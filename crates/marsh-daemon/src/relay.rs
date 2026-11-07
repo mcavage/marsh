@@ -1729,6 +1729,8 @@ mod tests {
                             daemon_id,
                             build_identity: Some(build_identity),
                             pid: Some(std::process::id()),
+                            update_identity: None,
+                            version: Some(env!("CARGO_PKG_VERSION").into()),
                         }
                     );
                 })

@@ -56,6 +56,9 @@ pub enum ProductCommand {
     Stop {
         json: bool,
     },
+    /// `marsh restart`: restart this home's idle daemon on the installed
+    /// marsh, keeping its VMs.
+    Restart,
     /// `marsh gc`: remove this home's superseded and long-unused VMs now.
     Gc {
         dry_run: bool,
@@ -281,6 +284,7 @@ fn parse_product_os_command(
                 name,
                 "kit"
                     | "stop"
+                    | "restart"
                     | "reset"
                     | "workers"
                     | "status"
@@ -421,6 +425,7 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         }
         [name] if name == "reset" => ProductCommand::Reset { json: false },
         [name] if name == "stop" => ProductCommand::Stop { json: false },
+        [name] if name == "restart" => ProductCommand::Restart,
         [name, json] if name == "reset" && json == "--json" => ProductCommand::Reset { json: true },
         [name, json] if name == "stop" && json == "--json" => ProductCommand::Stop { json: true },
         [name, help] if name == "workers" && matches!(help.as_str(), "-h" | "--help") => {
@@ -565,6 +570,9 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
             return Err(CliError(
                 "usage: marsh results [--json] | marsh results show RESULT [--json]".into(),
             ));
+        }
+        [name, ..] if name == "restart" => {
+            return Err(CliError("usage: marsh restart".into()));
         }
         [name, ..] if name == "stop" || name == "reset" => {
             return Err(CliError(format!("usage: marsh {name} [--json]")));

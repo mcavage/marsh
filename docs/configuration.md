@@ -33,6 +33,7 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_HOME` | Absolute scope root. Default `~/.marsh`. The guest home is `$MARSH_HOME/home`. |
 | `MARSH_SHELL` | Shell to run: `marsh` (Brush, the default), `bash`, or `zsh`. See [Choosing your shell](shells.md). |
 | `MARSH_SBX` | Path to `sbx`. Default: `sbx` on `PATH`. |
+| `MARSH_DOCKER` | Path to the Docker CLI the daemon reads Kit images from registries and builds local Kits with. Default: `docker`. |
 | `MARSH_CONTROL_HOME` | Host-only state root. See [Control home](#control-home). |
 | `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. See [spawn restrictions and refusal statuses](agents.md#limits-and-messages). |
 | `MARSH_PLACE` | Where registered commands run. Only `local` is accepted; any other value is an error (`MARSH_PLACE must be local`). |

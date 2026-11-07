@@ -941,6 +941,8 @@ pub struct StockSbx {
     kit_image_cache: Option<PathBuf>,
     /// Whether published (digest) Kit images use the cache as well.
     published_image_cache: bool,
+    /// The Docker CLI marsh reads registries and builds with (`docker`).
+    docker: PathBuf,
     /// Published images whose archive is being saved into the cache.
     published_image_saves: Arc<Mutex<BTreeSet<String>>>,
     worker_artifact_identities: Mutex<BTreeMap<PathBuf, String>>,
@@ -1080,6 +1082,7 @@ impl StockSbx {
             installed_worker_artifacts: Mutex::new(BTreeMap::new()),
             kit_image_cache: None,
             published_image_cache: true,
+            docker: PathBuf::from("docker"),
             published_image_saves: Arc::new(Mutex::new(BTreeSet::new())),
             worker_artifact_identities: Mutex::new(BTreeMap::new()),
             worker_generations: Mutex::new(BTreeMap::new()),
@@ -1199,6 +1202,13 @@ impl StockSbx {
     /// the Kit image cache (default on). A nested `--dev` daemon turns it
     /// off: its stock calls cross the dev broker, and moving an archive
     /// through it costs more than the child VM's own registry pull.
+    /// Use another Docker CLI (`MARSH_DOCKER`) for registry reads and builds.
+    #[must_use]
+    pub fn with_docker(mut self, docker: PathBuf) -> Self {
+        self.docker = docker;
+        self
+    }
+
     #[must_use]
     pub fn with_published_image_cache(mut self, enabled: bool) -> Self {
         self.published_image_cache = enabled;
@@ -1621,7 +1631,7 @@ impl StockSbx {
     pub fn kit_contract(&self, image: &OciImage) -> Result<Option<u32>, SbxError> {
         let output = self.run_program_bounded_os(
             "read Kit contract label",
-            Path::new("docker"),
+            &self.docker,
             KIT_RESOLUTION_TIMEOUT,
             [
                 "buildx",
@@ -1645,7 +1655,7 @@ impl StockSbx {
     pub fn kit_created(&self, image: &OciImage) -> Result<Option<i128>, SbxError> {
         let output = self.run_program_bounded_os(
             "read Kit creation time",
-            Path::new("docker"),
+            &self.docker,
             KIT_RESOLUTION_TIMEOUT,
             [
                 "buildx",
@@ -1732,6 +1742,40 @@ impl StockSbx {
         }
     }
 
+    /// A published Kit's descriptor from the image archive marsh already
+    /// keeps on this Mac (the Kit image cache), without a registry: `None`
+    /// when there is no archive for that exact digest or it carries none.
+    #[must_use]
+    pub fn archived_kit_descriptor(&self, kit: &NativeKitRef) -> Option<serde_json::Value> {
+        let NativeKitLocation::ImmutableOci(image) = &kit.location else {
+            return None;
+        };
+        let archive = cached_published_image(self.kit_image_cache.as_deref()?, image)?;
+        let blob = |digest: &str| {
+            let name = format!("blobs/sha256/{}", digest.strip_prefix("sha256:")?);
+            let output = self
+                .run_program_bounded_os(
+                    "read archived Kit descriptor",
+                    Path::new("/usr/bin/tar"),
+                    KIT_RESOLUTION_TIMEOUT,
+                    [OsStr::new("-xOf"), archive.as_os_str(), OsStr::new(&name)],
+                )
+                .ok()?;
+            output.succeeded().then_some(output.stdout)
+        };
+        let top = blob(published_image_digest(image)?)?;
+        let manifest = match arm64_manifest_digest(&top).ok()? {
+            Some(digest) => blob(&digest)?,
+            None => top,
+        };
+        let value: serde_json::Value = serde_json::from_slice(&manifest).ok()?;
+        let descriptor = value
+            .get("annotations")?
+            .get(DESCRIPTOR_ANNOTATION)?
+            .as_str()?;
+        serde_json::from_str(descriptor).ok()
+    }
+
     /// A cached local build's image manifest, read from its OCI archive.
     fn archived_manifest(&self, build: &LocalBuild) -> Result<Vec<u8>, SbxError> {
         let blob = format!(
@@ -1778,7 +1822,7 @@ impl StockSbx {
         let read = |reference: &str| {
             let output = self.run_program_bounded_os(
                 "read Kit descriptor",
-                Path::new("docker"),
+                &self.docker,
                 KIT_RESOLUTION_TIMEOUT,
                 ["buildx", "imagetools", "inspect", "--raw", reference],
             )?;
@@ -5950,7 +5994,7 @@ impl StockSbx {
         ));
         let output = self.run_program_bounded_os(
             "build local v3 kit job image",
-            Path::new("docker"),
+            &self.docker,
             self.preparation_timeouts.build,
             [
                 OsStr::new("buildx"),

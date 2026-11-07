@@ -49,6 +49,10 @@ fn main() {
             }
         }
     }
+    if arguments.first().is_some_and(|word| word == "--version") {
+        println!("marshd {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     if let Err(error) = run() {
         eprintln!("marshd: {error}");
         std::process::exit(1);
@@ -148,7 +152,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if env::var_os("MARSH_LOCAL_SHELL_AUTHORITY").is_some() {
         return Err("MARSH_LOCAL_SHELL_AUTHORITY was removed; pass a local shell image tag via the normal shell image setting".into());
     }
-    let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner)
+    let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner);
+    if let Some(docker) = env::var_os("MARSH_DOCKER") {
+        stock_adapter = stock_adapter.with_docker(PathBuf::from(docker));
+    }
+    let mut stock_adapter = stock_adapter
         .with_kit_image_cache(kit_image_cache)
         // Inside `marsh --dev` every stock call crosses the dev broker.
         .with_published_image_cache(env::var_os("MARSH_DEV_DEPTH").is_none())
@@ -213,6 +221,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("marshd: {error}");
     }
     let backend = Arc::new(backend.with_dev_broker(Arc::clone(&dev_broker)));
+    // Started by the daemon it replaces (an upgrade): everything but the
+    // endpoint is ready; say so, and wait until that daemon is gone.
+    if env::args_os()
+        .skip(1)
+        .any(|word| marsh_daemon::is_handover_flag(&word))
+    {
+        marsh_daemon::handover_ready()?;
+    }
     let server = Server::bind_with_stock_sbx_and_control_home(&home, &stock_sbx, &control_home)?
         .with_protected_guest_roots(protected_guest_roots)
         .with_job_defaults(defaults)
@@ -228,8 +244,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     signal_hook::flag::register(SIGTERM, Arc::clone(&stopping))?;
     marsh_daemon::finish_startup_diagnostics()?;
     drop(startup_lock);
-    server.serve_until(|| stopping.load(Ordering::Relaxed))?;
-    Ok(())
+    loop {
+        server.serve_until(|| stopping.load(Ordering::Relaxed))?;
+        let Some((mut successor, fence)) = server.take_handover() else {
+            return Ok(());
+        };
+        // Upgrading: the successor is ready. Checked alive right before the
+        // release: release the endpoint, then the fence (the store and its
+        // journal), and only then let it bind.
+        if successor.alive() {
+            drop(server);
+            drop(fence);
+            drop(successor);
+            return Ok(());
+        }
+        // It died: serve on (the fence goes, background work restarts).
+        drop(fence);
+        server.handover_failed(successor);
+    }
 }
 
 /// `marshd --check-config [DIR]`: validate an install's packaged configuration
@@ -256,7 +288,9 @@ fn check_config(arguments: &[std::ffi::OsString]) -> Result<String, Box<dyn std:
     let shell_image = fs::read_to_string(guest_artifacts.join("shell-image"))
         .map_err(|_| "cannot read shell-image")?;
     OciImage::parse(shell_image.trim().to_owned())?;
-    let local = guest_artifacts.join("local-build").exists();
+    // A local build and a dev install (`make dev`) run their source Kits.
+    let local = guest_artifacts.join("local-build").exists()
+        || guest_artifacts.join("dev-enabled").exists();
     if !local
         && commands
             .iter()
@@ -408,7 +442,11 @@ fn daemon_home() -> Result<PathBuf, Box<dyn std::error::Error>> {
         }
         Some(_) => return Err("usage: marshd [--home PATH]".into()),
     };
-    if arguments.next().is_some() {
+    if arguments
+        .next()
+        .is_some_and(|word| !marsh_daemon::is_handover_flag(&word))
+        || arguments.next().is_some()
+    {
         return Err("usage: marshd [--home PATH]".into());
     }
     Ok(home)

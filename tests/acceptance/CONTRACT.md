@@ -129,7 +129,10 @@ removes them and keeps the daemon. Both refuse while shells or jobs are active.
 Each prints one stderr line naming the VMs the daemon reported removed, one line
 per VM it left with the next step, and exits 1 unless every cleanup was
 verified. With no daemon and no VM recorded for the home, each prints
-`marsh: nothing running for HOME` and exits 0 without starting anything. Like
+`marsh: nothing to stop for HOME` (`nothing to reset`) and exits 0 without
+starting anything. With no daemon but VMs recorded, each starts the daemon (as
+`status` does) and then removes them; neither ever asks for another command
+first. Like
 `status`, these words are subcommands only as the first operand; a script named
 `stop` runs as `marsh ./stop`.
 

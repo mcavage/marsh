@@ -328,6 +328,25 @@ were not affected.
 
 ## Stale daemon after an upgrade
 
+- **`update pending: restarts on VERSION when idle`.** `brew upgrade` (or a
+  new `marshd` from an installer) replaced the executable of a daemon that is
+  still running a job, a marsh shell or a Kit start. It switches by itself
+  once they end; nothing needs stopping. From 0.3.13 on, a daemon notices this
+  itself; a daemon of an older release still waits for `marsh stop`.
+- **`update: the update to marsh VERSION failed: …; this daemon keeps
+  running …`.** The new marsh did not start (or its file changed after it was
+  checked). The old daemon keeps serving; reinstall, then it is checked again.
+- **`update: marsh VERSION installed is older than the running …`.** A
+  downgrade is never automatic: run `marsh restart` when nothing runs.
+- **A command fails with `can't read IMAGE: registry access denied`.** marsh
+  never read that Kit image's descriptor and cannot now: sign in with an
+  account that can pull it (`docker login REGISTRY` and
+  `sbx secret set --registry REGISTRY`). A command whose descriptor marsh read
+  before keeps working from the saved copy; `marsh status` then warns and
+  `marsh status --json` shows `commands[].descriptor.error`.
+- **`marsh stop` with no daemon running.** It starts the daemon when VMs are
+  recorded for the home and removes them; with none it prints
+  `nothing to stop` and exits 0.
 - **`marsh: waiting for the daemon to finish another request…`** `marsh stop`
   and `marsh reset` wait, for up to 30 s, while the daemon serves another
   request (an app polling `marsh status`, a Kit update). If it is still busy

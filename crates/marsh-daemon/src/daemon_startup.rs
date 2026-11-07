@@ -26,7 +26,7 @@ use std::{
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const STDERR_LIMIT: usize = 8192;
-const CAPTURE_ENV: &str = "MARSH_INTERNAL_STARTUP_STDERR";
+pub(super) const CAPTURE_ENV: &str = "MARSH_INTERNAL_STARTUP_STDERR";
 
 /// The defaults used by the real daemon, not a status-only copy.
 pub const DEFAULT_JOB_RESOURCES: JobResources = JobResources {

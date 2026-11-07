@@ -64,7 +64,9 @@ mod shell_client;
 pub mod split;
 pub mod split_confinement;
 pub mod split_fs;
+mod upgrade;
 pub use acp_bridge::{AcpAttachmentBridge, AcpAttachmentStatus};
+pub use upgrade::{HANDOVER_FLAG, Successor, UpdatePending, handover_ready, is_handover_flag};
 mod acp_session;
 pub use acp_session::{
     AcpPendingPermission, AcpSessionStatus, AcpSessionSummary, AcpUpdate, PromptAdmissionError,
@@ -107,6 +109,8 @@ pub const FEATURES: &[&str] = &[
     "peer-review-v1",
     "skills-mirror-v1",
     "task-usage-v1",
+    "descriptor-source-v1",
+    "update-pending-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -928,6 +932,14 @@ pub enum PublicReply {
         build_identity: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pid: Option<u32>,
+        /// The build identity this daemon restarts on once idle
+        /// (`update_pending`): a client of that build may use it meanwhile.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update_identity: Option<String>,
+        /// This daemon's marsh version: a client of an older one never
+        /// replaces it (`marsh restart` does).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
     },
     ShuttingDown,
     RegisteredCommands {
@@ -1752,6 +1764,17 @@ pub struct StatusDocument {
     /// skills store (`marsh config skills-mirror`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills_mirror: Option<Box<SkillsMirrorStatus>>,
+    /// This daemon's marsh version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Its executable was replaced: it restarts on that version once no
+    /// job, shell or Kit start runs (`docs/install.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_pending: Option<UpdatePending>,
+    /// Why an installed marsh is not switched to: it is older than this
+    /// daemon, or starting it failed (this daemon keeps running).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_notice: Option<String>,
 }
 
 /// Key in `$MARSH_HOME/config.json`, written by `marsh config skills-mirror`
@@ -1794,6 +1817,22 @@ pub struct CommandStatus {
     /// service's key for (`KitAgent::reaches`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reaches: BTreeMap<String, Vec<String>>,
+    /// Where the declarations above came from; `null` before a read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor: Option<DescriptorStatus>,
+}
+
+/// `marsh status` `commands[].descriptor` (feature `descriptor-source-v1`).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DescriptorStatus {
+    /// `fresh`: the image's own descriptor (read from its registry, a saved
+    /// copy of such a read, or the image archive on this Mac). `cached`: an
+    /// older marsh's reading of it, used because the descriptor could not be
+    /// read; it may lack declarations that marsh reads now.
+    pub source: String,
+    /// Why the registry read failed, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// `marsh status` `sbxenv`: the environment files the daemon is using now.
@@ -2527,6 +2566,10 @@ fn scope_can_recover(state: &State) -> bool {
             .values()
             .all(|job| !matches!(job.state, JobState::Queued | JobState::Running))
 }
+
+/// The lifecycle fence of a handover (`Server::take_handover`): while it is
+/// held nothing is admitted.
+pub struct HandoverFence(#[allow(dead_code)] RequestAdmission);
 
 struct RequestAdmission {
     store: DaemonStore,
@@ -4341,6 +4384,9 @@ impl DaemonStore {
             peer_review: None,
             worker_recoveries: state.worker_recoveries.clone(),
             skills_mirror: None,
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            update_pending: None,
+            update_notice: None,
         }
     }
 
@@ -4631,6 +4677,11 @@ pub struct Server {
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
     events: Arc<events::Bus>,
+    /// Production daemons watch their own executable (`upgrade.rs`).
+    upgrade: Option<Arc<upgrade::UpgradeWatch>>,
+    /// The ready successor and the lifecycle fence, once `serve_until`
+    /// stopped to upgrade.
+    handover: Mutex<Option<(Successor, RequestAdmission)>>,
 }
 
 impl Server {
@@ -4680,6 +4731,9 @@ impl Server {
             .with_defaults_home(journal_home.to_path_buf()),
         );
         server.stock_sbx = Some(stock_sbx.to_path_buf());
+        server.upgrade = upgrade::UpgradeWatch::new(home, &executable, stock_sbx)
+            .ok()
+            .map(Arc::new);
         Ok(server)
     }
 
@@ -4724,6 +4778,8 @@ impl Server {
             dev_broker: None,
             splits,
             events,
+            upgrade: None,
+            handover: Mutex::new(None),
         })
     }
 
@@ -4808,6 +4864,28 @@ impl Server {
         self
     }
 
+    /// Watch `executable` as this daemon's own (`upgrade.rs`).
+    #[cfg(test)]
+    fn with_upgrade_executable(mut self, home: &Path, executable: &Path) -> Self {
+        let stock = self.stock_sbx.clone().expect("a stock SBX is pinned");
+        self.upgrade = Some(Arc::new(
+            upgrade::UpgradeWatch::new(home, executable, &stock).unwrap(),
+        ));
+        self
+    }
+
+    /// Run `hook` between the successor's last check and its start (tests).
+    #[cfg(test)]
+    fn before_successor_launch(&self, hook: impl Fn() + Send + 'static) {
+        *self
+            .upgrade
+            .as_ref()
+            .expect("an upgrade watch")
+            .before_launch
+            .lock()
+            .unwrap() = Some(Box::new(hook));
+    }
+
     #[cfg(test)]
     fn with_stock_sbx_probe_interval(mut self, interval: Duration) -> Self {
         self.stock_sbx_probe_interval = interval;
@@ -4830,6 +4908,72 @@ impl Server {
         true
     }
 
+    /// The executable was replaced and nothing runs: take the lifecycle
+    /// fence (no request, job, shell, Kit start or background pass may
+    /// begin). Never with work in flight.
+    fn handover_fence(&self, active_connections: &AtomicUsize) -> Option<RequestAdmission> {
+        self.upgrade.as_ref()?.probe()?;
+        if active_connections.load(Ordering::Acquire) != 0
+            || !self.store.safe_to_shutdown()
+            || self.acp.starting()
+        {
+            return None;
+        }
+        let fence = self.store.begin_lifecycle_request().ok()?;
+        (self.store.safe_to_shutdown() && !self.acp.starting()).then_some(fence)
+    }
+
+    /// Behind the fence, with the background workers joined: start the
+    /// validated successor; it is kept only when ready and still alive.
+    fn start_successor(&self, fence: RequestAdmission) -> bool {
+        let Some(watch) = self.upgrade.as_ref() else {
+            return false;
+        };
+        let Ok(successor) = watch.start_successor() else {
+            return false;
+        };
+        eprintln!(
+            "marshd: restarting on marsh {}",
+            successor.executable.display()
+        );
+        *self
+            .handover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((successor, fence));
+        true
+    }
+
+    /// After `take_handover`, a successor that died before the release: this
+    /// daemon serves on and reports it.
+    pub fn handover_failed(&self, successor: Successor) {
+        if let Some(watch) = self.upgrade.as_ref() {
+            watch.fail(successor, "the successor exited before this daemon let go");
+        }
+    }
+
+    /// After `serve_until` stopped to upgrade: the successor, ready and
+    /// waiting, and the lifecycle fence. Drop the server (its endpoint),
+    /// then the fence (the last hold on the store and its journal), then the
+    /// successor, which then binds; then exit.
+    #[must_use]
+    pub fn take_handover(&self) -> Option<(Successor, HandoverFence)> {
+        self.handover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .map(|(successor, fence)| (successor, HandoverFence(fence)))
+    }
+
+    /// Whether `serve_until` stopped to upgrade (tests).
+    #[cfg(test)]
+    fn handing_over(&self) -> Option<PathBuf> {
+        self.handover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|(successor, _)| successor.executable.clone())
+    }
+
     #[must_use]
     pub fn store(&self) -> DaemonStore {
         self.store.clone()
@@ -4846,14 +4990,8 @@ impl Server {
     {
         self.lifecycle.listener.set_nonblocking(true)?;
         let active_connections = Arc::new(AtomicUsize::new(0));
-        let updater_stop = Arc::new(AtomicBool::new(false));
-        self.spawn_kit_updater(Arc::clone(&updater_stop));
-        self.spawn_sbxenv_watcher(Arc::clone(&updater_stop));
-        self.spawn_skills_mirror(Arc::clone(&updater_stop));
-        self.spawn_cloud_collector(Arc::clone(&updater_stop));
-        self.spawn_session_reaper(Arc::clone(&updater_stop));
+        let (mut workers, mut stop_updater) = self.spawn_workers();
         self.spawn_agent_reader();
-        let _stop_updater = StopOnDrop(updater_stop);
         let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
             if Instant::now() >= next_sbx_probe {
@@ -4863,6 +5001,21 @@ impl Server {
                     && self.exit_for_removed_stock_sbx()
                 {
                     break;
+                }
+                if let Some(fence) = self.handover_fence(&active_connections) {
+                    // Behind the fence no pass can start: stop and join the
+                    // background workers (a running pass ends first), then
+                    // start the successor. The endpoint is released only
+                    // when this process exits.
+                    drop(stop_updater);
+                    for worker in workers.into_iter().flatten() {
+                        let _ = worker.join();
+                    }
+                    if self.start_successor(fence) {
+                        return Ok(());
+                    }
+                    // It failed: serve on, background work included.
+                    (workers, stop_updater) = self.spawn_workers();
                 }
             }
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
@@ -4888,11 +5041,24 @@ impl Server {
         Ok(())
     }
 
+    /// The background workers, and what stops them when dropped.
+    fn spawn_workers(&self) -> (Vec<Option<thread::JoinHandle<()>>>, StopOnDrop) {
+        let stop = Arc::new(AtomicBool::new(false));
+        let workers = vec![
+            self.spawn_kit_updater(Arc::clone(&stop)),
+            self.spawn_sbxenv_watcher(Arc::clone(&stop)),
+            self.spawn_skills_mirror(Arc::clone(&stop)),
+            self.spawn_cloud_collector(Arc::clone(&stop)),
+            self.spawn_session_reaper(Arc::clone(&stop)),
+        ];
+        (workers, StopOnDrop(stop))
+    }
+
     /// The automatic Kit updater: a background thread that never delays a
     /// request. It asks the backend right after startup (the start-up check)
     /// and then once a minute; the backend decides whether a check or a
     /// waiting switch is due.
-    fn spawn_kit_updater(&self, stop: Arc<AtomicBool>) {
+    fn spawn_kit_updater(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         // Weak, so a stopped server's store (and its journal lock) and
         // backend are released even while this thread sleeps.
         let backend = Arc::downgrade(&self.backend);
@@ -4933,8 +5099,12 @@ impl Server {
                     }
                 }
             });
-        if let Err(error) = spawned {
-            eprintln!("marshd: cannot start the Kit updater: {error}");
+        match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("marshd: cannot start the Kit updater: {error}");
+                None
+            }
         }
     }
 
@@ -4946,7 +5116,7 @@ impl Server {
     /// The `sbxenv` file watcher: a background thread that asks the backend
     /// every couple of seconds; the backend compares file stamps and does
     /// nothing unless something changed.
-    fn spawn_sbxenv_watcher(&self, stop: Arc<AtomicBool>) {
+    fn spawn_sbxenv_watcher(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         let backend = Arc::downgrade(&self.backend);
         let store = Arc::downgrade(&self.store.0);
         let spawned = thread::Builder::new()
@@ -4966,15 +5136,19 @@ impl Server {
                     backend.watch_sbxenv(&DaemonStore(store));
                 }
             });
-        if let Err(error) = spawned {
-            eprintln!("marshd: cannot start the sbxenv watcher: {error}");
+        match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("marshd: cannot start the sbxenv watcher: {error}");
+                None
+            }
         }
     }
 
     /// The skills mirror: a background thread that asks the backend every
     /// second; the backend compares folder stamps and waits for them to
     /// settle before it imports.
-    fn spawn_skills_mirror(&self, stop: Arc<AtomicBool>) {
+    fn spawn_skills_mirror(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         let backend = Arc::downgrade(&self.backend);
         let spawned = thread::Builder::new()
             .name("marsh-skills-mirror".into())
@@ -4994,8 +5168,12 @@ impl Server {
                     }
                 }
             });
-        if let Err(error) = spawned {
-            eprintln!("marshd: cannot start the skills mirror: {error}");
+        match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("marshd: cannot start the skills mirror: {error}");
+                None
+            }
         }
     }
 
@@ -5007,7 +5185,7 @@ impl Server {
     /// pins hold Kit mounts busy, and `marsh workers reset` refuses while a
     /// session that ran in the VM is attached. Detach such a session once
     /// its client process is gone and nothing runs in it.
-    fn spawn_session_reaper(&self, stop: Arc<AtomicBool>) {
+    fn spawn_session_reaper(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         let backend = Arc::downgrade(&self.backend);
         let store = Arc::downgrade(&self.store.0);
         let acp = Arc::downgrade(&self.acp);
@@ -5031,12 +5209,16 @@ impl Server {
                     release_departed(&store, backend.as_ref(), &acp);
                 }
             });
-        if let Err(error) = spawned {
-            eprintln!("marshd: cannot start the session reaper: {error}");
+        match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("marshd: cannot start the session reaper: {error}");
+                None
+            }
         }
     }
 
-    fn spawn_cloud_collector(&self, stop: Arc<AtomicBool>) {
+    fn spawn_cloud_collector(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         let backend = Arc::downgrade(&self.backend);
         let store = Arc::downgrade(&self.store.0);
         let pause = move |duration: Duration| {
@@ -5066,8 +5248,12 @@ impl Server {
                     }
                 }
             });
-        if let Err(error) = spawned {
-            eprintln!("marshd: cannot start the cloud collector: {error}");
+        match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("marshd: cannot start the cloud collector: {error}");
+                None
+            }
         }
     }
 
@@ -5086,6 +5272,7 @@ impl Server {
             dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
             events: Arc::clone(&self.events),
+            upgrade: self.upgrade.clone(),
         }
     }
 }
@@ -5195,6 +5382,7 @@ struct ConnectionHandler {
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
     events: Arc<events::Bus>,
+    upgrade: Option<Arc<upgrade::UpgradeWatch>>,
 }
 
 /// Reject a guest mount containing, or contained by, a host-owned path.
@@ -6313,6 +6501,27 @@ impl ConnectionHandler {
                     }
                 }
             }
+            PublicRequest::Ping => {
+                let mut reply = dispatch_request(
+                    &self.store,
+                    self.backend.as_ref(),
+                    &self.build_identity,
+                    PublicRequest::Ping,
+                );
+                if let PublicReply::Pong {
+                    update_identity, ..
+                } = &mut reply
+                {
+                    // Probed now, not on the timer: a client of a build just
+                    // installed must not race this daemon's next look.
+                    *update_identity = self
+                        .upgrade
+                        .as_ref()
+                        .and_then(|watch| watch.probe())
+                        .map(|(_, identity)| identity);
+                }
+                write_frame(&mut stream, &reply)
+            }
             request => write_frame(
                 &mut stream,
                 &dispatch_request(
@@ -6751,6 +6960,12 @@ impl ConnectionHandler {
                     .filter(|path| stock_sbx_removed(Some(path)));
                 status.commands = self.backend.command_catalog();
                 status.peer_review = self.backend.peer_review_status().map(Box::new);
+                status.update_pending = self
+                    .upgrade
+                    .as_ref()
+                    .and_then(|watch| watch.probe())
+                    .map(|(pending, _)| pending);
+                status.update_notice = self.upgrade.as_ref().and_then(|watch| watch.notice());
                 self.backend.annotate_status(&mut status);
                 write_frame(&mut stream, &PublicReply::Status(Box::new(status)))
             }
@@ -6889,6 +7104,8 @@ fn dispatch_request(
             daemon_id: store.daemon_id(),
             build_identity: Some(build_identity.into()),
             pid: Some(std::process::id()),
+            update_identity: None,
+            version: Some(env!("CARGO_PKG_VERSION").into()),
         },
         PublicRequest::Shutdown | PublicRequest::ResetScope | PublicRequest::StopScope => {
             PublicReply::Error {
@@ -7461,11 +7678,35 @@ impl Client {
             && let Ok(PublicReply::Pong {
                 daemon_id,
                 build_identity,
+                update_identity,
+                version,
                 ..
             }) = client.request(PublicRequest::Ping)
         {
             if build_identity.as_deref() == Some(expected_build_identity) {
                 return Ok(Some(client));
+            }
+            // Never a downgrade by itself: a client of an older marsh uses
+            // a newer daemon (whose status says so); `marsh restart` replaces it.
+            if version
+                .as_deref()
+                .and_then(|version| upgrade::older(env!("CARGO_PKG_VERSION"), version))
+                == Some(true)
+            {
+                return Ok(Some(client));
+            }
+            // It restarts on this build once idle: never stop running work
+            // for that; use it until then.
+            if update_identity.as_deref() == Some(expected_build_identity) {
+                match client.shutdown_resident_after_probe() {
+                    Ok(()) => {}
+                    Err(DaemonError::Remote(message)) if message.starts_with(BUSY_BLOCKED) => {
+                        return Ok(Some(client));
+                    }
+                    Err(error) => return Err(error),
+                }
+                wait_for_owner_release(paths)?;
+                return Ok(None);
             }
             if build_identity.is_some() {
                 client
@@ -7537,6 +7778,13 @@ impl Client {
                 sessions.join(", ")
             }
         )
+    }
+
+    /// `marsh restart`: stop this idle daemon (never with work running) and
+    /// wait until its endpoint is released; the caller starts a new one.
+    pub fn restart_resident(&self) -> Result<(), DaemonError> {
+        self.shutdown_resident_waiting(RESIDENT_SHUTDOWN_RETRY_TIMEOUT, TRANSIENT_BUSY_WAIT)?;
+        wait_for_owner_release(&self.paths)
     }
 
     fn shutdown_resident_after_probe(&self) -> Result<(), DaemonError> {

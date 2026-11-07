@@ -3166,6 +3166,368 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
     task.join().unwrap();
 }
 
+/// How a stand-in successor behaves.
+#[derive(Clone, Copy, PartialEq)]
+enum StandIn {
+    /// Reports ready, waits for its stdin to close, touches `PATH.ran`.
+    Waits,
+    /// Exits 1 before it is ready.
+    Fails,
+    /// Reports ready, then exits at once.
+    ReadyThenExits,
+}
+
+/// A stand-in `marshd` at `path`: `--version` reports `version`;
+/// `--handover` touches `PATH.started` and behaves as `successor`.
+fn install_marshd(path: &Path, version: &str, successor: StandIn) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let ready = "echo \"ready $(/usr/bin/shasum -a 256 \"$0\" | cut -d' ' -f1)\"";
+    let handover = match successor {
+        StandIn::Waits => {
+            format!("touch \"$0.started\"; {ready}; cat >/dev/null; touch \"$0.ran\"")
+        }
+        StandIn::Fails => "touch \"$0.started\"; exit 1".to_owned(),
+        StandIn::ReadyThenExits => format!("touch \"$0.started\"; {ready}; exit 0"),
+    };
+    let staged = path.with_extension("new");
+    fs::write(
+        &staged,
+        format!(
+            "#!/bin/sh\ncase \"$1$3\" in --version) echo \"marshd {version}\";; --check-config) echo ok;; --home--handover) {handover};; *) exit 2;; esac\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::rename(&staged, path).unwrap();
+}
+
+struct Upgrading {
+    home: tempfile::TempDir,
+    sbx: tempfile::NamedTempFile,
+    _bin: tempfile::TempDir,
+    marshd: PathBuf,
+    server: Arc<Server>,
+    shell: String,
+    stop: Arc<AtomicBool>,
+    task: thread::JoinHandle<()>,
+}
+
+impl Upgrading {
+    /// A daemon watching `marshd` (installed as version 0.0.1-same build),
+    /// serving, with a shell attached.
+    fn start(backend: Option<Arc<dyn DaemonBackend>>) -> Self {
+        let home = home();
+        let sbx = stock_sbx(b"stock-sbx");
+        let bin = tempfile::tempdir().unwrap();
+        let marshd = bin.path().join("marshd");
+        install_marshd(&marshd, env!("CARGO_PKG_VERSION"), StandIn::Waits);
+        let mut server = Server::bind_with_stock_sbx(home.path(), sbx.path())
+            .unwrap()
+            .with_upgrade_executable(home.path(), &marshd)
+            .with_stock_sbx_probe_interval(Duration::from_millis(10));
+        if let Some(backend) = backend {
+            server = server.with_backend(backend);
+        }
+        let server = Arc::new(server);
+        let shell = server.store.attach_shell(
+            std::process::id(),
+            authority("/Users/example/project", home.path()),
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        let (task_server, task_stop) = (Arc::clone(&server), Arc::clone(&stop));
+        let task = thread::spawn(move || {
+            task_server
+                .serve_until(|| task_stop.load(Ordering::Relaxed))
+                .unwrap();
+        });
+        Self {
+            home,
+            sbx,
+            _bin: bin,
+            marshd,
+            server,
+            shell,
+            stop,
+            task,
+        }
+    }
+
+    fn status(&self) -> StatusDocument {
+        Client::connect(self.home.path())
+            .unwrap()
+            .status(None)
+            .unwrap()
+    }
+
+    fn wait_pending(&self) -> UpdatePending {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            if let Some(pending) = self.status().update_pending {
+                return pending;
+            }
+            assert!(Instant::now() < deadline, "the update was not noticed");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_notice(&self) -> String {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            if let Some(notice) = self.status().update_notice {
+                return notice;
+            }
+            assert!(Instant::now() < deadline, "no update notice");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_finished(&self) {
+        let deadline = Instant::now() + PATIENCE;
+        while !self.task.is_finished() {
+            assert!(Instant::now() < deadline, "the daemon did not stop");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// The daemon kept serving: it still answers, and stops when asked.
+    fn still_serving(self) {
+        thread::sleep(Duration::from_millis(200));
+        assert!(!self.task.is_finished(), "the daemon stopped");
+        assert_eq!(self.status().update_pending, None);
+        assert!(self.server.handing_over().is_none());
+        self.stop.store(true, Ordering::Relaxed);
+        self.task.join().unwrap();
+    }
+}
+
+/// A replaced daemon executable: running work keeps the daemon, `marsh
+/// status` says it waits, a client of the new build uses it meanwhile, and
+/// once nothing runs it starts the new build, which is ready before this
+/// daemon lets go and binds only after. A same-version rebuild switches.
+#[test]
+fn a_replaced_daemon_restarts_on_the_new_build_only_once_idle() {
+    let up = Upgrading::start(None);
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(up.status().update_pending, None);
+    assert_eq!(
+        up.status().version.as_deref(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+
+    install_marshd(&up.marshd, env!("CARGO_PKG_VERSION"), StandIn::Waits);
+    // A client of the new build, even before the daemon's own next look, uses
+    // this daemon until it restarts; one of another build is refused as before.
+    let paths = EndpointPaths::for_home(up.home.path()).unwrap();
+    let next = fs::canonicalize(&up.marshd).unwrap();
+    let new_build = runtime_identity(&next, up.sbx.path()).unwrap();
+    assert!(
+        Client::reconcile_resident(up.home.path(), &paths, &new_build)
+            .unwrap()
+            .is_some()
+    );
+    assert!(matches!(
+        Client::reconcile_resident(up.home.path(), &paths, "sha256:other"),
+        Err(DaemonError::Remote(ref message)) if busy_lifecycle_refusal(message)
+    ));
+    assert_eq!(
+        up.wait_pending(),
+        UpdatePending {
+            version: env!("CARGO_PKG_VERSION").into(),
+            executable: next.clone(),
+        }
+    );
+    thread::sleep(Duration::from_millis(100));
+    assert!(!up.task.is_finished(), "an attached shell keeps the daemon");
+
+    up.server.store.detach_shell(&up.shell).unwrap();
+    up.wait_finished();
+    assert_eq!(up.server.handing_over(), Some(next.clone()));
+    // Until this daemon lets go, nothing is admitted, background work
+    // included, and the successor waits.
+    assert!(up.server.store.begin_background_request("a pass").is_err());
+    let ran = next.with_extension("ran");
+    assert!(!ran.exists());
+    let (successor, fence) = up.server.take_handover().unwrap();
+    drop(fence);
+    drop(successor);
+    let deadline = Instant::now() + PATIENCE;
+    while !ran.exists() {
+        assert!(Instant::now() < deadline, "the successor never went on");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_replacement_that_is_not_what_was_checked_or_does_not_start_is_not_switched_to() {
+    use std::os::unix::fs::PermissionsExt as _;
+    // Removed after it was checked.
+    let up = Upgrading::start(None);
+    install_marshd(&up.marshd, "9.9.9", StandIn::Waits);
+    up.wait_pending();
+    fs::remove_file(&up.marshd).unwrap();
+    up.server.store.detach_shell(&up.shell).unwrap();
+    let notice = up.wait_notice();
+    assert!(
+        notice.contains("changed or disappeared after it was checked"),
+        "{notice}"
+    );
+    up.still_serving();
+
+    // Truncated, or replaced by another build, between the last check and
+    // the start.
+    for change in ["truncate", "replace"] {
+        let up = Upgrading::start(None);
+        install_marshd(&up.marshd, "9.9.9", StandIn::Waits);
+        up.wait_pending();
+        let path = up.marshd.clone();
+        up.server.before_successor_launch(move || {
+            if change == "truncate" {
+                let bytes = fs::read(&path).unwrap();
+                fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
+            } else {
+                // Another (broken) build; a valid one would be checked
+                // afresh and switched to.
+                let staged = path.with_extension("broken");
+                fs::write(&staged, "#!/bin/sh\nexit 1\n").unwrap();
+                fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+                fs::rename(&staged, &path).unwrap();
+            }
+        });
+        up.server.store.detach_shell(&up.shell).unwrap();
+        let notice = up.wait_notice();
+        assert!(
+            notice.starts_with("the update to marsh 9.9.9 failed:")
+                && notice.contains("changed or disappeared")
+                || notice.ends_with(
+                    "does not run as a marshd (`--version`, `--check-config`); not switched to"
+                ),
+            "{change}: {notice}"
+        );
+        up.still_serving();
+    }
+
+    // A successor that fails before it is ready, or reports ready and then
+    // exits: this daemon keeps serving.
+    for (successor, why) in [
+        (StandIn::Fails, "before it was ready"),
+        (StandIn::ReadyThenExits, "exited after it reported ready"),
+    ] {
+        let up = Upgrading::start(None);
+        install_marshd(&up.marshd, "9.9.9", successor);
+        up.wait_pending();
+        up.server.store.detach_shell(&up.shell).unwrap();
+        let notice = up.wait_notice();
+        assert!(notice.contains(why), "{notice}");
+        assert!(notice.contains("this daemon keeps running"), "{notice}");
+        up.still_serving();
+    }
+}
+
+#[test]
+fn an_older_marsh_is_never_switched_to() {
+    let up = Upgrading::start(None);
+    install_marshd(&up.marshd, "0.0.1", StandIn::Waits);
+    let notice = up.wait_notice();
+    assert_eq!(
+        notice,
+        format!(
+            "marsh 0.0.1 installed is older than the running {}; run `marsh restart` to use it",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+    up.server.store.detach_shell(&up.shell).unwrap();
+    up.still_serving();
+}
+
+/// A background pass that is running when the daemon goes idle: the
+/// handover waits for it (the workers are joined before the daemon lets go),
+/// and it cannot start new work behind the fence.
+#[derive(Default)]
+struct HeldCollector {
+    entered: AtomicBool,
+    release: AtomicBool,
+    admitted_after: Mutex<Option<bool>>,
+}
+
+impl DaemonBackend for HeldCollector {
+    fn registered_commands(&self) -> Result<Vec<String>, DaemonError> {
+        Ok(Vec::new())
+    }
+    fn prepare(
+        &self,
+        _: &LoadSelection,
+        _: &SessionSpec,
+        _: PreparationProgress,
+        _: DaemonStore,
+    ) -> Result<PreparationResult, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    fn execute(
+        &self,
+        _: ExecuteSpec,
+        _: ServerAttachment,
+        _: DaemonStore,
+    ) -> Result<(), DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    fn open_shell(
+        &self,
+        _: ShellSpec,
+        _: ServerAttachment,
+        _: DaemonStore,
+    ) -> Result<(), DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    fn collect_detached(&self, store: &DaemonStore) {
+        if self.entered.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        while !self.release.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        // The write-back a detached run's collection would start.
+        let admitted = store.begin_background_request("a write-back").is_ok();
+        *self.admitted_after.lock().unwrap() = Some(admitted);
+    }
+}
+
+#[test]
+fn a_handover_waits_for_running_background_passes_and_fences_new_ones() {
+    let collector = Arc::new(HeldCollector::default());
+    let up = Upgrading::start(Some(Arc::clone(&collector) as Arc<dyn DaemonBackend>));
+    let deadline = Instant::now() + PATIENCE;
+    while !collector.entered.load(Ordering::Acquire) {
+        assert!(Instant::now() < deadline, "the collector never ran");
+        thread::sleep(Duration::from_millis(10));
+    }
+    install_marshd(&up.marshd, "9.9.9", StandIn::Waits);
+    up.wait_pending();
+    up.server.store.detach_shell(&up.shell).unwrap();
+    // A long collection (minutes in production; time-scaled here): the
+    // fence is taken, and the successor is not even started until the pass
+    // has ended, so its own wait for this daemon never runs out meanwhile.
+    let started = up.marshd.with_extension("started");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        assert!(
+            !started.exists(),
+            "the successor started with a pass still running"
+        );
+        assert!(
+            !up.task.is_finished(),
+            "serving ended with a pass still running"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(up.server.store.begin_background_request("a pass").is_err());
+    collector.release.store(true, Ordering::Release);
+    up.wait_finished();
+    assert!(started.exists());
+    assert_eq!(*collector.admitted_after.lock().unwrap(), Some(false));
+    let (successor, fence) = up.server.take_handover().unwrap();
+    drop((fence, successor));
+}
+
 #[test]
 fn a_daemon_whose_stock_sbx_was_removed_reports_it_and_stops_once_nothing_is_attached() {
     let home = home();
@@ -3332,6 +3694,8 @@ fn legacy_pong_is_compatible_but_ambiguous_owner_is_never_signalable() {
             daemon_id: "old".into(),
             build_identity: None,
             pid: None,
+            update_identity: None,
+            version: None,
         }
     );
 
