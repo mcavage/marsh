@@ -5,12 +5,12 @@ to change job limits, choose a shell, or find the files used by your
 [installation](install.md).
 
 For a separate guest home and set of VMs, launch with
-`MARSH_HOME=~/.marsh-work marsh`. To raise the per-job memory limit to 16 GiB,
-finish active work, exit open shells, run `marsh stop`, then launch with
-`MARSH_JOB_MEMORY_BYTES=17179869184 marsh`.
+`MARSH_HOME=~/.marsh-work marsh`. To raise the per-job memory limit to 16 GiB
+for jobs started from now on, run
+`marsh config limit job-memory-bytes 17179869184`.
 
-`marsh status` shows the limits in effect and whether each came from a built-in
-default or the daemon's launch environment.
+`marsh config limits` shows the limits in effect and whether each came from a
+default, `config.json`, or the daemon's launch environment.
 
 ## Scopes
 
@@ -49,31 +49,55 @@ For skills, dotfiles, MCP connections, and extra directories, see
 
 ### Job limits
 
-The daemon reads these once, when it starts for a scope. They apply to every
-job in the scope. Values are positive integers.
+Every limit has a name, a default, and a `MARSH_*` variable. Set one for this
+scope with `marsh config limit NAME VALUE`, or put it back with
+`marsh config limit NAME default`. The value is kept in
+`$MARSH_HOME/config.json` and needs no restart:
 
-| Variable | Default |
-|---|---|
-| `MARSH_JOB_CPU_MILLIS` | 2000 (2 CPUs) |
-| `MARSH_JOB_MEMORY_BYTES` | 4294967296 (4 GiB) |
-| `MARSH_JOB_PIDS` | 4096 |
-| `MARSH_JOB_WRITABLE_BYTES` | 10737418240 (10 GiB). Counts the container's own files, not mounted directories. |
-| `MARSH_JOB_OUTPUT_BYTES` | 268435456 (256 MiB). stdout and stderr together. |
-| `MARSH_JOB_WALL_SECONDS` | 86400 (24 hours) |
-| `MARSH_TREE_KIT_VMS` | 4. Distinct Kit VMs used by live jobs in one tree, 1 to 64. Aliases of the same Kit share a VM. |
-| `MARSH_TREE_LAUNCH_RATE` | `60/60s`. Launches one job tree may make in any rolling window, as `LAUNCHES/SECONDS` (1 to 10000 in 1 to 3600 s; `60/1m` also works). It catches tight loops: a long session calling tools steadily never reaches it. Refused child calls count only up to 8 per window. The refusal says when to retry. |
+- admission limits apply to the next launch;
+- per-job resource limits apply to jobs started after the change. Running
+  jobs keep theirs.
 
-To see the values in effect, run `marsh status` (or `marsh status --json` and
-read `job_defaults`).
+`marsh config limits` lists each limit with its value, default, source
+(`default`, `config`, or `env`), range, and when a change applies.
+`marsh config limits --json` gives the same list to programs. `marsh status`
+shows the values in effect, and `marsh status --json` has them under `limits`.
 
-To change them:
+```console
+$ marsh config limit job-children 32
+job-children 32
+$ marsh config limit job-children default
+job-children 16
+```
 
-1. Let running work finish and exit open shells.
-2. Run `marsh stop`.
-3. Start marsh with the new values, as in the example at the top.
+A variable set when marsh starts wins over `config.json` until marsh
+restarts without it. A shell started with a value that conflicts with the
+running daemon's is refused; `marsh config limit` changes it without a
+restart.
 
-A shell started with a value that conflicts with the running daemon is
-refused. `marsh status` shows the daemon's values.
+| Name | Variable | Default | Range | Applies |
+|---|---|---|---|---|
+| `daemon-jobs` | `MARSH_DAEMON_JOBS` | 64. Jobs at once in the scope, all depths. Each Kit VM also runs at most 64 jobs at once. | 1 to 512 | now |
+| `job-children` | `MARSH_JOB_CHILDREN` | 16. Live children of one job. | 1 to 128 | now |
+| `tree-depth` | `MARSH_TREE_DEPTH` | 4. Your command is depth 1. | 1 to 16 | now |
+| `tree-kit-vms` | `MARSH_TREE_KIT_VMS` | 8. Distinct Kit VMs used by live jobs in one tree. Aliases of the same Kit share a VM. | 1 to 64 | now |
+| `tasks-live` | `MARSH_TASKS_LIVE` | 16. Tasks one agent's [task tool](agents.md#the-task-tool) has running at once. Finished tasks do not count. | 1 to 128 | new jobs |
+| `tree-launch-rate` | `MARSH_TREE_LAUNCH_RATE` | `60/60s`. Launches one job tree may make in any rolling window, as `LAUNCHES/SECONDS` (`60/1m` also works). It catches tight loops: a long session calling tools steadily never reaches it. Refused child calls count only up to 8 per window. | 1 to 10000 in 1 to 3600 s | now |
+| `job-cpu-millis` | `MARSH_JOB_CPU_MILLIS` | Half the Mac's cores, at least 2 (2000 = 2 CPUs). | 1 or more | new jobs |
+| `job-memory-bytes` | `MARSH_JOB_MEMORY_BYTES` | A quarter of the Mac's memory, from 4 GiB to 8 GiB. A Kit VM created while it is above stock SBX's VM size (half the Mac's memory) is made big enough for one such job. | 1 or more | new jobs |
+| `job-pids` | `MARSH_JOB_PIDS` | 4096 | 1 or more | new jobs |
+| `job-writable-bytes` | `MARSH_JOB_WRITABLE_BYTES` | 10737418240 (10 GiB). Counts the container's own files, not mounted directories. | 1 or more | new jobs |
+| `job-output-bytes` | `MARSH_JOB_OUTPUT_BYTES` | 268435456 (256 MiB). stdout and stderr together. | 1 or more | new jobs |
+| `job-wall-seconds` | `MARSH_JOB_WALL_SECONDS` | 86400 (24 hours) | 1 or more | new jobs |
+
+A call over an admission limit is refused with exit 125. The refusal names
+the limit, how to raise it, and when to retry
+([messages](agents.md#limits-and-messages)). Lowering a limit ends nothing
+that runs; it refuses the next launch over it.
+
+There is no limit on the same Kit calling itself: `claude` may hand work to
+`claude`, which hands work to `claude`. Depth and the launch rate stop a
+runaway.
 
 #### Writable limit
 
@@ -81,15 +105,7 @@ marsh periodically measures the container's writable layer and kills a job
 that exceeds the limit (`limit:writable`). A fast writer can overshoot between
 checks. Files in mounted directories do not count toward this limit.
 
-#### Fixed limits
-
-These cannot be changed. A call that exceeds one is refused with exit 125
-([messages](agents.md#limits-and-messages)).
-
-- 16 jobs at once per daemon
-- depth 4
-- 8 live children per job
-- the same Kit at most twice in a row
+#### Other limits
 
 Children also inherit their parent's wall-time deadline. With less than one
 second remaining, a new child is refused. Parallel composition has separate
@@ -115,7 +131,7 @@ When unset, control directories are in
 
 | Path | Contents |
 |---|---|
-| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), whether marsh mirrors your skills folders into the Docker Sandboxes skills store, set by `marsh config skills-mirror on\|off` (default on), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3). Default path `~/.marsh/config.json`. |
+| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), whether marsh mirrors your skills folders into the Docker Sandboxes skills store, set by `marsh config skills-mirror on\|off` (default on), after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3), and job limits (`limits`), set by `marsh config limit NAME VALUE\|default`. Default path `~/.marsh/config.json`. |
 | `CONTROL/HASH/skills-mirror.json` | The skills the skills mirror put in the Docker Sandboxes store, with a digest of each: only these are ever replaced or removed. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |

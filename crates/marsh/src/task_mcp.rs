@@ -39,8 +39,6 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(20);
 const MAX_LINE_BYTES: usize = 1 << 20;
 /// `tools/call` requests in flight at once; more are refused at once.
 const MAX_CALLS: usize = 32;
-/// Tasks one server starts (a tree's launch limit is 128 too).
-const MAX_TASKS: u64 = 128;
 /// A description is also the task's job label, `task: DESCRIPTION`
 /// (labels are at most 128 bytes).
 const MAX_DESCRIPTION_BYTES: usize = 120;
@@ -76,6 +74,9 @@ struct Setup {
     marsh: PathBuf,
     /// Where task transcripts are kept in this container.
     dir: PathBuf,
+    /// Tasks running at once (`tasks-live`, from `job.json`); finished ones
+    /// do not count. The tree's launch rate catches loops.
+    live_cap: usize,
 }
 
 impl Setup {
@@ -132,6 +133,7 @@ impl Setup {
             none_reason,
             marsh: PathBuf::from(contract::ARTIFACT),
             dir: std::env::temp_dir().join(format!("marsh-tasks-{short}-{}", std::process::id())),
+            live_cap: document.limits.tasks_live.max(1),
         }
     }
 
@@ -725,8 +727,13 @@ impl Server {
             if tasks.closing {
                 return Err("the task server is shutting down".into());
             }
-            if tasks.next >= MAX_TASKS {
-                return Err(format!("this server already started {MAX_TASKS} tasks"));
+            let running = tasks
+                .tasks
+                .values()
+                .filter(|task| matches!(task.state, State::Running { .. }))
+                .count();
+            if running >= self.setup.live_cap {
+                return Err(live_cap_refusal(running, self.setup.live_cap));
             }
             if self.cancelled(key) {
                 return Err("cancelled".into());
@@ -1278,6 +1285,14 @@ fn refusal_text(stderr: &str, code: Option<i32>, signal: Option<i32>) -> String 
     }
 }
 
+fn live_cap_refusal(running: usize, cap: usize) -> String {
+    format!(
+        "{running} tasks are running in this task server (limit {cap} at once); wait for one with \
+         task_output(id, wait: true) and start this one then, or raise it with \
+         `marsh config limit tasks-live N` or MARSH_TASKS_LIVE"
+    )
+}
+
 fn exit_words(code: Option<i32>, signal: Option<i32>) -> String {
     match (code, signal) {
         (Some(130), _) => "cancelled (exit 130)".into(),
@@ -1698,6 +1713,28 @@ mod tests {
             assert_eq!(request.argv, ["exec", "r", "-m", named]);
             assert_eq!(request.asked, None);
         }
+    }
+
+    #[test]
+    fn the_task_cap_counts_running_tasks_from_job_json() {
+        // Finished tasks do not count; the cap is what the job started with.
+        assert_eq!(setup(&["claude"], None).live_cap, 16);
+        let document = JobDocument {
+            limits: contract::Limits {
+                tasks_live: 3,
+                ..contract::Limits::default()
+            },
+            ..JobDocument::default()
+        };
+        assert_eq!(Setup::from_document(&document, None).live_cap, 3);
+        let refusal = live_cap_refusal(3, 3);
+        assert!(refusal.contains("limit 3 at once"), "{refusal}");
+        assert!(refusal.contains("task_output(id, wait: true)"), "{refusal}");
+        assert!(
+            refusal.contains("marsh config limit tasks-live N"),
+            "{refusal}"
+        );
+        assert!(refusal.contains("MARSH_TASKS_LIVE"), "{refusal}");
     }
 
     #[test]

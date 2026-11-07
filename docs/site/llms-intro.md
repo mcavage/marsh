@@ -124,11 +124,13 @@ network policy and credentials.
   its children. Ctrl-C cancels the foreground tree with INT, then KILL after
   10 seconds if needed.
 
-Fixed limits are 16 concurrent jobs per daemon, depth 4, and 8 live children per job.
-A tree may launch 60 jobs in any rolling minute by default (`MARSH_TREE_LAUNCH_RATE`,
-e.g. `60/60s`); only a tight loop reaches it, and the refusal says when to retry. The same Kit may
-appear at most twice consecutively in a lineage. The per-tree Kit VM cap
-defaults to 4 and can be set with `MARSH_TREE_KIT_VMS`. Refusals exit 125;
+Default limits are 64 concurrent jobs per scope, depth 4, 16 live children per job,
+8 distinct Kit VMs per tree, and 16 running tasks per task tool. A tree may launch
+60 jobs in any rolling minute by default; only a tight loop reaches it, and the
+refusal says when to retry. The same Kit may call itself; depth and the rate bound
+it. `marsh config limits` lists every limit and `marsh config limit NAME VALUE`
+changes one without a restart (each also has a `MARSH_*` variable). Refusals
+name the limit and how to raise it, and exit 125;
 registered-name links return 126 for a spawn-set refusal, while `marsh run`
 returns 125. See https://runmar.sh/docs/agents.md for exact messages.
 

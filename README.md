@@ -115,10 +115,10 @@ with a `.git` directory. See [Split and join](docs/split.md) for details.
 ## Limits
 
 marsh runs on Apple Silicon Macs, with Linux arm64 guest tools. Builds that
-require Xcode or macOS frameworks cannot run in the guest. At most 16
-jobs run at once per daemon; a job tree has at most four levels, eight live
-children per job, and, by default, 60 launches per tree in any minute (only a
-tight loop reaches it; `MARSH_TREE_LAUNCH_RATE` changes it).
+require Xcode or macOS frameworks cannot run in the guest. By default, 64
+jobs run at once per scope; a job tree has at most four levels, 16 live
+children per job, eight distinct Kit VMs, and 60 launches in any minute (only
+a tight loop reaches it). `marsh config limit` changes each without a restart.
 
 marsh is early, and its release binaries are unsigned.
 

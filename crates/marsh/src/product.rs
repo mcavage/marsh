@@ -1116,90 +1116,33 @@ fn write_job_defaults(
     writer: &mut impl Write,
     defaults: Option<&marsh_daemon::JobDefaults>,
 ) -> Result<(), ProductError> {
-    if let Some(defaults) = defaults {
-        let resources = defaults.resources;
-        writeln!(writer, "Per-job defaults (daemon first-launch snapshot):")?;
-        for (name, variable, value, unit) in [
-            (
-                "CPU",
-                "MARSH_JOB_CPU_MILLIS",
-                u64::from(resources.cpu_millis),
-                "millicpus",
-            ),
-            (
-                "memory",
-                "MARSH_JOB_MEMORY_BYTES",
-                resources.memory_bytes,
-                "bytes",
-            ),
-            (
-                "PIDs",
-                "MARSH_JOB_PIDS",
-                u64::from(resources.pids),
-                "processes",
-            ),
-            (
-                "writable",
-                "MARSH_JOB_WRITABLE_BYTES",
-                resources.writable_bytes,
-                "bytes",
-            ),
-            (
-                "output",
-                "MARSH_JOB_OUTPUT_BYTES",
-                resources.output_bytes,
-                "bytes (stdout + stderr)",
-            ),
-            (
-                "wall",
-                "MARSH_JOB_WALL_SECONDS",
-                resources.wall_seconds,
-                "seconds (a child: no later than its parent)",
-            ),
-            (
-                "Kit VMs",
-                "MARSH_TREE_KIT_VMS",
-                defaults.tree_kit_vms as u64,
-                "distinct per job tree",
-            ),
-        ] {
-            let origin = if defaults
-                .environment_overrides
-                .iter()
-                .any(|name| name == variable)
-            {
-                format!("daemon launch environment: {variable}")
-            } else {
-                "built-in default".into()
-            };
-            writeln!(writer, "  {name}: {value} {unit} [{origin}]")?;
-        }
-        let rate = defaults.tree_launch_rate;
-        writeln!(
-            writer,
-            "  launch rate: {} launches per {} s per job tree [{}]",
-            rate.launches,
-            rate.window_seconds,
-            if defaults
-                .environment_overrides
-                .iter()
-                .any(|name| name == "MARSH_TREE_LAUNCH_RATE")
-            {
-                "daemon launch environment: MARSH_TREE_LAUNCH_RATE"
-            } else {
-                "built-in default"
+    let Some(defaults) = defaults else {
+        writeln!(writer, "Limits: unavailable (inspection-only daemon)")?;
+        return Ok(());
+    };
+    writeln!(writer, "Limits (`marsh config limits`):")?;
+    let status = defaults.status();
+    for spec in &marsh_daemon::limits::LIMITS {
+        let Some(entry) = status.get(spec.name) else {
+            continue;
+        };
+        let origin = match entry.source {
+            marsh_daemon::limits::Source::Default => "default".to_owned(),
+            marsh_daemon::limits::Source::Config => "config.json".to_owned(),
+            marsh_daemon::limits::Source::Env => {
+                format!("daemon launch environment: {}", spec.variable)
             }
-        )?;
+        };
         writeln!(
             writer,
-            "Later shells cannot override this snapshot. Close work and stop the scope before changing it, or use a separate MARSH_HOME."
-        )?;
-    } else {
-        writeln!(
-            writer,
-            "Per-job defaults: unavailable (inspection-only daemon)"
+            "  {}: {} {} [{origin}]",
+            spec.name, entry.value, spec.unit
         )?;
     }
+    writeln!(
+        writer,
+        "Change one with `marsh config limit NAME VALUE`: admission limits apply to the next launch, per-job resources to new jobs. A MARSH_* variable at daemon start wins until restart."
+    )?;
     Ok(())
 }
 

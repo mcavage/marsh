@@ -321,6 +321,8 @@ struct Running {
 struct State {
     vms: BTreeMap<String, Vm>,
     calls: Vec<Call>,
+    /// The bound each bounded call ran under, in order: (verb, bound).
+    bounds: Vec<(String, Duration)>,
     faults: Vec<(Matcher, Fault)>,
     gates: Vec<(Matcher, Arc<Gate>)>,
     next_id: u64,
@@ -566,6 +568,18 @@ impl StockModel {
 
     pub fn calls(&self) -> Vec<Call> {
         self.state.lock().unwrap().calls.clone()
+    }
+
+    /// The bounds the bounded calls of stock `verb` ran under.
+    pub fn bounds_of(&self, verb: &str) -> Vec<Duration> {
+        self.state
+            .lock()
+            .unwrap()
+            .bounds
+            .iter()
+            .filter(|(seen, _)| seen == verb)
+            .map(|(_, bound)| *bound)
+            .collect()
     }
 
     pub fn calls_of(&self, verb: &str) -> Vec<Call> {
@@ -1491,8 +1505,14 @@ impl CommandRunner for StockModel {
         self.respond(&Call::new(invocation))
     }
 
-    fn run_bounded(&self, invocation: &Invocation, _: Duration) -> io::Result<CommandOutput> {
-        self.respond(&Call::new(invocation))
+    fn run_bounded(&self, invocation: &Invocation, bound: Duration) -> io::Result<CommandOutput> {
+        let call = Call::new(invocation);
+        self.state
+            .lock()
+            .unwrap()
+            .bounds
+            .push((call.verb().to_owned(), bound));
+        self.respond(&call)
     }
 
     fn spawn_attached(&self, invocation: &Invocation) -> io::Result<Attachment> {
