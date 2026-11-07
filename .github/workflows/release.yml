@@ -75,11 +75,11 @@ on:
         required: false
 permissions:
   contents: read
-# Stable, nightly and per-commit runs queue separately: GitHub keeps one pending
-# run per group, so a stream of per-commit runs must not replace a pending
-# release or a pending daily nightly. Nothing in progress is cancelled.
+# Stable and daily nightly releases keep their own queues. Per-commit runs
+# classify independently, so an unrelated commit cannot replace a pending
+# image publication. Only their selected image jobs share a queue (below).
 concurrency:
-  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || (github.event_name == 'workflow_run' && 'commit' || 'nightly') }}
+  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || (github.event_name == 'workflow_run' && format('commit-{0}', github.run_id) || 'nightly') }}
   cancel-in-progress: false
 env:
   KIT_REPOSITORY_PREFIX: docker.io/mcavage
@@ -239,6 +239,9 @@ jobs:
   images:
     needs: version
     if: needs.version.outputs.stages != 'none'
+    concurrency:
+      group: release-images-${{ github.event_name == 'workflow_run' && 'commit' || github.run_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 120
     permissions:
