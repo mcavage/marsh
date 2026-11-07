@@ -1277,7 +1277,7 @@ class Processes(ScenarioSuite):
         require(v.get("ready") == str(len(names)) and "Kit VM" not in err,
                 f"children of {len(names)} more Kits did not run at once: {v} {err[-800:]!r}")
         receipts = self.settle(before, len(names) + 1, timeout=300)
-        require(len({r.get("kit_ref") for r in receipts}) == len(names) + 1,
+        require(len({r.get("image") for r in receipts}) == len(names) + 1,
                 f"want {len(names) + 1} distinct Kits: {sorted(r.get('command') for r in receipts)}")
         self.verify_deleted(receipts)
 

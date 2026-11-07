@@ -575,8 +575,25 @@ fn load_by_other_callers_is_refused_before_any_effect() {
 fn load_needs_no_second_daemon_connection() {
     let f = LoadFixture::new();
     // Accepted in order, so these hold their slots before the load arrives.
+    // More than the listen backlog: a refused connect waits for the accept
+    // loop to catch up.
+    crate::raise_descriptor_limit();
     let occupied = (0..MAX_DAEMON_CONNECTIONS - 1)
-        .map(|_| UnixStream::connect(&f.relay.paths.socket).unwrap())
+        .map(|_| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                match UnixStream::connect(&f.relay.paths.socket) {
+                    Ok(stream) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::ConnectionRefused
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("connect: {error}"),
+                }
+            }
+        })
         .collect::<Vec<_>>();
     f.relay
         .mcp_load(
