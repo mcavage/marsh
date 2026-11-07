@@ -52,8 +52,9 @@ pub enum SetupStage {
 /// Maximum concurrent containers on one retained worker transport.
 ///
 /// Host admission and worker enforcement use the same bound. This is independent
-/// of the shell's fanout branch count. It equals the daemon's job pool
-/// (`process::POOL_LIMIT`), so a pool that is not full never meets a full VM.
+/// of the shell's fanout branch count. It equals the daemon's default job
+/// pool (`process::POOL_LIMIT`), so at the defaults a pool that is not full
+/// never meets a full VM; a larger `daemon-jobs` is bounded by it per Kit VM.
 /// The daemon raises its descriptor soft limit above the macOS default of 256
 /// for the relay, worker and control pipes this many containers hold.
-pub const WORKER_CONTAINER_CAPACITY: u16 = 16;
+pub const WORKER_CONTAINER_CAPACITY: u16 = 64;

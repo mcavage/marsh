@@ -347,13 +347,16 @@ class TaskTool(ScenarioSuite):
                     f"{mode}: a shell grandchild was started")
 
     def admission_refusal(self) -> None:
-        """T06: admission refusals (same-Kit chain; depth, shared and copy) are tool errors with marsh's reason."""
-        out = self.steps([["call", "task", {"description": "too deep", "prompt": "echo SHOULD-NOT-RUN"}]], nest=True)
+        """T06: the same agent may hand work to itself three deep (fixture -> fixture -> fixture, as claude ->
+        claude -> claude with the default agent); depth refusals (shared and copy) are tool errors with marsh's reason."""
+        out = self.steps([["call", "task", {"description": "third in a row", "prompt": "echo RAN-THIRD"}]], nest=True)
         body = text_of(out[0])
-        require(out[0].get("isError") and "same-Kit chain limit" in body and "SHOULD-NOT-RUN" not in body,
-                f"the third fixture in a row was not refused as a tool error: {body[-900:]!r}")
-        # A split's argv branch is not a same-Kit step (processes.md s6), so a
-        # copy task meets the depth limit: a `shell` caller at depth 4.
+        require(not out[0].get("isError") and "exited 0" in body and "RAN-THIRD" in body,
+                f"the third fixture in a row did not run: {body[-900:]!r}")
+        child = self.job_state(self.job_of(out[0]))
+        require(child.get("command") == "fixture" and self.lin(child).get("depth") == 3,
+                f"the task is not a depth-3 fixture job: {child.get('command')} {self.lin(child)}")
+        # A `shell` caller at depth 4 meets the depth limit, shared and copy.
         steps = [["call", "task", {"description": "too deep", "prompt": "echo NO", "agent": "fixture"}],
                  ["call", "task", {"description": "too deep", "prompt": "echo NO", "agent": "fixture",
                                    "files": "copy"}]]
@@ -367,7 +370,8 @@ class TaskTool(ScenarioSuite):
                 f"depth-4 caller failed ({completed.returncode}): {output[-600:]!r} {text(completed.stderr)[-900:]!r}")
         for result, mode in zip(json.loads(output.split("@@", 1)[1]), ("shared", "copy")):
             body = text_of(result)
-            require(result.get("isError") and "depth limit 4" in body, f"{mode}: depth 5 was not refused: {body[-900:]!r}")
+            require(result.get("isError") and "depth limit 4" in body and "marsh config limit tree-depth" in body,
+                    f"{mode}: depth 5 was not refused with how to raise it: {body[-900:]!r}")
 
     def cross_job_ids(self) -> None:
         """T07: a task id belongs to its own job's server: another job's server refuses it."""
@@ -457,30 +461,35 @@ class TaskTool(ScenarioSuite):
         self.git(self.project, "reset", "-q", "--hard")
 
     def fan_out_limit(self) -> None:
-        """T11: 8 live tasks: a 9th is refused (shared and copy), the caller keeps working, every result returns."""
-        workers = [["call", "task", {"description": f"worker {n}", "prompt": f"sleep 8; echo RESULT-{n}",
-                                     "background": True}] for n in range(1, 9)]
+        """T11: 16 running tasks: a 17th is refused (shared and copy) with the limit and how to raise it, the
+        caller keeps working, every result returns, and a finished task frees its place."""
+        live = 16
+        workers = [["call", "task", {"description": f"worker {n}", "prompt": f"sleep 10; echo RESULT-{n}",
+                                     "background": True}] for n in range(1, live + 1)]
         out = self.steps([*workers, ["sh", "sleep 4"],
-                          ["call", "task", {"description": "ninth shared", "prompt": "echo NO"}],
-                          ["call", "task", {"description": "ninth copy", "prompt": "echo NO", "files": "copy"}],
-                          *[["call", "task_output", {"id": f"t{n}", "wait": True}] for n in range(1, 9)],
+                          ["call", "task", {"description": "extra shared", "prompt": "echo NO"}],
+                          ["call", "task", {"description": "extra copy", "prompt": "echo NO", "files": "copy"}],
+                          *[["call", "task_output", {"id": f"t{n}", "wait": True}] for n in range(1, live + 1)],
                           ["sh", "sleep 3"],
                           ["call", "task", {"description": "after the limit", "prompt": "echo AFTER"}],
-                          # Eight more, cancelled while they start (EOF at once).
+                          # Sixteen more, cancelled while they start (EOF at once).
                           *[["call", "task", {"description": f"early {n}", "prompt": "sleep 120",
-                                              "background": True}] for n in range(8)],
+                                              "background": True}] for n in range(live)],
                           ["eof"]])
-        for mode, result in (("shared", out[9]), ("copy", out[10])):
-            require(result.get("isError") and "fan-out limit 8" in text_of(result) and "uncertain" not in text_of(result),
-                    f"{mode}: the 9th task was not refused cleanly: {text_of(result)[-600:]!r}")
-        for n, result in enumerate(out[11:19], 1):
+        for mode, result in (("shared", out[live + 1]), ("copy", out[live + 2])):
+            body = text_of(result)
+            require(result.get("isError") and f"limit {live} at once" in body and "tasks-live" in body
+                    and "MARSH_TASKS_LIVE" in body and "uncertain" not in body,
+                    f"{mode}: the extra task was not refused cleanly: {body[-600:]!r}")
+        for n, result in enumerate(out[live + 3:2 * live + 3], 1):
             require(f"exited 0" in text_of(result) and f"RESULT-{n}" in text_of(result),
                     f"t{n}'s result was lost: {text_of(result)[-600:]!r}")
-        require("AFTER" in text_of(out[20]), f"the caller could not start a task after the limit: {text_of(out[20])!r}")
+        after = out[2 * live + 4]
+        require("AFTER" in text_of(after), f"the caller could not start a task after the limit: {text_of(after)!r}")
         require(out[-1]["exit"] == 0, f"the server did not exit: {out[-1]}")
         tasks = [r for r in (self.show(j) for j in self.job_ids()) if (r.get("label") or "").startswith(
             ("task: worker", "task: early", "task: after the limit"))]
-        require(len(tasks) == 17, f"want 17 task jobs: {[r.get('label') for r in tasks]}")
+        require(len(tasks) == 2 * live + 1, f"want {2 * live + 1} task jobs: {[r.get('label') for r in tasks]}")
         for receipt in tasks:
             settled = self.job_state(receipt["job_id"])
             require(settled["cleanup"] == "verified", f"{settled.get('label')}: cleanup {settled['cleanup']}: "

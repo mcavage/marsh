@@ -232,6 +232,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let server = Server::bind_with_stock_sbx_and_control_home(&home, &stock_sbx, &control_home)?
         .with_protected_guest_roots(protected_guest_roots)
         .with_job_defaults(defaults)
+        .with_limits_config(home.join("config.json"))
         .with_url_opener(marsh_daemon::open_url::Opener::from_environment(
             env::var_os("MARSH_OPEN_COMMAND").as_deref(),
             env::var_os("MARSH_OPEN_URLS").as_deref(),
@@ -896,10 +897,12 @@ mod tests {
 
     #[test]
     fn job_limits_default_and_accept_strict_positive_overrides() {
-        assert_eq!(
-            job_resources_from_environment(|_| None).unwrap(),
-            DEFAULT_JOB_RESOURCES
-        );
+        // CPU and memory scale to the host; the rest are the fixed floors.
+        let defaults = job_resources_from_environment(|_| None).unwrap();
+        assert_eq!(defaults, JobDefaults::default().resources);
+        assert!(defaults.cpu_millis >= DEFAULT_JOB_RESOURCES.cpu_millis);
+        assert!(defaults.memory_bytes >= DEFAULT_JOB_RESOURCES.memory_bytes);
+        assert_eq!(defaults.pids, DEFAULT_JOB_RESOURCES.pids);
         let values = BTreeMap::from([
             ("MARSH_JOB_CPU_MILLIS", "500"),
             ("MARSH_JOB_MEMORY_BYTES", "134217728"),

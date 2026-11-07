@@ -91,7 +91,8 @@ then frame relay.
   (section 14). stdout and stderr use per-attempt credits.
 
 **Capability socket** (`capability.rs`): blocking accept, at most
-`MaxFan + 4` (12) open connections per attempt. An excess connection receives
+the most live children a job can be allowed plus 4 (`FAN_OUT_MAX + 4`, 132)
+open connections per attempt. An excess connection receives
 `marsh: too many concurrent daemon requests in this job` and closes.
 
 ## 4. The links and the in-job `marsh`
@@ -266,12 +267,21 @@ queued child would deadlock the pool.
 
 | Limit | Value | Refusal (exit 125 / `failed: …`) |
 |---|---|---|
-| Pool | 16 concurrent jobs per daemon (selected home): one pool across all sessions and host CLI calls, all depths; a slot frees only on verified deletion (`BudgetBound`, control `freeOnRevoke`) | `capacity: 16 jobs (2 held by uncertain jobs on Kit codex: run marsh workers reset codex)` |
-| Kit VMs | 4 distinct Kit VMs live at once per job tree (one warm VM per Kit identity: aliases of a live Kit, or a second call to it, cost nothing; `MARSH_TREE_KIT_VMS` at daemon start sets 1–64; `KitVMBound`, `noKitCap`) | `shell refused: tree already uses 4 Kit VMs (claude, codex, fixture, pi) (MARSH_TREE_KIT_VMS)` |
-| Depth | 4; a root job is depth 1 (`LineageWF`, `noDepth`) | `depth limit 4` |
-| Same-Kit chain | 2 consecutive parent→child steps with the same Kit identity (Kit source/image, not the registered name): claude → claude is allowed, a third claude is refused (`SameKitBound`, `noSameKit`) | `claude → claude → claude refused: same-Kit chain limit 2 (see /run/marsh/context.md)` |
-| Fan-out | 8 live children per job, including its splits' branches (`FanOutBound`, `noFan`) | `fan-out limit 8` |
-| Rate | 60 launches per top-level tree in any rolling 60 s by default (`MARSH_TREE_LAUNCH_RATE`); refused child calls count up to 8 per window (`RateBound`, `noRate`) | `rate limit: 60 launches in the last minute; retry in Ns` |
+Every limit below but wall time is read on each admission: the daemon's
+launch environment (`MARSH_*`), else the scope's `config.json` (`marsh config
+limit NAME VALUE`), else the default (`AdmittedUnderLimits`, control
+`staleLimits`). A change applies to the next launch; lowering a limit ends
+nothing that runs. Each refusal names the limit, how to raise it, and when to
+retry. There is no same-Kit chain cap: depth and the rate bound a Kit calling
+itself, as the task tool's default (the caller's own agent) does.
+
+| Limit | Value | Refusal (exit 125 / `failed: …`) |
+|---|---|---|
+| Pool | `daemon-jobs`, 64 by default (1–512): concurrent jobs per daemon (selected home), one pool across all sessions and host CLI calls, all depths; a slot frees only on verified deletion (`BudgetBound`, control `freeOnRevoke`). Each Kit VM also takes at most 64 (`WORKER_CONTAINER_CAPACITY`) | `capacity: 64 jobs at once in this scope; retry when one ends, or raise it with `marsh config limit daemon-jobs N` or MARSH_DAEMON_JOBS (2 held by uncertain jobs on Kit codex: run marsh workers reset codex)` |
+| Kit VMs | `tree-kit-vms`, 8 by default (1–64): distinct Kit VMs live at once per job tree (one warm VM per Kit identity: aliases of a live Kit, or a second call to it, cost nothing; `KitVMBound`, `noKitCap`) | `shell refused: tree already uses 8 Kit VMs (...); retry when one of their jobs ends, or raise it with ...` |
+| Depth | `tree-depth`, 4 by default (1–16); a root job is depth 1 (`LineageWF`, `noDepth`) | `depth limit 4: NAME would run at depth 5; use fewer levels, or raise it with ...` |
+| Fan-out | `job-children`, 16 by default (1–128): live children per job, including its splits' branches (`FanOutBound`, `noFan`) | `fan-out limit 16: job ... already has 16 live children; retry when one ends, or raise it with ...` |
+| Rate | `tree-launch-rate`, 60 launches per top-level tree in any rolling 60 s by default; refused child calls count up to 8 per window (`RateBound`, `noRate`) | `rate limit: 60 launches in the last minute; retry in Ns, or raise it with ...` |
 | Wall time | min(the Kit's own limit, `MARSH_JOB_WALL_SECONDS`, and the parent's remaining time); a child needs 1 s left at admission. The receipt's `lineage.deadline_unix_ms` is the effective deadline and `parent_deadline` says it is the parent's. The worker stops the child at it (`exit.cause` `limit:wall: parent deadline`); if the parent's own wall kill lands first, its end cancels the child with the same cause | `fixture refused: deadline: parent job 1a2b3c4d has 420 ms of wall time left (MARSH_JOB_WALL_SECONDS)` |
 
 **No TTY children in v1.** A job's child gets no PTY. A `ProcessRun` whose
@@ -454,7 +464,8 @@ refused by the spawn set), and is counted in `marsh status`
 - Launches by the session, or by any running job that holds a live
   capability and has finished its entry step.
 - Rights narrowing: the view and the spawn set.
-- The pool, depth, same-Kit chain, fan-out, total, and per-tree Kit VM caps.
+- The pool, depth, fan-out, launch-rate, and per-tree Kit VM caps, as in
+  effect at each step (`SetLimits` changes them while jobs run).
 - The exit, cancel, and loss cascades, with grace and `unreaped`.
 - A daemon restart between any two steps.
 - Per-Kit entrypoint kind (script or ELF), a mandatory entry step, and the
@@ -465,8 +476,8 @@ Invariants:
 - `LineageWF`, `Attenuation`, `BudgetBound`, `FanOutBound`, `RateBound`;
 - `LiveUnderLive`, `NoOrphanRunning`, `CancelPropagates`;
 - `RevokedAtRestart`, `RestartUncertain`, `NoReplay`;
-- `EntryOnce`, `NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`,
-  `KitVMBound`;
+- `EntryOnce`, `NoEntryRecursion`, `SpawnSetAttenuates`, `KitVMBound`,
+  `AdmittedUnderLimits`;
 - the liveness property `EventuallySettled`.
 
 Each invariant has one negative control that removes a guard in a real
@@ -524,11 +535,13 @@ black-box scenarios and the gaps they do not cover.
   `ENV` is never forwarded; digests are keyed so a job cannot test guesses
   (section 6).
 - **The capability socket refuses, never drops.** It uses a blocking accept,
-  at least `MaxFan + 4` connections, and a refusal frame (section 3).
+  at least `MaxFan + 4` connections (the largest `job-children` plus 4), and
+  a refusal frame (section 3).
 - **Spawn is ordered against cancel** by re-checking the parent's capability
   under the process-table lock (section 3).
-- **Loops are bounded and refusals explain themselves.** The same-Kit chain cap
-  is 2; messages name the chain, `context.md`, and `marsh workers reset KIT`.
+- **Loops are bounded and refusals explain themselves.** Depth and the
+  per-tree launch rate bound a loop; messages name the limit, how to raise
+  it, when to retry, and `marsh workers reset KIT` for held slots.
 - **No TTY children; image-provided names stay local; `marsh context` only
   prints** (sections 5, 6, and 9).
 - **The model checks the link decision.** Per-Kit entrypoint kind and a
@@ -540,12 +553,9 @@ black-box scenarios and the gaps they do not cover.
 1. **Entry rule keeps PATH.** The link takes the entry path, clears
    `MARSH_ENTRY`, and execs the image binary by absolute path (PATH searched
    with `/run/marsh/bin` excluded). PATH is not stripped (section 5).
-2. **Same-Kit chain** counts consecutive parent→child steps whose Kit
-   identity (the Kit reference the job ran from) is equal; cap 2. A split
-   argv branch is not such a step: nested splits are already bounded by the
-   split depth limit 3 (`workspaces.md`), and counting them would refuse
-   the third level of an all-fixture nested split. The chain walk stops at
-   a branch job.
+2. **No same-Kit chain cap.** A job may start its own Kit's command as a
+   child, down to the depth limit; nested splits are also bounded by the
+   split depth limit 3 (`workspaces.md`).
 3. **Depth base.** A root job is depth 1.
 4. **Refusals** leave no receipt; they go to the caller's stderr and
    `processes.refused`.
@@ -656,8 +666,8 @@ black-box scenarios and the gaps they do not cover.
 - The artifact is mandatory: the worker install and identity and the job's
   container setup fail without it; a failed `/run/marsh` setup fails the
   attempt (`SetupFailed`), never runs it without one.
-- The same-Kit pre-check uses the Kit identity resolved before VM work;
-  refused launches count toward their tree's total.
+- The Kit VM pre-check uses the Kit identity resolved before VM work;
+  refused launches count toward their tree's launch rate (up to 8).
 - The daemon applies the split environment filter to `ProcessRun` itself.
 - A connection slot on `cap.sock` is freed only when the daemon side closes;
   a link retries a refused connection briefly (nothing was started).

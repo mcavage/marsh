@@ -25,10 +25,11 @@ use std::{
 };
 
 const CHUNK_BYTES: usize = 16 * 1024;
-// Each connection retains three local socket descriptors; the host daemon
-// needs additional descriptors for its end. Leave room under macOS's usual
-// 256-descriptor soft limit for the tunnel, listener, and active shell jobs.
-const MAX_RELAY_CONNECTIONS: usize = 16;
+// One shell's daemon connections at once; every job it runs holds one. Twice
+// the default job pool (`daemon-jobs`), so a shell can fill the pool with
+// room for its other requests. Each connection retains three local socket
+// descriptors; the daemon raises its descriptor limit to fit them.
+const MAX_RELAY_CONNECTIONS: usize = 2 * marsh_contracts::process::POOL_LIMIT;
 // At most 1 MiB per connection, including an in-progress write. A stalled
 // recipient must not hold the tunnel reader or the shared connection map.
 const MAX_PENDING_CHUNKS: usize = 64;
