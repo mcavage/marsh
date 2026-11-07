@@ -195,12 +195,6 @@
       schedule: ["at any time"],
     },
     {
-      description: "Pi's nested shrinkwrap pins brace-expansion; patch-pi-dependencies.mjs validates the reviewed version",
-      matchFileNames: ["kits/marsh-pi/package.json"],
-      matchPackageNames: ["brace-expansion"],
-      enabled: false,
-    },
-    {
       description: "Rust crates and other libraries: weekly, minor and patch together",
       matchManagers: ["cargo", "npm"],
       matchPackageNames: [

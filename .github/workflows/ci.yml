@@ -25,8 +25,8 @@ env:
 # on a pull request the workspace tests except the platform-neutral guest
 # worker, contract values, Bash audit and API probe (Makefile TEST_SCOPE=host),
 # split between two jobs, the binary
-# callers and the entrypoint harnesses; on main, everything. A pull request
-# runs only the lanes its files need (scripts/ci-changes.sh): a docs-only
+# callers and the entrypoint harnesses. PRs and main pushes run only the
+# lanes their files need (scripts/ci-changes.sh): a docs-only
 # change runs the docs check alone. "CI passed" is the one required check.
 # The huge TLA+ configs run weekly (model.yml) and in make regress. The macOS release build is not
 # here: the nightly and release workflows build it (release.yml).
@@ -37,16 +37,16 @@ env:
 # acceptance) runs on a Mac by hand; see CONTRIBUTING.md.
 jobs:
   changes:
-    # Which lanes a change needs. A merge or manual run needs them all, except
-    # the image build, which runs when an image input changed since the
-    # previous push. The lanes below run when this job fails, so a broken
-    # classifier can only cost time, never skip a check.
+    # Classify PRs against main and pushes against their previous revision.
+    # Manual runs and missing history check everything. If this job fails,
+    # every lane runs so a broken classifier cannot skip a check.
     name: What changed
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
       host: ${{ steps.classify.outputs.host }}
+      tools: ${{ steps.classify.outputs.tools }}
       model: ${{ steps.classify.outputs.model }}
       images: ${{ steps.classify.outputs.images }}
       renovate: ${{ steps.classify.outputs.renovate }}
@@ -65,11 +65,11 @@ jobs:
             git diff --name-only "origin/$BASE_REF...HEAD" | sh scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
-          printf 'code=true\nhost=true\nmodel=true\nrenovate=true\n' | tee -a "$GITHUB_OUTPUT"
           if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            git diff --name-only "$BEFORE...HEAD" | sh scripts/ci-changes.sh | grep '^images=' | tee -a "$GITHUB_OUTPUT"
+            git diff --name-only "$BEFORE" HEAD | sh scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
           else
-            echo images=true | tee -a "$GITHUB_OUTPUT"
+            # Manual dispatch or missing history: check everything.
+            sh scripts/ci-changes.sh </dev/null | tee -a "$GITHUB_OUTPUT"
           fi
 
   lint:
@@ -261,7 +261,7 @@ jobs:
     # The publisher and tooling self-tests are Python and shell: no Rust build.
     name: Tooling and publisher (Linux)
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tools == 'true') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -453,8 +453,8 @@ jobs:
   images:
     # Builds the shell template and every Kit from their pinned inputs, without
     # pushing (make kits, prepare-shell-image --validate-only). This is where a
-    # base-image or agent-CLI bump (Renovate) proves it still builds: the build
-    # verifies the downloaded checksums and the license notices. It runs only
+    # base-image or agent-CLI bump (Renovate) proves it still builds and
+    # the installed commands pass their smoke checks. It runs only
     # when an input changed, and not for fork PRs (no registry secrets there).
     name: Kit and shell images (build, no push)
     needs: changes

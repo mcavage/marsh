@@ -115,13 +115,15 @@ if [ -d /etc/profile.d ]; then
     unset _f
 fi
 EOF
-COPY image-repair /tmp/marsh-image-repair
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
-RUN python3 -I -S /tmp/marsh-image-repair/repair.py \
- && rm -rf /tmp/marsh-image-repair \
- && command -v sudo && command -v visudo && command -v useradd && command -v getent \
+RUN command -v sudo && command -v visudo && command -v useradd && command -v getent \
  && command -v docker && command -v dockerd \
- && command -v gcc && command -v node && command -v npm && command -v make && command -v python3
+ && command -v gcc && command -v make \
+ && node --version && npm --version && python3 --version \
+ && python3 -m pip --version \
+ && python3 -m venv /tmp/marsh-python-smoke \
+ && /tmp/marsh-python-smoke/bin/python -m pip --version \
+ && rm -rf /tmp/marsh-python-smoke
 COPY --from=rust /usr/local/cargo/ /usr/local/cargo/
 COPY --from=rust /usr/local/rustup/ /usr/local/rustup/
 # Any shell UID (the Mac user's) may use the shared registry cache.

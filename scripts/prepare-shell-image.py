@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build/import the one shell template (repaired DHI shell + Rust + Pi) locally;
+"""Build/import the one shell template (DHI shell + Rust + Pi) locally;
 registry publication is opt-in.
 
 The produced archive, config, platform manifest, and import are recorded.
@@ -184,7 +184,6 @@ def main() -> None:
         INPUTS.copy_regular(source_recipe, context / "Dockerfile", budget)
         if file_hash(context / "Dockerfile") != recipe_hash:
             raise ValueError("shell Dockerfile changed while staging")
-        repair_inputs = copy_inputs(ROOT / "packaging/image-repair", context / "image-repair", budget)
         base_inputs = copy_inputs(ROOT / "packaging/image-base", context / "image-base", budget)
         notice_inputs = copy_inputs(ROOT / "packaging/dhi-notices/collected", context / "dhi-notices", budget)
         pi_inputs = copy_inputs(ROOT / "packaging/shell/pi", context / "pi", budget)
@@ -207,7 +206,7 @@ def main() -> None:
                    "--metadata-file", str(metadata), str(context)]
         inputs = {"packaging/shell-image": base_hash, "packaging/shell/Dockerfile": recipe_hash,
                   "packaging/image-base": base_inputs,
-                  "scripts/prepare-shell-image.py": script_hash, "packaging/image-repair": repair_inputs,
+                  "scripts/prepare-shell-image.py": script_hash,
                    "packaging/dhi-notices/collected": notice_inputs, "packaging/shell/pi": pi_inputs,
                    "packaging/shell/editors": editor_inputs,
                   "support_scripts": support_hashes}
@@ -217,7 +216,6 @@ def main() -> None:
             phase = "source-fence"
             if (file_hash(base_file) != base_hash or file_hash(source_recipe) != recipe_hash
                     or file_hash(Path(__file__)) != script_hash
-                    or input_tree(ROOT / "packaging/image-repair") != repair_inputs
                     or input_tree(ROOT / "packaging/image-base") != base_inputs
                     or input_tree(ROOT / "packaging/dhi-notices/collected") != notice_inputs
                     or input_tree(ROOT / "packaging/shell/pi") != pi_inputs
@@ -225,13 +223,13 @@ def main() -> None:
                     or support_hashes != {name: file_hash(ROOT / "scripts" / name) for name in support_hashes}):
                 raise ValueError("shell image inputs changed during build")
             if args.validate_only:
-                print("Validated repaired shell image; no publication or runnable reference emitted", file=sys.stderr)
+                print("Validated shell image; no publication or runnable reference emitted", file=sys.stderr)
                 return
             phase = "read-buildx-metadata"
             observed = json.loads(INPUTS.read_file(metadata))
             digest = observed.get("containerimage.digest")
             if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
-                raise ValueError("Buildx did not report an immutable repaired-image manifest")
+                raise ValueError("Buildx did not report an immutable shell-image manifest")
             local = None
             if args.repository:
                 reference = f"{args.repository}@{digest}"
