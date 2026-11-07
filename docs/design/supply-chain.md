@@ -41,31 +41,17 @@ The released registry pins the published image digests in `commands.json` and
 DHI inputs. The registry/repository destinations remain configurable through
 `KIT_REPOSITORY_PREFIX` and `SHELL_IMAGE_REPOSITORY`.
 
-## Pi's nested shrinkwrap
+## npm and Python dependencies
 
 The Pi Kit installs its runtime and gateway dependencies with `npm ci` and
-lifecycle scripts disabled. Its package lock carries integrity hashes, and its
-declared Kit version must match the exact package version. The shell template
-separately locks the Pi used by `pi-dev` under `packaging/shell/pi`.
+lifecycle scripts disabled. Its declared Kit version must match the exact
+package version. The shell template separately locks the Pi used by `pi-dev`.
 
-Some earlier Pi releases shipped their own npm shrinkwrap with a vulnerable
-`brace-expansion` (5.0.9). npm installed that nested copy despite a root
-override and a changed outer lock, so checking the outer lock alone missed what
-Pi actually used.
-
-The Pi Kit locks `brace-expansion` 5.0.12. After installation, for
-any Pi release, `patch-pi-dependencies.mjs` requires the fixed `brace-expansion`
-(5.0.12 or later), fails if Pi bundles its own `brace-expansion` again, checks
-that Pi's own `minimatch` resolves the fixed package, and exercises
-representative brace/glob behavior. A Pi bump that reintroduces a nested copy
-fails the image build.
-
-The fixed release addresses the publisher's
-[quadratic expansion](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr),
-[nested group recursion](https://github.com/advisories/GHSA-qhr7-859c-m2p7), and
-[comma recursion](https://github.com/advisories/GHSA-6j4f-fj2g-mc7p)
-denial-of-service advisories. Changes to these pins require a fresh installed
-module inventory scan and CLI/ACP caller validation.
+DHI supplies the shell's npm and Python packages, including their bundled
+dependencies. marsh installs those packages without replacing npm's modules,
+rewriting pip's vendored code or bootstrap wheels, or maintaining accepted
+upstream-version lists. Updates are validated by image builds and installed
+CLI checks, including creating a Python virtual environment with pip.
 
 ## Installed notices
 
@@ -95,7 +81,3 @@ packages, npm license files remain with their packages, and the DHI base's own
 license remains in the image. This archive is not a per-version inventory or an
 assertion about an image's complete license coverage. Updating a dependency
 does not regenerate it or require a license-delta approval.
-
-The shell template also applies the existing focused package repairs in
-`packaging/image-repair/repair.py`; those fix installed vulnerable code and
-preserve the upstream notices. Their runtime checks remain part of CI.

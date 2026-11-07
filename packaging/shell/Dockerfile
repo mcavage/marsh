@@ -66,12 +66,12 @@ COPY image-base /tmp/marsh-image-base
 RUN apt-get update \
  && sh /tmp/marsh-image-base/align-packages.sh \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.9.2-1 docker-ce-cli=5:29.9.2-2 containerd.io=2.4.2-3 \
+      docker-ce=5:29.9.3-0 docker-ce-cli=5:29.9.3-0 containerd.io=2.4.2-4 \
       docker-buildx-plugin=0.38.2-0 \
-      nodejs-24=24.22.2-0 npm=11.21.1-1 \
-      python-3.14=3.14.10-3 python-3.14-minimal=3.14.10-3 \
-      libpython-3.14=3.14.10-3 libpython-3.14-minimal=3.14.10-3 \
-      libpython-3.14-stdlib=3.14.10-3 python3-pip=26.2.2-0 python3-pip-whl=26.2.2-0 \
+      nodejs-24=24.22.2-0 npm=11.21.2-1 \
+      python-3.14=3.14.10-5 python-3.14-minimal=3.14.10-5 \
+      libpython-3.14=3.14.10-5 libpython-3.14-minimal=3.14.10-5 \
+      libpython-3.14-stdlib=3.14.10-5 python3-pip=26.3-0 python3-pip-whl=26.3-0 \
       python3-setuptools-whl=84.2.1-0 python3-wheel=0.48.0-0 \
       sudo passwd ca-certificates curl git openssh-client less procps jq \
       gcc libc6-dev make zsh vim \
@@ -115,13 +115,15 @@ if [ -d /etc/profile.d ]; then
     unset _f
 fi
 EOF
-COPY image-repair /tmp/marsh-image-repair
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
-RUN python3 -I -S /tmp/marsh-image-repair/repair.py \
- && rm -rf /tmp/marsh-image-repair \
- && command -v sudo && command -v visudo && command -v useradd && command -v getent \
+RUN command -v sudo && command -v visudo && command -v useradd && command -v getent \
  && command -v docker && command -v dockerd \
- && command -v gcc && command -v node && command -v npm && command -v make && command -v python3
+ && command -v gcc && command -v make \
+ && node --version && npm --version && python3 --version \
+ && python3 -m pip --version \
+ && python3 -m venv /tmp/marsh-python-smoke \
+ && /tmp/marsh-python-smoke/bin/python -m pip --version \
+ && rm -rf /tmp/marsh-python-smoke
 COPY --from=rust /usr/local/cargo/ /usr/local/cargo/
 COPY --from=rust /usr/local/rustup/ /usr/local/rustup/
 # Any shell UID (the Mac user's) may use the shared registry cache.

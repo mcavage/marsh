@@ -134,7 +134,7 @@ class ImageCallerTests(unittest.TestCase):
         (self.source / "packaging/shell/editors").mkdir()
         (self.source / "packaging/shell/editors/input").write_text("controlled editor input\n")
         (self.source / "packaging/shell-image").write_text("example/base@sha256:" + "b" * 64 + "\n")
-        for name in ("image-base", "image-repair", "dhi-notices/collected"):
+        for name in ("image-base", "dhi-notices/collected"):
             directory = self.source / "packaging" / name
             directory.mkdir(parents=True)
             (directory / "NOTICE").write_text("controlled notice\n")

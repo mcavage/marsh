@@ -111,18 +111,20 @@ removes its VMs, only by the recorded VM name and UUID
 CI splits `make test` into its pieces (`make lint`, `test-unit`,
 `test-callers`, `test-bash`, `test-entrypoints`, `test-tools`, `test-model`)
 and runs them as parallel jobs; `CI passed` is the one required check. A pull
-request runs only the lanes its files need (`scripts/ci-changes.sh`): a
-docs-only change runs just the docs and link checks, and the macOS jobs run
-when crates, Cargo files, tests, vendor, the Makefile or the toolchain changed.
-Linux arm64 runs everything, including the shell's Bash differential tests
-(against GNU Bash 5.3). On a pull request macOS runs clippy, the host side of
-the workspace tests (`make test-unit TEST_SCOPE=host`: everything but the
-platform-neutral guest worker, contract values, Bash audit and the `cargo check`
-probe of marsh-acp's public API), the binary
-callers and the entrypoint harnesses. A merge to `main` also runs the full
-workspace tests and the tooling self-tests on macOS, every TLA+ config but the
-huge one (which runs weekly, and in `make regress` before every release: [model.yml](.github/workflows/model.yml)), and the
-docs and link checks. The macOS release build runs in the nightly and release
+request and a push to main run only the lanes their changed files need
+(`scripts/ci-changes.sh`). Documentation runs the docs/link checks; image inputs
+run image builds and tooling tests without compiling Rust; Rust changes run the
+Linux and macOS code lanes. Linux runs the full workspace and Bash differential
+tests (against GNU Bash 5.3). macOS PR jobs split the host tests between two
+runners; selected macOS jobs on main also run the platform-neutral workspace
+tests and tooling self-tests. Manual CI runs check everything.
+
+TLA+ checks run when specs, configs, their runner or shared build/CI inputs
+change. Normal CI excludes the huge configs; those run weekly and in
+`make regress` before releases ([model.yml](.github/workflows/model.yml)).
+Per-commit image publishing runs only when the passing CI run built images.
+Stable and daily nightly releases keep their full build pipeline.
+The macOS release build runs in the nightly and release
 workflows, not in CI. Rust jobs use content-addressed `sccache` compiler
 results across source changes. The isolated Python harness tests run
 concurrently (`HARNESS_JOBS=3`; set it to 1 to serialize). Host-side tests use

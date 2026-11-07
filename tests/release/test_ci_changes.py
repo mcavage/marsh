@@ -1,10 +1,10 @@
-"""scripts/ci-changes.sh: which CI lanes a change's files need."""
+"""File selection for CI builds, model checking and image publication."""
 import pathlib
 import subprocess
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts/ci-changes.sh"
-LANES = ("code", "host", "model", "images", "renovate")
+LANES = ("code", "host", "tools", "model", "images", "renovate")
 
 
 def classify(*files):
@@ -18,42 +18,49 @@ class CiChanges(unittest.TestCase):
         expected = {lane: str(lane in lanes).lower() for lane in LANES}
         self.assertEqual(classify(*files), expected, files)
 
-    def test_documentation_and_metadata_need_no_code_lane(self):
-        self.check(["docs/split.md"])
-        self.check(["docs/design/processes.md", "docs/site/style.css", "README.md", "CONTRIBUTING.md"])
-        self.check([".github/CODEOWNERS"])
+    def test_documentation_needs_no_build_or_model_lane(self):
+        self.check(["docs/split.md", "README.md", "CONTRIBUTING.md"])
+        self.check(["docs/model/README.md"])
 
-    def test_renovate_config_runs_only_its_validator(self):
-        self.check([".github/renovate.json5"], "renovate")
-        self.check([".github/renovate-version"], "code", "renovate")
-        self.check(["tests/release/renovate-policy.mjs"], "code", "host", "renovate")
+    def test_renovate_configuration_runs_tooling_and_its_validator(self):
+        for path in (".github/renovate.json5", ".github/renovate-version",
+                     "tests/release/renovate-policy.mjs"):
+            self.check([path], "tools", "renovate")
 
-    def test_model_and_patch_queue_under_docs_are_code(self):
-        self.check(["docs/model/Worker.tla"], "code", "model")
-        self.check(["docs/model/check.sh"], "code", "model")
-        self.check(["docs/upstream/brush/0042-x.patch", "docs/split.md"], "code")
+    def test_model_inputs_run_only_the_model_lane(self):
+        for path in ("docs/model/Worker.tla", "docs/model/Worker.cfg", "docs/model/check.sh"):
+            self.check([path], "model")
+        self.check([".github/workflows/model.yml"], "tools", "model")
 
-    def test_kits_and_packaging_run_linux_and_images_but_not_the_mac_host_tests(self):
-        self.check(["kits/marsh-claude/claude.yaml"], "code", "images")
-        self.check(["packaging/shell/Dockerfile", "kits/marsh-pi/package-lock.json"], "code", "images")
-        self.check(["scripts/publish-kits.py"], "code", "images")
-        self.check(["scripts/third-party-notices.py"], "code")
+    def test_image_only_updates_skip_rust_and_models(self):
+        self.check(["kits/marsh-claude/claude.yaml"], "tools", "images")
+        self.check(["packaging/shell/Dockerfile", "kits/marsh-pi/package-lock.json",
+                    "tests/acceptance/fixture/fixture.dockerfile",
+                    "tests/acceptance/acp-fixture/acp-fixture.dockerfile"], "tools", "images")
+        self.check(["scripts/publish-kits.py"], "tools", "images")
+        self.check(["scripts/third-party-notices.py"], "tools")
 
-    def test_host_paths_run_the_mac_host_tests(self):
+    def test_rust_and_real_binary_callers_run_both_platforms(self):
         for path in ("crates/marsh-sbx/src/lib.rs", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml",
-                     "vendor/brush/src/lib.rs", "tests/release/test_site.py", ".config/nextest.toml"):
-            self.check([path], "code", "host")
-        self.check(["Makefile"], "code", "host", "model")
+                     "vendor/brush/src/lib.rs", "docs/upstream/brush/0042-x.patch", ".config/nextest.toml", "tests/mcp/test_stdio.py",
+                     "tests/acceptance/onboarding.py", "tests/acceptance/acp-fixture/typed_host_caller.py",
+                     "tests/acceptance/bash_suites.py"):
+            self.check([path], "code", "host", "tools")
+        self.check(["Makefile"], "code", "host", "tools", "model", "images")
+
+    def test_tool_self_tests_do_not_compile_rust(self):
+        self.check(["tests/release/test_site.py", "tests/acceptance/test_image_preparation.py"], "tools")
 
     def test_ci_itself_runs_every_lane(self):
         self.check([".github/workflows/ci.yml"], *LANES)
         self.check(["scripts/ci-changes.sh"], *LANES)
 
-    def test_any_code_file_beside_documentation_runs_everything_it_touches(self):
-        self.check(["docs/split.md", "crates/marsh/src/main.rs"], "code", "host")
+    def test_combined_changes_run_the_union_of_lanes(self):
+        self.check(["docs/split.md", "crates/marsh/src/main.rs", "packaging/shell-image"],
+                   "code", "host", "tools", "images")
 
-    def test_workflows_other_than_ci_are_code_but_not_host(self):
-        self.check([".github/workflows/release.yml"], "code")
+    def test_release_workflow_runs_tooling_without_building_images(self):
+        self.check([".github/workflows/release.yml"], "tools")
 
     def test_an_empty_list_runs_everything(self):
         self.check([], *LANES)

@@ -18,7 +18,7 @@ name: Release
 #            and :<version>; prune-nightlies.yml trims them the same way) and
 #            the Homebrew formula `marsh-nightly`. A manual run without a
 #            version publishes a nightly from the selected ref any time.
-#   per commit  every commit on main whose CI run passed runs only the version
+#   per commit  image-input changes on main whose CI passed run only the version
 #            and images stages: the Kit images are built, :nightly moves, and
 #            the stable Kit tag may move (below). No version tags are made, so
 #            the 10 kept nightly image tags stay the daily builds. The guest,
@@ -75,11 +75,11 @@ on:
         required: false
 permissions:
   contents: read
-# Stable, nightly and per-commit runs queue separately: GitHub keeps one pending
-# run per group, so a stream of per-commit runs must not replace a pending
-# release or a pending daily nightly. Nothing in progress is cancelled.
+# Stable and daily nightly releases keep their own queues. Per-commit runs
+# classify independently, so an unrelated commit cannot replace a pending
+# image publication. Only their selected image jobs share a queue (below).
 concurrency:
-  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || (github.event_name == 'workflow_run' && 'commit' || 'nightly') }}
+  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || (github.event_name == 'workflow_run' && format('commit-{0}', github.run_id) || 'nightly') }}
   cancel-in-progress: false
 env:
   KIT_REPOSITORY_PREFIX: docker.io/mcavage
@@ -117,6 +117,7 @@ jobs:
       - id: v
         env:
           INPUT: ${{ github.event.inputs.version }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -125,6 +126,17 @@ jobs:
           # all: every stage. images: the Kit images only (a per-commit run).
           # none: nothing to publish.
           stages=all
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            # Follow CI's image selection, including its conservative fallback.
+            # Unrelated commits must not rebuild or publish the Kit images.
+            image_result=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "Kit and shell images (build, no push)") | .conclusion')
+            case "$image_result" in
+              success) ;;
+              skipped) echo "No image inputs changed; nothing to publish."; echo stages=none >> "$GITHUB_OUTPUT"; exit 0 ;;
+              *) echo "::error::expected a successful or skipped CI image job, got: $image_result"; exit 1 ;;
+            esac
+          fi
           case $GITHUB_EVENT_NAME in
             push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
             workflow_dispatch)
@@ -227,6 +239,9 @@ jobs:
   images:
     needs: version
     if: needs.version.outputs.stages != 'none'
+    concurrency:
+      group: release-images-${{ github.event_name == 'workflow_run' && 'commit' || github.run_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 120
     permissions:
