@@ -1308,6 +1308,37 @@ impl LocalDaemonClient {
             .map_err(map_daemon_error)
     }
 
+    /// `marsh stop` / `marsh reset`: like [`Self::connect_existing`], but an
+    /// idle daemon of another build is replaced first (`None` then), so an
+    /// upgrade that deleted the daemon's pinned sbx cannot leave every stop
+    /// failing against it. A refused replacement keeps the resident and says
+    /// why on stderr.
+    ///
+    /// # Errors
+    /// Returns an actionable lifecycle or authentication error for unsafe or
+    /// inconsistent endpoint state.
+    pub fn connect_existing_current(home: &std::path::Path) -> Result<Option<Self>, ClientError> {
+        let relayed = std::env::var_os("MARSH_DAEMON_SOCKET").is_some()
+            || std::env::var_os("MARSH_DAEMON_TOKEN").is_some();
+        let (false, Ok(daemon), Ok(stock_sbx)) = (relayed, sibling_daemon(), resolve_stock_sbx())
+        else {
+            return Self::connect_existing(home);
+        };
+        match marsh_daemon::Client::connect_current_if_running(home, &daemon, &stock_sbx)
+            .map_err(map_daemon_error)?
+        {
+            None => Ok(None),
+            Some((client, refusal)) => {
+                if let Some(refusal) = refusal {
+                    eprintln!(
+                        "marsh: the running daemon is another marsh or sbx build and was not replaced: {refusal}"
+                    );
+                }
+                Ok(Some(Self(client, None, None)))
+            }
+        }
+    }
+
     /// Connect to the scoped daemon, starting the installed sibling `marshd`
     /// when no lifecycle artifacts exist.
     ///
@@ -1334,20 +1365,24 @@ impl LocalDaemonClient {
                 ));
             }
         }
-        // Resolve symlinks so a linked `marsh` (Homebrew's bin/) finds the
-        // marshd of its own release tree.
-        let executable = std::env::current_exe()
-            .and_then(std::fs::canonicalize)
-            .map_err(|error| ClientError(format!("cannot locate marsh: {error}")))?;
-        let daemon = executable
-            .parent()
-            .ok_or_else(|| ClientError("marsh has no executable directory".into()))?
-            .join("marshd");
+        let daemon = sibling_daemon()?;
         let stock_sbx = resolve_stock_sbx()?;
         marsh_daemon::Client::ensure_running(home, &daemon, &stock_sbx)
             .map(|client| Self(client, None, None))
             .map_err(map_daemon_error)
     }
+}
+
+/// The `marshd` of this `marsh`'s release tree. Symlinks are resolved so a
+/// linked `marsh` (Homebrew's bin/) finds its own sibling.
+fn sibling_daemon() -> Result<PathBuf, ClientError> {
+    let executable = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| ClientError(format!("cannot locate marsh: {error}")))?;
+    Ok(executable
+        .parent()
+        .ok_or_else(|| ClientError("marsh has no executable directory".into()))?
+        .join("marshd"))
 }
 
 /// The one install instruction for stock SBX. The Homebrew formula's caveats
