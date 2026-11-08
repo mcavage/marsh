@@ -3,6 +3,6 @@
   "private": true,
   "version": "0.1.0",
   "dependencies": {
-    "@agentclientprotocol/codex-acp": "2.5.0"
+    "@agentclientprotocol/codex-acp": "2.6.0"
   }
 }
