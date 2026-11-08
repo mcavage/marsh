@@ -3166,6 +3166,56 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
     task.join().unwrap();
 }
 
+/// `marsh stop` / `marsh reset` after an upgrade deleted the daemon's sbx:
+/// they replace it rather than ask it for cleanup it cannot verify, and keep
+/// a daemon with live work, saying why.
+#[test]
+fn stop_and_reset_replace_a_daemon_whose_stock_sbx_was_removed() {
+    let home = home();
+    let old_sbx = stock_sbx(b"stock-sbx-old");
+    let new_sbx = stock_sbx(b"stock-sbx-new");
+    let server = Arc::new(Server::bind_with_stock_sbx(home.path(), old_sbx.path()).unwrap());
+    let uncertain = server
+        .store
+        .attach_shell(1, authority("/Users/example/project", home.path()));
+    server.store.mark_shell_cleanup_uncertain(&uncertain);
+    let task_server = Arc::clone(&server);
+    let task = thread::spawn(move || task_server.serve_until(|| false).unwrap());
+    let store = server.store.clone();
+    drop(server);
+    let executable = std::env::current_exe().unwrap();
+    old_sbx.close().unwrap();
+
+    let attached = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    let (resident, refusal) =
+        Client::connect_current_if_running(home.path(), &executable, new_sbx.path())
+            .unwrap()
+            .expect("a daemon with live work is kept");
+    assert!(
+        matches!(&refusal, Some(DaemonError::Remote(message)) if message.contains(STOCK_SBX_REMOVED)),
+        "{refusal:?}"
+    );
+    assert!(matches!(
+        resident.request(PublicRequest::Ping).unwrap(),
+        PublicReply::Pong { .. }
+    ));
+
+    store.detach_shell(&attached).unwrap();
+    assert!(
+        Client::connect_current_if_running(home.path(), &executable, new_sbx.path())
+            .unwrap()
+            .is_none()
+    );
+    task.join().unwrap();
+    assert!(
+        Client::connect_if_running(home.path()).unwrap().is_none(),
+        "the replaced daemon released its endpoint"
+    );
+}
+
 /// How a stand-in successor behaves.
 #[derive(Clone, Copy, PartialEq)]
 enum StandIn {

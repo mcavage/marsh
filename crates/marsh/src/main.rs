@@ -900,9 +900,11 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
                 cli::ProductCommand::Reset { .. } | cli::ProductCommand::Stop { .. }
             );
             let existing = if lifecycle_only {
-                match LocalDaemonClient::connect_existing(&daemon_home).map_err(|error| {
-                    RunError::new(format!("cannot connect to the local daemon: {error}"), 1)
-                })? {
+                match LocalDaemonClient::connect_existing_current(&daemon_home).map_err(
+                    |error| {
+                        RunError::new(format!("cannot connect to the local daemon: {error}"), 1)
+                    },
+                )? {
                     Some(client) => Some(client),
                     // VMs are recorded: start the daemon (as `marsh status`
                     // does) and let it clean them up.

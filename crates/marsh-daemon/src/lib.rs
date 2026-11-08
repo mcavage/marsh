@@ -7731,6 +7731,18 @@ impl Client {
         daemon_startup::ensure_running(home, daemon_program, stock_sbx)
     }
 
+    /// Connect to a live daemon without starting one, first replacing an
+    /// idle daemon of another build (`ensure_running`'s rule). `None` when
+    /// no daemon runs, or the replaced one is gone. A refused replacement
+    /// keeps the resident and returns the refusal beside it.
+    pub fn connect_current_if_running(
+        home: &Path,
+        daemon_program: &Path,
+        stock_sbx: &Path,
+    ) -> Result<Option<(Self, Option<DaemonError>)>, DaemonError> {
+        daemon_startup::connect_current_if_running(home, daemon_program, stock_sbx)
+    }
+
     fn reconcile_resident(
         home: &Path,
         paths: &EndpointPaths,

@@ -277,6 +277,40 @@ fn ready_client(home: &Path, identity: &str) -> Option<Client> {
     }
 }
 
+/// `marsh stop` / `marsh reset`: the running daemon, never starting one.
+/// A daemon of another build (an older marsh, or one pinned to an sbx that
+/// an upgrade deleted, which can verify no cleanup) is replaced when idle, as
+/// `ensure_running` does; `None` then lets the caller start this build's
+/// daemon to do the cleanup. A replacement it refuses (live work) keeps the
+/// resident, with the refusal for the caller to show.
+pub(super) fn connect_current_if_running(
+    home: &Path,
+    daemon: &Path,
+    stock: &Path,
+) -> Result<Option<(Client, Option<DaemonError>)>, DaemonError> {
+    let Some(resident) = Client::connect_if_running(home)? else {
+        return Ok(None);
+    };
+    let identity = match (
+        super::canonical_executable(daemon),
+        super::canonical_executable(stock),
+    ) {
+        (Ok(daemon), Ok(stock)) => super::runtime_identity(&daemon, &stock)?,
+        // This build cannot start a daemon either: use the resident.
+        _ => return Ok(Some((resident, None))),
+    };
+    if let Some(client) = ready_client(home, &identity) {
+        return Ok(Some((client, None)));
+    }
+    let paths = EndpointPaths::for_home(home)?;
+    let _launch = launch_lock(&paths, Instant::now() + STARTUP_TIMEOUT)?;
+    match Client::reconcile_resident(home, &paths, &identity) {
+        Ok(Some(client)) => Ok(Some((client, None))),
+        Ok(None) => Ok(Client::connect_if_running(home)?.map(|client| (client, None))),
+        Err(refusal) => Ok(Client::connect_if_running(home)?.map(|client| (client, Some(refusal)))),
+    }
+}
+
 pub(super) fn ensure_running(
     home: &Path,
     daemon: &Path,
