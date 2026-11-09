@@ -30,7 +30,7 @@ use std::{
         mpsc,
     },
     thread::{self, Scope},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// Test breaks of the daemon's half (`docs/design/test-breaks.md`).
@@ -510,6 +510,23 @@ fn serve<'scope, 'env>(
         .remove(&channel);
 }
 
+/// How long the port watcher waits before it looks for the project's relay
+/// again, and between two looks at `closed`. The job's end joins the watcher,
+/// so a long wait here is added to every job of a project with Docker on.
+const WATCH_RETRY: Duration = Duration::from_millis(500);
+const WATCH_SLICE: Duration = Duration::from_millis(20);
+
+/// Sleeps up to `total`, returning early once `closed` is set.
+fn pause(closed: &AtomicBool, total: Duration) {
+    let deadline = Instant::now() + total;
+    while !closed.load(Ordering::Acquire) {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            return;
+        };
+        thread::sleep(left.min(WATCH_SLICE));
+    }
+}
+
 /// Follows the project's relay and hands every change of `workspace`'s
 /// published ports to `send` (which returns `false` when its peer is gone),
 /// as the numbers the job listens on: in a lane, the original port numbers
@@ -533,11 +550,11 @@ fn watch(
             .and_then(|relays| relays.get(root).ok())
             .map(|entry| entry.relay().clone())
         else {
-            thread::sleep(Duration::from_millis(500));
+            pause(closed, WATCH_RETRY);
             continue;
         };
         let Ok(mut subscription) = relay.ports(workspace) else {
-            thread::sleep(Duration::from_millis(500));
+            pause(closed, WATCH_RETRY);
             continue;
         };
         acquired();
@@ -545,7 +562,7 @@ fn watch(
         // restore, which may be after the first report.
         let mut mapped_at = backend.lane_generation(workspace);
         while !closed.load(Ordering::Acquire) {
-            let changed = subscription.wait_change(Duration::from_millis(500));
+            let changed = subscription.wait_change(WATCH_SLICE);
             let generation = backend.lane_generation(workspace);
             if changed.is_none() {
                 if relay.closed().is_some() {

@@ -352,6 +352,10 @@ impl StockDaemonBackend {
                     .map_err(|error| {
                         quarantine_hint(error, &command, self.recovery_note(&spec.name).as_deref())
                     })?;
+                // Read the Kit's skills and instructions now: they are cached
+                // per image, so the first job after `--load` does not wait on
+                // the registry. A failure is reported again when a job needs them.
+                let _ = self.kit_assets(vm.job_image());
                 let mut grants = grants_by_command[&command].clone();
                 if self.kit_wants_no_home(&command, &spec.workload_kit)? {
                     grants.retain(|grant| grant.target() != session.guest_home);
@@ -1786,11 +1790,12 @@ impl DaemonBackend for StockDaemonBackend {
             .into_iter()
             .filter_map(|name| {
                 let kit = self.registered_kit(&name).ok()?;
-                let agent = kit
-                    .workload
-                    .capture_generation()
-                    .ok()
-                    .and_then(|exact| self.status_kit_agent(&exact));
+                // Every job reads this catalog: a local Kit's files are not
+                // read in full again while they are unchanged.
+                let exact = kit.workload.capture_generation_memoized().ok();
+                let agent = exact
+                    .as_ref()
+                    .and_then(|exact| self.status_kit_agent(exact));
                 Some(marsh_daemon::CommandStatus {
                     reference: kit.workload.identity().to_owned(),
                     acp: agent.as_ref().map(|agent| agent.acp.is_some()),
@@ -1803,11 +1808,9 @@ impl DaemonBackend for StockDaemonBackend {
                         .map(|agent| agent.reaches.clone())
                         .unwrap_or_default(),
                     sessions: agent.and_then(|agent| agent.sessions),
-                    descriptor: kit
-                        .workload
-                        .capture_generation()
-                        .ok()
-                        .and_then(|exact| self.descriptor_status(&exact)),
+                    descriptor: exact
+                        .as_ref()
+                        .and_then(|exact| self.descriptor_status(exact)),
                     name,
                 })
             })
@@ -2193,7 +2196,12 @@ impl DaemonBackend for StockDaemonBackend {
             self.environment(&request.command)
         };
         if link.parent_job.is_none() && !link.branch {
-            self.send_inside_project_notes(&request.session, &extra_environment, &attachment);
+            self.send_inside_project_notes(
+                &request.session,
+                &extra_environment,
+                &attachment,
+                false,
+            );
         }
         // Validate every added source before VM preparation or MCP effects.
         let extra_environment = Self::session_environment(&request.session, &extra_environment)?;
@@ -3144,7 +3152,12 @@ impl DaemonBackend for StockDaemonBackend {
                 } else {
                     self.environment("shell")
                 };
-                self.send_inside_project_notes(&request.session, &shell_environment, &attachment);
+                self.send_inside_project_notes(
+                    &request.session,
+                    &shell_environment,
+                    &attachment,
+                    true,
+                );
                 admitted_mounts
                     .extend(self.additional_grants(&request.session, &shell_environment)?);
                 if let Some((_, grant)) = &dev_grant {

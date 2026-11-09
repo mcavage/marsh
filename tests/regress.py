@@ -704,6 +704,13 @@ def main() -> int:
         if check.returncode != 0:
             print("regress: make check failed; not starting the suites", file=sys.stderr)
             return 1
+    if any(suite.family == "services" for suite in suites):
+        # The services suites load these image tars into the engine; `save` keeps tars already there.
+        saved = subprocess.run([sys.executable, str(ACCEPTANCE / "services" / "fixtures" / "image_cache.py"), "save"],
+                               cwd=CHECKOUT, env=clean_environment())
+        if saved.returncode != 0:
+            print("regress: image_cache.py save failed; not starting the suites", file=sys.stderr)
+            return 1
     code, summary = execute(plan, suites)
     summary["suites"] = pre + summary["suites"]
     summary["wall_seconds"] = round(summary["wall_seconds"] + sum(r["seconds"] for r in pre), 1)

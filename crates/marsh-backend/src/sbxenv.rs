@@ -746,12 +746,15 @@ impl StockDaemonBackend {
     }
 
     /// One stderr line per session and folder for each extra folder that is
-    /// skipped because the project already contains it.
+    /// skipped because the project already contains it. A shell's client
+    /// accepts only notices until the shell is ready, so `shell` sends the
+    /// line as one.
     pub(crate) fn send_inside_project_notes(
         &self,
         session: &SessionSpec,
         environment: &Environment,
         attachment: &ServerAttachment,
+        shell: bool,
     ) {
         let Ok((_, inside)) = Self::fit_environment(session, environment) else {
             return;
@@ -768,12 +771,16 @@ impl StockDaemonBackend {
                         .insert((session.session_id.clone(), path.clone()))
             };
             if fresh {
-                let _ = attachment.send(&marsh_daemon::AttachmentFrame::Stderr {
-                    bytes: format!(
-                        "marsh: {} is inside the project; already visible\n",
-                        tilde(&path)
-                    )
-                    .into_bytes(),
+                let line = format!(
+                    "marsh: {} is inside the project; already visible",
+                    tilde(&path)
+                );
+                let _ = attachment.send(&if shell {
+                    marsh_daemon::AttachmentFrame::Notice { message: line }
+                } else {
+                    marsh_daemon::AttachmentFrame::Stderr {
+                        bytes: format!("{line}\n").into_bytes(),
+                    }
                 });
             }
         }

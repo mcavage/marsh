@@ -706,7 +706,8 @@ class Processes(ScenarioSuite):
     def cap_socket_cap(self) -> None:
         """s3 socket fixes: >= 12 concurrent connections admitted; excess ones get a refusal frame, not a drop."""
         before = self.job_ids()
-        completed = self.injob("/usr/local/bin/marsh-fixture cap-flood 24; fixture identity; echo after=$?",
+        # The cap is FAN_OUT_MAX + 4 = 132 (docs/design/processes.md s3), so flood past it.
+        completed = self.injob("/usr/local/bin/marsh-fixture cap-flood 140; fixture identity; echo after=$?",
                                shell="/bin/sh")
         lines = [line for line in text(completed.stdout).splitlines() if line.startswith("[")]
         require(lines, f"cap-flood produced no report: {text(completed.stderr)[-400:]!r}")

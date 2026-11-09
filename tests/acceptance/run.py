@@ -1064,7 +1064,8 @@ class Harness(IsolatedScope):
                 raise AssertionError("no ready fixture worker advertised capacity")
             worker = workers[-1]
             capacity = worker.get("container_capacity")
-            if not isinstance(capacity, int) or not 1 <= capacity <= 16:
+            # WORKER_CONTAINER_CAPACITY is 64 since 0.3.13 (bigger defaults), equal to the daemon's job pool.
+            if not isinstance(capacity, int) or not 1 <= capacity <= 64:
                 raise AssertionError(f"worker advertised invalid bounded capacity: {capacity!r}")
             gates: list[dict[str, Any]] = []
             overflow: dict[str, Any] | None = None
@@ -1449,7 +1450,10 @@ class Harness(IsolatedScope):
 
         def authority() -> None:
             report = json.loads(self.gated_shell(["authority"]).stdout)
-            if report != {"sockets": [], "authority_env": []}:
+            # Docker is on by default: marsh itself sets DOCKER_HOST to the project's filtered
+            # endpoint (docs/docker.md). The fixture lists names only, so that is the one
+            # allowed name; no stock runtime socket or other variable may appear.
+            if report["sockets"] != [] or report["authority_env"] not in ([], ["DOCKER_HOST"]):
                 raise AssertionError(f"job received runtime authority: {report}")
 
         self.mark("no-runtime-authority", authority)
@@ -1749,6 +1753,7 @@ class Harness(IsolatedScope):
             raise AssertionError("held container was not active")
         victim = active[0]
         vm_id = victim.get("vm_id")
+        quarantined_uuid = stock_vm_inventory(self.sbx).get(str(vm_id))
         stopped = self.run([self.sbx, "stop", str(vm_id)], cwd=self.root, timeout=20)
         if stopped.returncode != 0:
             raise AssertionError("stock sbx could not stop the exact acceptance VM")
@@ -1760,19 +1765,22 @@ class Harness(IsolatedScope):
         worker = next((item for item in after.get("workers", []) if item.get("worker_id") == victim.get("worker_id")), None)
         if not run or run.get("cleanup") != "uncertain" or not worker or worker.get("health") != "quarantined":
             raise AssertionError("uncertain cleanup did not quarantine the affected worker")
-        rejected = self.shell("fixture identity", timeout=30)
-        if rejected.returncode == 0:
-            raise AssertionError("a command reused the quarantined worker")
-        message = rejected.stderr.decode(errors="replace").lower()
-        if not any(word in message for word in ("quarantined", "unhealthy", "capacity")):
-            raise AssertionError(f"quarantine rejection was not actionable: {rejected.stderr!r}")
+        # Worker quarantine is self-healing (docs/architecture.md): the VM is stopped, so no job
+        # can still run there, and the next command replaces it and says why. What must hold is
+        # that the quarantined VM itself is never reused and its job stays uncertain.
+        # The replacement keeps the VM's name under a new stable ID: re-learn it.
+        self.owned_vm_identities.pop(str(vm_id), None)
+        replaced = self.shell("fixture identity", timeout=120)
+        message = replaced.stderr.decode(errors="replace").lower()
+        if replaced.returncode != 0 or "replacing the fixture worker vm" not in message or "quarantined because" not in message:
+            raise AssertionError(f"a stopped quarantined VM was not replaced with an explanation: {replaced.stderr!r}")
         final = self.state_snapshot("quarantined-worker-not-reused")
-        if any(
-            item.get("state") == "running"
-            and (item.get("vm_id") == vm_id or item.get("worker_id") == victim.get("worker_id"))
-            for item in self.runs(final)
-        ):
-            raise AssertionError("a quarantined worker or VM was reused")
+        replacement_uuid = stock_vm_inventory(self.sbx).get(str(vm_id))
+        if not replacement_uuid or replacement_uuid == quarantined_uuid:
+            raise AssertionError("the quarantined VM was reused instead of replaced")
+        run = next((item for item in self.runs(final) if item.get("job_id") == victim.get("job_id")), None)
+        if not run or run.get("cleanup") != "uncertain":
+            raise AssertionError("the uncertain job's receipt changed when its worker was replaced")
 
 
 

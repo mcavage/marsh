@@ -416,8 +416,13 @@ class Workspaces(ScenarioSuite):
             f"'cat >/dev/null; cat \"$SPLIT_DIR/e/stdout\" > \"$1\"' _ {shlex.quote(str(dest / 'host'))}",
             self.project)
         lines = (dest / "host").read_text().splitlines() if (dest / "host").exists() else []
-        require(lines[:1] == ["a b$c|unset|unset|unset|unset"],
-                f"host CLI env forwarding wrong (want exported only, minus MARSH_/SBX_/DOCKER_): {lines}")
+        # Docker is on by default: marsh itself sets DOCKER_HOST to the project's endpoint
+        # (docs/docker.md); the exported tcp:// value must never reach the branch.
+        fields = lines[0].split("|") if lines else []
+        require(len(fields) == 5 and fields[:3] == ["a b$c", "unset", "unset"] and fields[4] == "unset"
+                and fields[3].startswith("unix:///run/marsh/"),
+                f"host CLI env forwarding wrong (want exported only, minus MARSH_/SBX_/DOCKER_; "
+                f"DOCKER_HOST is marsh's own endpoint): {lines}")
         require(len(lines) == 2 and lines[1] != "tty=0", f"branch has a controlling terminal: {lines}")
         session = self.brush(
             "export E2=x; L2=y; fn() { :; }; set -f; marsh split -n -b e='echo \"${E2-unset}|${L2-unset}\"; "
