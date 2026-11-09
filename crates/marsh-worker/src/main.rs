@@ -4,6 +4,7 @@ use marsh_worker::{ThreadSupervisor, Worker, WorkerTransport, serve_retained};
 use std::{fs::File, io, os::fd::AsFd, sync::Arc};
 
 fn main() {
+    let _ = marsh_provenance::embed!();
     if let Err(error) = run() {
         eprintln!("marsh-worker: {error}");
         std::process::exit(125);

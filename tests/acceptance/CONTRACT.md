@@ -25,6 +25,27 @@ from a job in the lane and from a shell that did not create the split, `split cl
 apply`, cancel ending a live lane job, `marsh storage`, and the `marsh events`
 stream. It is included in `make verify`/`make regress`.
 
+### Services E2E (`services/services_uat.py`)
+
+The services E2E harness (`make services-e2e`, `services/README.md`) drives marsh through its public interfaces
+(`marsh`, `marsh run`, `marsh -c`, `marsh checkpoint`, `marsh split`, `marsh status --json`,
+`marsh services status --json`) and records those calls as `commands` in its evidence. Its oracles about state
+inside a services VM come from a **privileged diagnostic extension** of this contract: `vx`, the independent
+observer, which uses stock `sbx exec` into a VM that the scope's own ownership map (name and UUID) lists, and,
+for the production engine, `docker exec marsh-svc-engine` against the engine's socket. `vx` never goes through
+marsh's endpoint or marsh's JSON, is read-only unless a scenario declares a setup write, checks the VM's name and
+UUID (and the engine container against `generation.engine`) before every probe, and is recorded as
+`observations`, apart from `commands`. It reads product state, so it is **not** part of the black-box surface the
+sections above describe: nothing in the product may depend on it, and a scenario that needs a fact the public
+interface can state must use the public interface. Break modes, holds and faults (`MARSH_TEST_BREAK`) exist only
+in `test-breaks` installs, reach a daemon only when the harness launches it with the variable in its environment,
+and are never read from job, project or CLI environment.
+
+Public observations the services scenarios rely on: `services-v1` in `marsh status --json` `features` (present only
+when the build can run services), the `services` and `ignored` fields of `marsh checkpoint --json` /
+`marsh checkpoints --json` (null when services are off), `restore` per lane of `marsh split --from --json`, and the
+plain `summary` line of each project of `marsh services status --json`.
+
 `tests/acceptance/cloud_uat.py` is the opt-in live Docker Cloud family for
 `cloud { }` / `marsh cloud` (C02-C06 and C09-C12 of the
 [cloud placement design](../../docs/design/cloud-placement.md#10-observable-acceptance)).

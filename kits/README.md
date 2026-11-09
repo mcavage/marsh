@@ -126,3 +126,37 @@ A pull request that touches one builds and tests it and pushes nothing.
 | `marsh-hermes` | `docker.io/mcavage/marsh-hermes:stable` | [kit-hermes.yml](../.github/workflows/kit-hermes.yml): follows Hermes Agent's releases every six hours |
 | `marsh-tools` | `docker.io/mcavage/marsh-tools:stable` | [kit-tools.yml](../.github/workflows/kit-tools.yml): `gog` and `bamboohr` in one Kit; follows gog's releases every six hours |
 | `marsh-pix` | `docker.io/mcavage/marsh-pix:stable` | [kit-pix.yml](../.github/workflows/kit-pix.yml): follows `marsh-pi:latest` and the Pix content, which stays in [mcavage/pix](https://github.com/mcavage/pix) and is checked out at every run |
+
+## `marsh-docker-cli`: the docker CLI for any agent image
+
+`marsh-docker-cli` is a v3 **mixin**, not an agent. Its image holds only
+`/usr/local/bin/docker` (Docker's official static CLI, 29.9.3) and the Compose
+plugin (`/usr/local/lib/docker/cli-plugins/docker-compose`, v5.7.0), each
+downloaded from the vendor at build time and checked against a pinned SHA-256
+(a mismatch fails the build; move a pin by changing the version and both
+digests together). A job of a project with Docker on already has `DOCKER_HOST`
+set to the project's private endpoint, so an agent image that ships these two
+files can use it.
+
+Build it (arm64 and amd64) and publish it like any Kit:
+
+```sh
+docker buildx build -f kits/marsh-docker-cli/marsh-docker-cli.yaml \
+  -t docker.io/YOU/marsh-docker-cli:1 --platform linux/arm64,linux/amd64 --push kits/marsh-docker-cli
+```
+
+It is a mixin for `sbx` (`sbx run KIT --kit docker.io/YOU/marsh-docker-cli:1`,
+or `sbx kit add SANDBOX REFERENCE`, which adds it to a sandbox that already
+exists), and a Kit author can list it in a kit set beside an agent.
+
+The packaged agent Kits (`marsh-claude`, `marsh-codex`, `marsh-pi`) and `marsh-shell` do not need it: they already ship the docker CLI (`docker-ce-cli`) and now also the Compose plugin, fetched by `packaging/image-base/docker-compose.sh` (pinned version and SHA-256 per architecture, checked at build; their smoke stage runs `docker --version && docker compose version`). `marsh-pix` and `marsh-hermes` are built on `marsh-pi` and `marsh-shell`, so they pick it up when rebuilt on a newer base.
+
+**marsh does not apply it to a job's Kit VM by itself.** A marsh job runs in a
+fresh container of the Kit's own image inside the Kit VM, and `sbx kit add`
+changes the sandbox's container, not those job containers, so there is no
+Kit-mechanism step marsh could take when a project turns Docker on. An agent
+image that lacks `docker` gets the files in its own Dockerfile instead:
+
+```dockerfile
+COPY --from=docker.io/YOU/marsh-docker-cli:1 /usr/local/ /usr/local/
+```

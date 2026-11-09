@@ -6,10 +6,15 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Deliberate E2E behavior breaks (docs/design/test-breaks.md). Off in releases.
+test-breaks = ["marsh-contracts/test-breaks", "marsh-daemon/test-breaks", "marsh-sbx/test-breaks"]
+
 [dependencies]
 flate2 = "1"
 marsh-acp = { path = "../marsh-acp" }
 marsh-contracts = { path = "../marsh-contracts" }
+marsh-provenance = { path = "../marsh-provenance" }
 marsh-daemon = { path = "../marsh-daemon" }
 marsh-runtime = { path = "../marsh-runtime" }
 marsh-sbx = { path = "../marsh-sbx" }
@@ -23,6 +28,9 @@ sha2 = "0.11"
 similar = "3"
 signal-hook = "0.4"
 tempfile = "3.23"
+
+[build-dependencies]
+marsh-provenance = { path = "../marsh-provenance", features = ["build"] }
 
 [dev-dependencies]
 marsh-sbx = { path = "../marsh-sbx", features = ["test-support"] }

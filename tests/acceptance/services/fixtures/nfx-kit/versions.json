@@ -1,0 +1,86 @@
+{
+ "comment": "What `marsh run nfx exec sh -c '<command>'` must print for HARNESS-03 c1: one line per tool, in order, EXACTLY equal (not a prefix or major). Update here, in nfx.dockerfile's pins and in the fixture image digest together.",
+ "command": "docker --version; docker compose version; docker buildx version; psql --version; pgbench --version; redis-cli --version; curl --version | head -1; jq --version; python3 --version; node --version; npm --version; supabase --version; script --version; ss --version; sqlite3 --version; dpkg-query -W -f '${Package}=${Version}\\n' netcat-openbsd",
+ "lines": [
+  {
+   "tool": "docker",
+   "command": "docker --version",
+   "exact": "Docker version 29.9.2, build a82e528901260c8df6073311379eac65f92db204"
+  },
+  {
+   "tool": "docker compose",
+   "command": "docker compose version",
+   "exact": "Docker Compose version v5.6.1"
+  },
+  {
+   "tool": "docker buildx",
+   "command": "docker buildx version",
+   "exact": "github.com/docker/buildx v0.38.1 0dbe87f36ed472fe36b6796c3f70b4210a731fc5"
+  },
+  {
+   "tool": "psql",
+   "command": "psql --version",
+   "exact": "psql (PostgreSQL) 17.11 (Debian 17.11-0+deb13u1)"
+  },
+  {
+   "tool": "pgbench",
+   "command": "pgbench --version",
+   "exact": "pgbench (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)"
+  },
+  {
+   "tool": "redis-cli",
+   "command": "redis-cli --version",
+   "exact": "redis-cli 8.0.2"
+  },
+  {
+   "tool": "curl",
+   "command": "curl --version | head -1",
+   "exact": "curl 8.14.1 (aarch64-unknown-linux-gnu) libcurl/8.14.1 OpenSSL/3.5.7 zlib/1.3.1 brotli/1.1.0 zstd/1.5.7 libidn2/2.3.8 libpsl/0.21.2 libssh2/1.11.1 nghttp2/1.64.0 nghttp3/1.8.0 librtmp/2.3 OpenLDAP/2.6.10"
+  },
+  {
+   "tool": "jq",
+   "command": "jq --version",
+   "exact": "jq-1.7"
+  },
+  {
+   "tool": "python3",
+   "command": "python3 --version",
+   "exact": "Python 3.13.5"
+  },
+  {
+   "tool": "node",
+   "command": "node --version",
+   "exact": "v22.23.4"
+  },
+  {
+   "tool": "npm",
+   "command": "npm --version",
+   "exact": "10.9.9"
+  },
+  {
+   "tool": "supabase",
+   "command": "supabase --version",
+   "exact": "3.0.0"
+  },
+  {
+   "tool": "script",
+   "command": "script --version",
+   "exact": "script from util-linux 2.41.5"
+  },
+  {
+   "tool": "ss",
+   "command": "ss --version",
+   "exact": "ss utility, iproute2-6.15.0"
+  },
+  {
+   "tool": "sqlite3",
+   "command": "sqlite3 --version",
+   "exact": "3.46.1 2024-08-13 09:16:08 c9c2ab54ba1f5f46360f1b4f35d849cd3f080e6fc2b6c60e91b16c63f69aalt1 (64-bit)"
+  },
+  {
+   "tool": "nc",
+   "command": "dpkg-query -W -f '${Package}=${Version}\\n' netcat-openbsd",
+   "exact": "netcat-openbsd=1.229-1"
+  }
+ ]
+}

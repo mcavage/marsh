@@ -140,6 +140,7 @@ def validate_schema(value: Any, schema: dict[str, Any], path: str = "$") -> None
             "array": lambda item: isinstance(item, list),
             "string": lambda item: isinstance(item, str),
             "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
+            "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
             "boolean": lambda item: isinstance(item, bool),
             "null": lambda item: item is None,
         }

@@ -12,21 +12,24 @@
 use crate::{WorkerResponse, transport::Publisher};
 use marsh_contracts::{
     kit_assets::{KitContext, MAX_CONTEXT_BYTES},
-    process::JobCapability,
+    process::{
+        ChannelKind, ENDPOINT_CHANNEL_LIMIT, ENDPOINT_CHUNK, ENDPOINT_CREDIT_BATCH,
+        ENDPOINT_WINDOW, JobCapability,
+    },
 };
 use std::{
     collections::BTreeMap,
     fs,
     io::{Read, Write},
-    net::Shutdown,
+    net::{Shutdown, TcpStream},
     os::unix::{
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     thread,
     time::Duration,
@@ -39,22 +42,147 @@ const MAX_CHANNELS: usize = marsh_contracts::process::CONNECTION_LIMIT;
 /// Daemon-to-job chunks queued per connection before it is closed.
 const QUEUED_CHUNKS: usize = 64;
 
+/// One accepted connection: a Unix socket (`cap.sock`, `docker.sock`) or a
+/// forwarded port's TCP stream.
+pub(crate) enum Conn {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Conn {
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(match self {
+            Self::Unix(stream) => Self::Unix(stream.try_clone()?),
+            Self::Tcp(stream) => Self::Tcp(stream.try_clone()?),
+        })
+    }
+
+    fn shutdown(&self, how: Shutdown) -> std::io::Result<()> {
+        match self {
+            Self::Unix(stream) => stream.shutdown(how),
+            Self::Tcp(stream) => stream.shutdown(how),
+        }
+    }
+
+    fn set_write_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        match self {
+            Self::Unix(stream) => stream.set_write_timeout(timeout),
+            Self::Tcp(stream) => stream.set_write_timeout(timeout),
+        }
+    }
+}
+
+impl Read for Conn {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Unix(stream) => stream.read(buffer),
+            Self::Tcp(stream) => stream.read(buffer),
+        }
+    }
+}
+
+impl Write for Conn {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Unix(stream) => stream.write(bytes),
+            Self::Tcp(stream) => stream.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Unix(stream) => stream.flush(),
+            Self::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+/// Chunks of credit for one direction of an endpoint channel.
+pub(crate) struct Window {
+    state: Mutex<(u32, bool)>,
+    changed: Condvar,
+}
+
+impl Window {
+    fn new(chunks: u32) -> Self {
+        Self {
+            state: Mutex::new((chunks, false)),
+            changed: Condvar::new(),
+        }
+    }
+
+    /// Takes one chunk of credit; `false` once the window is closed.
+    fn acquire(&self) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while state.0 == 0 && !state.1 {
+            state = self
+                .changed
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        if state.1 {
+            return false;
+        }
+        state.0 -= 1;
+        true
+    }
+
+    fn add(&self, chunks: u32) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.0 = state.0.saturating_add(chunks).min(ENDPOINT_WINDOW);
+        self.changed.notify_all();
+    }
+
+    fn close(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .1 = true;
+        self.changed.notify_all();
+    }
+}
+
 /// One connection's writer: a bounded queue drained by its own thread, so a
 /// job that stops reading never blocks the worker transport.
 pub(crate) struct Channel {
-    queue: std::sync::mpsc::SyncSender<Vec<u8>>,
-    stream: UnixStream,
+    /// `None` once the daemon half-closed an endpoint channel.
+    queue: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    stream: Conn,
+    /// `None` for a `cap.sock` connection; the endpoint kinds are credited.
+    kind: Option<ChannelKind>,
+    /// Credit for the job's bytes towards the daemon.
+    window: Arc<Window>,
+    job_eof: bool,
+    daemon_eof: bool,
+}
+
+impl Channel {
+    /// Ends an endpoint or capability connection at once.
+    fn discard(self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+        self.window.close();
+    }
 }
 
 pub(crate) type Streams = Arc<Mutex<BTreeMap<(String, u32), Channel>>>;
+
+/// The attempts whose port forwards the worker serves, by attempt.
+pub(crate) type Forwarders = Arc<Mutex<BTreeMap<String, Arc<crate::forward::Forwards>>>>;
 
 pub(crate) struct Capability {
     dir: PathBuf,
     attempt: String,
     stop: Arc<AtomicBool>,
     streams: Streams,
-    accept: Option<thread::JoinHandle<()>>,
-    socket: PathBuf,
+    accepts: Vec<(thread::JoinHandle<()>, PathBuf)>,
+    forwarders: Forwarders,
+    forwards: Option<Arc<crate::forward::Forwards>>,
 }
 
 /// The refusal an excess connection reads before its EOF: the daemon's
@@ -72,6 +200,145 @@ fn refusal_frame() -> Vec<u8> {
         .to_vec();
     frame.extend_from_slice(body.as_bytes());
     frame
+}
+
+fn docker_error(status: &str, message: &str) -> Vec<u8> {
+    marsh_contracts::process::docker_error_response(status, message)
+}
+
+/// Admits connections of one attempt: `cap.sock`, `docker.sock` and the
+/// forwarded ports share one channel numbering and one table.
+#[derive(Clone)]
+pub(crate) struct Hub {
+    pub(crate) attempt: String,
+    streams: Streams,
+    pub(crate) output: Publisher,
+    next: Arc<AtomicU32>,
+}
+
+impl Hub {
+    fn new(attempt: &str, streams: Streams, output: Publisher) -> Self {
+        Self {
+            attempt: attempt.to_owned(),
+            streams,
+            output,
+            next: Arc::new(AtomicU32::new(0)),
+        }
+    }
+
+    /// Registers one accepted connection and starts its pump. `kind` is
+    /// `None` for `cap.sock`.
+    #[allow(clippy::too_many_lines)] // One admission: limit, writer thread, table, open frame, pump.
+    pub(crate) fn admit(&self, conn: Conn, kind: Option<ChannelKind>) {
+        let endpoint = kind.is_some();
+        let (limit, open) = {
+            let streams = self
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                if endpoint {
+                    ENDPOINT_CHANNEL_LIMIT
+                } else {
+                    MAX_CHANNELS
+                },
+                streams
+                    .iter()
+                    .filter(|((owner, _), channel)| {
+                        *owner == self.attempt && channel.kind.is_some() == endpoint
+                    })
+                    .count(),
+            )
+        };
+        let mut conn = conn;
+        if open >= limit {
+            // Never a silent drop: the excess connection reads one refusal.
+            let _ = conn.set_write_timeout(Some(Duration::from_secs(1)));
+            match kind {
+                None => {
+                    let _ = conn.write_all(&refusal_frame());
+                }
+                Some(ChannelKind::Docker) => {
+                    let _ = conn.write_all(&docker_error(
+                        "429 Too Many Requests",
+                        &format!(
+                            "marsh: too many open connections to the Docker endpoint in this job (limit {ENDPOINT_CHANNEL_LIMIT})"
+                        ),
+                    ));
+                }
+                Some(ChannelKind::Tcp { .. }) => {}
+            }
+            let _ = conn.shutdown(Shutdown::Both);
+            return;
+        }
+        let channel = self.next.fetch_add(1, Ordering::AcqRel) + 1;
+        let (Ok(mut writer), Ok(handle)) = (conn.try_clone(), conn.try_clone()) else {
+            return;
+        };
+        let (queue, chunks) = std::sync::mpsc::sync_channel::<Vec<u8>>(QUEUED_CHUNKS);
+        let window = Arc::new(Window::new(ENDPOINT_WINDOW));
+        let (credit_output, credit_attempt) = (self.output.clone(), self.attempt.clone());
+        thread::spawn(move || {
+            let mut written = 0_u32;
+            for chunk in chunks {
+                if writer.write_all(&chunk).is_err() {
+                    break;
+                }
+                if endpoint {
+                    written += 1;
+                    if written.is_multiple_of(ENDPOINT_CREDIT_BATCH) {
+                        // Never the non-blocking `control` path: a credit lost to a
+                        // momentarily full spool would stall the channel for good.
+                        let _ = credit_output.send(&WorkerResponse::ChanCredit {
+                            attempt: credit_attempt.clone(),
+                            channel,
+                            chunks: ENDPOINT_CREDIT_BATCH,
+                        });
+                    }
+                }
+            }
+            // The daemon closed: deliver EOF after the data.
+            let _ = writer.shutdown(Shutdown::Write);
+        });
+        self.streams
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                (self.attempt.clone(), channel),
+                Channel {
+                    queue: Some(queue),
+                    stream: handle,
+                    kind,
+                    window: Arc::clone(&window),
+                    job_eof: false,
+                    daemon_eof: false,
+                },
+            );
+        let opened = match kind {
+            None => self.output.control(&WorkerResponse::CapOpen {
+                attempt: self.attempt.clone(),
+                channel,
+            }),
+            // Blocking publication: an endpoint channel is never opened half way.
+            Some(kind) => self.output.send(&WorkerResponse::ChanOpen {
+                attempt: self.attempt.clone(),
+                channel,
+                kind,
+            }),
+        };
+        if opened.is_err() && endpoint {
+            let removed = self
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&(self.attempt.clone(), channel));
+            if let Some(open) = removed {
+                open.discard();
+            }
+            return;
+        }
+        pump(conn, self.clone(), channel, kind, window);
+    }
 }
 
 /// Write the read-only parts of `/run/marsh`: links, context, mountpoint.
@@ -118,6 +385,13 @@ fn publish(dir: &Path, capability: &JobCapability) -> std::io::Result<()> {
             text.push_str(section);
             text.push('\n');
         }
+    }
+    if capability.services.is_some() {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push('\n');
+        text.push_str(marsh_contracts::process::DOCKER_CONTEXT);
     }
     for body in &capability.kit.contexts {
         if let Some(body) = kit_context(body) {
@@ -176,7 +450,33 @@ fn valid_link(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
+/// One blocking accept loop for one of the attempt's sockets.
+fn accept_loop(listener: &UnixListener, hub: &Hub, stop: &AtomicBool, kind: Option<ChannelKind>) {
+    // Blocking accept; `Drop` wakes it with one local connection.
+    while !stop.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                let _ = stream.set_nonblocking(false);
+                hub.admit(Conn::Unix(stream), kind);
+            }
+            Err(_) => thread::sleep(Duration::from_millis(5)),
+        }
+    }
+}
+
+/// A socket in the capability directory, owned by the job's uid and gid, 0600.
+fn bind_private(path: &Path, uid: u32, gid: u32) -> std::io::Result<UnixListener> {
+    let listener = UnixListener::bind(path)?;
+    std::os::unix::fs::chown(path, Some(uid), Some(gid))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(listener)
+}
+
 impl Capability {
+    #[allow(clippy::too_many_arguments)] // One attempt's whole endpoint; each is a distinct input.
     pub(crate) fn start(
         attempt: &str,
         uid: u32,
@@ -184,6 +484,9 @@ impl Capability {
         output: Publisher,
         streams: Streams,
         capability: &JobCapability,
+        forwarders: Forwarders,
+        runtime: Arc<dyn marsh_runtime::JobRuntime>,
+        container: Arc<Mutex<Option<marsh_contracts::ContainerId>>>,
     ) -> std::io::Result<Self> {
         let dir = Path::new(ROOT).join(attempt);
         fs::create_dir_all(ROOT)?;
@@ -192,83 +495,46 @@ impl Capability {
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755))?;
         publish(&dir, capability)?;
         let stop = Arc::new(AtomicBool::new(false));
+        let hub = Hub::new(attempt, Arc::clone(&streams), output);
         let socket = dir.join("cap.sock");
-        let listener = UnixListener::bind(&socket)?;
-        std::os::unix::fs::chown(&socket, Some(uid), Some(gid))?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
-        let accept = {
-            let stop = Arc::clone(&stop);
-            let streams = Arc::clone(&streams);
-            let attempt = attempt.to_owned();
-            thread::spawn(move || {
-                let mut channel = 0_u32;
-                // Blocking accept; `Drop` wakes it with one local connection.
-                while !stop.load(Ordering::Acquire) {
-                    match listener.accept() {
-                        Ok((mut stream, _)) => {
-                            if stop.load(Ordering::Acquire) {
-                                break;
-                            }
-                            let open = streams
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .keys()
-                                .filter(|(owner, _)| *owner == attempt)
-                                .count();
-                            if open >= MAX_CHANNELS {
-                                // Never a silent drop: the excess connection
-                                // reads one refusal frame, then EOF.
-                                let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-                                let _ = stream.write_all(&refusal_frame());
-                                let _ = stream.shutdown(Shutdown::Both);
-                                continue;
-                            }
-                            channel += 1;
-                            let _ = stream.set_nonblocking(false);
-                            let (Ok(mut writer), Ok(handle)) =
-                                (stream.try_clone(), stream.try_clone())
-                            else {
-                                continue;
-                            };
-                            let (queue, chunks) =
-                                std::sync::mpsc::sync_channel::<Vec<u8>>(QUEUED_CHUNKS);
-                            thread::spawn(move || {
-                                for chunk in chunks {
-                                    if writer.write_all(&chunk).is_err() {
-                                        break;
-                                    }
-                                }
-                                // The daemon closed: deliver EOF after the data.
-                                let _ = writer.shutdown(Shutdown::Write);
-                            });
-                            streams
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .insert(
-                                    (attempt.clone(), channel),
-                                    Channel {
-                                        queue,
-                                        stream: handle,
-                                    },
-                                );
-                            let _ = output.control(&WorkerResponse::CapOpen {
-                                attempt: attempt.clone(),
-                                channel,
-                            });
-                            pump(stream, attempt.clone(), channel, output.clone());
-                        }
-                        Err(_) => thread::sleep(Duration::from_millis(5)),
-                    }
-                }
-            })
+        let mut sockets = vec![(bind_private(&socket, uid, gid)?, socket, None)];
+        // A job of a services-enabled project also gets the filtered Docker
+        // endpoint and its port forwards (E2); every other job gets neither.
+        let forwards = if let Some(endpoint) = &capability.services {
+            marsh_contracts::test_breaks::attest_guest(&endpoint.breaks);
+            let socket = dir.join("docker.sock");
+            sockets.push((
+                bind_private(&socket, uid, gid)?,
+                socket,
+                Some(ChannelKind::Docker),
+            ));
+            let forwards = crate::forward::Forwards::start(hub.clone(), runtime, container);
+            forwarders
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(attempt.to_owned(), Arc::clone(&forwards));
+            Some(forwards)
+        } else {
+            None
         };
+        let accepts = sockets
+            .into_iter()
+            .map(|(listener, socket, kind)| {
+                let (hub, stop) = (hub.clone(), Arc::clone(&stop));
+                (
+                    thread::spawn(move || accept_loop(&listener, &hub, &stop, kind)),
+                    socket,
+                )
+            })
+            .collect();
         Ok(Self {
             dir,
             attempt: attempt.to_owned(),
             stop,
             streams,
-            accept: Some(accept),
-            socket,
+            accepts,
+            forwarders,
+            forwards,
         })
     }
 
@@ -277,29 +543,86 @@ impl Capability {
     }
 }
 
-/// The job's bytes to the daemon. The slot stays counted until the daemon
-/// side closes (`close`), never just because the job hung up.
-fn pump(mut stream: UnixStream, attempt: String, channel: u32, output: Publisher) {
+/// The job's bytes to the daemon. A `cap.sock` slot stays counted until the
+/// daemon side closes (`close`), never just because the job hung up; an
+/// endpoint channel sends credit-limited chunks and a half close.
+fn pump(mut stream: Conn, hub: Hub, channel: u32, kind: Option<ChannelKind>, window: Arc<Window>) {
     thread::spawn(move || {
-        let mut buffer = vec![0_u8; 64 * 1024];
-        loop {
+        let endpoint = kind.is_some();
+        let mut buffer = vec![0_u8; if endpoint { ENDPOINT_CHUNK } else { 64 * 1024 }];
+        let clean = loop {
+            if endpoint && !window.acquire() {
+                break false;
+            }
             match stream.read(&mut buffer) {
-                Ok(0) | Err(_) => break,
+                Ok(0) => break true,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                    if endpoint {
+                        window.add(1);
+                    }
+                }
+                Err(_) => break false,
                 Ok(count) => {
-                    if output
-                        .control(&WorkerResponse::CapData {
-                            attempt: attempt.clone(),
-                            channel,
-                            bytes: buffer[..count].to_vec(),
-                        })
-                        .is_err()
-                    {
-                        break;
+                    let data = WorkerResponse::CapData {
+                        attempt: hub.attempt.clone(),
+                        channel,
+                        bytes: buffer[..count].to_vec(),
+                    };
+                    // An endpoint channel's bytes wait for room in the transport
+                    // (backpressure on the job); `control` would fail the moment the
+                    // spool is full and cut the connection mid-transfer.
+                    let published = if endpoint {
+                        hub.output.send(&data)
+                    } else {
+                        hub.output.control(&data)
+                    };
+                    if published.is_err() {
+                        break false;
                     }
                 }
             }
+        };
+        if endpoint && clean {
+            // The job closed its writing side: tell the daemon, and keep the
+            // channel until the daemon's side is done too.
+            {
+                let mut streams = hub
+                    .streams
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let key = (hub.attempt.clone(), channel);
+                let done = streams.get_mut(&key).is_some_and(|open| {
+                    open.job_eof = true;
+                    open.daemon_eof
+                });
+                // Both sides are done: the entry goes, but the writer thread still
+                // delivers what is queued and then closes (never a `shutdown(Both)`
+                // here: the job may not have read it all yet).
+                if done {
+                    streams.remove(&key);
+                }
+            }
+            let _ = hub.output.send(&WorkerResponse::ChanEof {
+                attempt: hub.attempt.clone(),
+                channel,
+            });
+            return;
         }
-        let _ = output.control(&WorkerResponse::CapClose { attempt, channel });
+        if endpoint {
+            let key = (hub.attempt.clone(), channel);
+            let removed = hub
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&key);
+            if let Some(open) = removed {
+                open.discard();
+            }
+        }
+        let _ = hub.output.control(&WorkerResponse::CapClose {
+            attempt: hub.attempt.clone(),
+            channel,
+        });
     });
 }
 
@@ -311,39 +634,113 @@ pub(crate) fn deliver(streams: &Streams, attempt: &str, channel: u32, bytes: &[u
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let key = (attempt.to_owned(), channel);
     if let Some(open) = streams.get(&key)
-        && open.queue.try_send(bytes.to_vec()).is_err()
+        && open
+            .queue
+            .as_ref()
+            .is_none_or(|queue| queue.try_send(bytes.to_vec()).is_err())
         && let Some(open) = streams.remove(&key)
     {
-        let _ = open.stream.shutdown(Shutdown::Both);
+        open.discard();
     }
 }
 
-/// The daemon side closed: its queued bytes drain, then the job sees EOF.
+/// The daemon side closed: its queued bytes drain, then the job sees EOF. An
+/// endpoint channel's close is an abort: nothing more is delivered either way.
 pub(crate) fn close(streams: &Streams, attempt: &str, channel: u32) {
-    streams
+    let removed = streams
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(&(attempt.to_owned(), channel));
+    if let Some(open) = removed
+        && open.kind.is_some()
+    {
+        open.discard();
+    }
+}
+
+/// The daemon will send no more on an endpoint channel: the job's connection
+/// gets EOF after the queued data, and the channel ends once the job's side is done.
+pub(crate) fn daemon_eof(streams: &Streams, attempt: &str, channel: u32) {
+    let mut streams = streams
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = (attempt.to_owned(), channel);
+    let done = streams.get_mut(&key).is_some_and(|open| {
+        open.queue = None;
+        open.daemon_eof = true;
+        open.job_eof
+    });
+    // The writer thread drains the queue and half-closes; the job's side is
+    // already over, so the entry just goes.
+    if done {
+        streams.remove(&key);
+    }
+}
+
+/// Credit for the job's bytes: the daemon passed that many chunks on.
+pub(crate) fn credit(streams: &Streams, attempt: &str, channel: u32, chunks: u32) {
+    if let Some(open) = streams
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&(attempt.to_owned(), channel))
+    {
+        open.window.add(chunks);
+    }
+}
+
+/// The daemon could not open an endpoint channel: a Docker connection reads an
+/// HTTP error with the reason, a port forward just closes. Either way the
+/// connection ends.
+pub(crate) fn refuse(streams: &Streams, attempt: &str, channel: u32, message: &str) {
+    let mut streams = streams
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = (attempt.to_owned(), channel);
+    let Some(open) = streams.get_mut(&key) else {
+        return;
+    };
+    if matches!(open.kind, Some(ChannelKind::Docker))
+        && let Some(queue) = &open.queue
+    {
+        let _ = queue.try_send(docker_error("503 Service Unavailable", message));
+    }
+    open.queue = None;
+    open.daemon_eof = true;
+    // The job's request is not read any further.
+    let _ = open.stream.shutdown(Shutdown::Read);
 }
 
 impl Drop for Capability {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        let _ = UnixStream::connect(&self.socket);
-        if let Some(accept) = self.accept.take() {
+        if let Some(forwards) = self.forwards.take() {
+            self.forwarders
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&self.attempt);
+            forwards.shutdown();
+        }
+        for (accept, socket) in std::mem::take(&mut self.accepts) {
+            let _ = UnixStream::connect(&socket);
             let _ = accept.join();
         }
-        self.streams
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .retain(|(attempt, _), open| {
-                if *attempt == self.attempt {
-                    let _ = open.stream.shutdown(Shutdown::Both);
-                    false
-                } else {
-                    true
-                }
-            });
+        let closing = {
+            let mut streams = self
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let keys = streams
+                .keys()
+                .filter(|(attempt, _)| *attempt == self.attempt)
+                .cloned()
+                .collect::<Vec<_>>();
+            keys.iter()
+                .filter_map(|key| streams.remove(key))
+                .collect::<Vec<_>>()
+        };
+        for open in closing {
+            open.discard();
+        }
         let _ = fs::remove_dir_all(&self.dir);
     }
 }
@@ -393,6 +790,26 @@ mod tests {
         );
         assert!(!context.contains("root only"));
         assert!(!dir.join("skills").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_job_with_docker_gets_the_docker_section_and_one_without_does_not() {
+        let root = std::env::temp_dir().join(format!("marsh-docker-ctx-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for (docker, name) in [(true, "with"), (false, "without")] {
+            let dir = root.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            let capability = JobCapability {
+                name: "pix".into(),
+                services: docker.then(marsh_contracts::process::ServicesEndpoint::default),
+                ..JobCapability::default()
+            };
+            publish(&dir, &capability).unwrap();
+            let context = fs::read_to_string(dir.join("context.md")).unwrap();
+            assert_eq!(context.contains("\n## Docker\n"), docker, "{context}");
+            assert_eq!(context.contains("`docker compose`"), docker);
+        }
         fs::remove_dir_all(&root).unwrap();
     }
 

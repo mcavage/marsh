@@ -1,0 +1,13 @@
+# syntax=docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753
+schemaVersion: "3"
+displayName: nfx-acp services fixture agent
+description: Credential-free fake ACP agent (exec verb) in the nfx toolbox image
+kind: workload
+provides: ["nfx-acp@1.0.0"]
+dockerfile: ./nfx.dockerfile
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: nfx-acp
+      command: ["node", "/usr/local/bin/marsh-acp-fixture.mjs"]

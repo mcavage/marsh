@@ -6,17 +6,28 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Deliberate E2E behavior breaks (docs/design/test-breaks.md). Off in releases.
+test-breaks = ["marsh-contracts/test-breaks"]
+
 [lints]
 workspace = true
 
 [dependencies]
 marsh-contracts = { path = "../marsh-contracts" }
+marsh-provenance = { path = "../marsh-provenance" }
 marsh-runtime = { path = "../marsh-runtime" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-rustix = { version = "1.1", features = ["fs", "process"] }
+rustix = { version = "1.1", features = ["fs", "process", "net", "event"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1", features = ["fs", "process", "net", "event", "thread"] }
 
 [[bin]]
 name = "marsh-worker"
 path = "src/main.rs"
+
+[build-dependencies]
+marsh-provenance = { path = "../marsh-provenance", features = ["build"] }

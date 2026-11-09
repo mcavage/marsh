@@ -1,0 +1,5 @@
+# Hostile variant: build-context-root
+services:
+  hostile:
+    build:
+      context: /

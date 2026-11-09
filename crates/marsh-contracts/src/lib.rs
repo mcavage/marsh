@@ -13,8 +13,10 @@ pub mod kit_assets;
 pub mod kit_source;
 pub mod process;
 pub mod terminal;
+pub mod test_breaks;
 pub mod usage;
 pub use execution::{ExecutionOutcome, ResourceLimit, SetupStage, WORKER_CONTAINER_CAPACITY};
+pub use test_breaks::break_mode;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -363,6 +365,10 @@ fn reserved_runtime_target(path: &Path) -> bool {
 /// Names reserved for the job identity or the sandbox control/proxy boundary.
 #[must_use]
 pub fn reserved_exported_environment_name(name: &str) -> bool {
+    // Test break `docker-env-open` (SEC-08 c2): `DOCKER_*` is not refused.
+    if name.starts_with("DOCKER_") && break_mode("docker-env-open") {
+        return false;
+    }
     matches!(
         name,
         "HOME"
@@ -382,6 +388,8 @@ pub fn reserved_exported_environment_name(name: &str) -> bool {
             | "NODE_USE_ENV_PROXY"
             | "MCP_GATEWAY_URL"
             | "MCP_SENTINEL_TOKEN_NAME"
+            // Set by marsh for a services-enabled project's jobs (E2).
+            | "TESTCONTAINERS_HOST_OVERRIDE"
     ) || ["MARSH_", "SBX_", "DOCKER_", "CONTAINERD_"]
         .iter()
         .any(|prefix| name.starts_with(prefix))

@@ -1,0 +1,28 @@
+{
+ "fixture": "uat-app-c",
+ "comment": "After seed.sh (UAT_RUN=<run>): 3 users in the Compose dev database. `NFX_HOLD=<path> npm test` holds one Testcontainers Postgres (1 user) between <path>.up and <path>.release; the unchanged `npm test` is rerun in the branch.",
+ "services": {
+  "db": {
+   "class": "restorable",
+   "volumes": [
+    "pgdata"
+   ]
+  },
+  "testcontainers": {
+   "class": "unsupported",
+   "reason": "Testcontainers containers are never restored"
+  }
+ },
+ "db": {
+  "user": "postgres",
+  "database": "app",
+  "table": "users",
+  "count": 3,
+  "names": "<run>-user-<n>"
+ },
+ "tests": {
+  "command": "npm test",
+  "passes": true
+ },
+ "testcontainers_after_jobs": 0
+}

@@ -7,8 +7,10 @@ members = [
     "crates/marsh-daemon",
     "crates/marsh-host-identity",
     "crates/marsh-mcp",
+    "crates/marsh-provenance",
     "crates/marsh-runtime",
     "crates/marsh-sbx",
+    "crates/marsh-services",
     "crates/marsh-worker",
 ]
 exclude = ["vendor/brush"]

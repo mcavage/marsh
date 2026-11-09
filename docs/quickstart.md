@@ -89,7 +89,7 @@ marsh stop
 ```
 
 Stop refuses while any marsh shells or jobs remain active. It preserves
-your project, guest home, and job records.
+your project, guest home, and job records, and any [Docker](docker.md) data.
 
 ## Run an agent directly
 

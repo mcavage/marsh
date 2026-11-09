@@ -407,7 +407,7 @@ NAV_GROUPS = [
                  ("Set up your home", "docs/guides/set-up-your-home.html"),
                  ("Build your own agent", "docs/guides/build-a-personal-agent.html")]),
     ("Use", [("The shell", "docs/shell.html"), ("Choosing a shell", "docs/shells.html"),
-             ("Commands and Kits", "docs/kits.html")]),
+             ("Commands and Kits", "docs/kits.html"), ("Docker", "docs/docker.html")]),
     ("Compose", [("Agents running agents", "docs/agents.html"), ("Split and join", "docs/split.html"),
                  ("Fanout and collect", "docs/fanout.html"), ("Peer review", "docs/peer-review.html"),
                  ("Docker Cloud (preview)", "docs/cloud.html")]),
@@ -435,6 +435,7 @@ DESCRIPTIONS = {
     "docs/shell.html": "The Bash-compatible shell: where it runs, startup files, and the documented differences from Bash.",
     "docs/shells.html": "Use the shell VM's own bash or zsh instead of Brush, and what you lose.",
     "docs/kits.html": "Registered commands and Kits: the default claude, codex, and pi commands, signing in, adding your own, and limits.",
+    "docs/docker.html": "Docker: a per-project Docker endpoint for agents and the shell, with Internet off by default, and what survives a job.",
     "docs/agents.html": "Agents that call other agents: child jobs, limits, MARSH_SPAWN, Ctrl-C, and what each job can see.",
     "docs/split.html": "split and join: run commands in parallel on private copies of your project and get patches back.",
     "docs/fanout.html": "fanout and collect: run commands side by side on the same files and gather their output.",
@@ -630,8 +631,10 @@ def build(out: pathlib.Path, base_url: str) -> None:
     pages = page_map()
     # Every user page needs navigation and a description. The full manual uses
     # this order too, so a newly discovered guide must not silently disappear.
+    # A "Moved:" stub keeps an old link working and has no navigation entry.
     manual = {target for target in pages.values()
-              if not target.startswith("docs/design/") and target != "docs/architecture.html"}
+              if not target.startswith("docs/design/") and target != "docs/architecture.html"
+              and target != "docs/services.html"}
     missing_nav = manual - {target for _, target in NAV}
     missing_description = manual - DESCRIPTIONS.keys()
     if missing_nav or missing_description:

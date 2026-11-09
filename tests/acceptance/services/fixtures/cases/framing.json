@@ -1,0 +1,943 @@
+{
+ "description": "SEC-03 cases. Each declares its expected statuses and whether the connection closes; cases that can carry a follow-up have a privileged create after the odd head. Nothing named nfxraw-* may exist afterwards.",
+ "cases": [
+  {
+   "id": "F01-ping-upgrade-tcp",
+   "description": "GET /_ping with Upgrade: tcp stays HTTP; a pipelined create is refused",
+   "send": [
+    "GET /_ping HTTP/1.1\r\nHost: d\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\nPOST /containers/create?name=nfxraw-69 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     200,
+     403
+    ],
+    "closed": false,
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-69"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-69?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F02-ping-upgrade-then-create-later",
+   "description": "the same, with the create sent as a later segment",
+   "send": [
+    "GET /_ping HTTP/1.1\r\nHost: d\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n",
+    {
+     "delay_ms": 300
+    },
+    "POST /containers/create?name=nfxraw-70 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     200,
+     403
+    ],
+    "closed": false,
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-70"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-70?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F03-attach-nonexistent-upgrade",
+   "description": "attach to a nonexistent ID with Upgrade: engine 404, stays HTTP, follow-up refused",
+   "send": [
+    "POST /containers/nfx-none/attach?stream=1&stdout=1 HTTP/1.1\r\nHost: d\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 0\r\n\r\nPOST /containers/create?name=nfxraw-71 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     404,
+     403
+    ],
+    "closed": false,
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-71"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-71?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F04-exec-bad-start-upgrade",
+   "description": "/exec/<bad>/start with Upgrade: 404, follow-up refused",
+   "send": [
+    "POST /exec/nfx-bad/start HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 2\r\n\r\n{}POST /containers/create?name=nfxraw-72 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     404,
+     403
+    ],
+    "closed": false,
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-72"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-72?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F05-ping-create-pipelined",
+   "description": "_ping and a privileged create pipelined in one write: ping 200, create 403",
+   "send": [
+    "GET /_ping HTTP/1.1\r\nHost: d\r\n\r\nPOST /containers/create?name=nfxraw-73 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     200,
+     403
+    ],
+    "closed": false,
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-73"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-73?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F06-policy-403-then-allowed",
+   "description": "a refused create followed by an allowed ping: the ping succeeds as itself",
+   "send": [
+    "POST /containers/create?name=nfxraw-74 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}GET /_ping HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     403,
+     200
+    ],
+    "closed": false,
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-74"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-74?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F07-slow-create-trickle",
+   "description": "a privileged create sent 1 byte per 5 ms (under the progress deadline)",
+   "send": [
+    {
+     "trickle": "POST /containers/create?name=nfxraw-75 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}",
+     "bytes": 1,
+     "delay_ms": 5
+    }
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-75"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-75?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F08-expect-100-continue",
+   "description": "Expect: 100-continue: 417, nothing forwarded",
+   "send": [
+    "POST /containers/create?name=nfxraw-76 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     417
+    ],
+    "forbidden_objects": [
+     "nfxraw-76"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-76?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F09-http10-keepalive-pipelining",
+   "description": "HTTP/1.0 keep-alive pipelining: the create is refused",
+   "send": [
+    "GET /_ping HTTP/1.0\r\nConnection: keep-alive\r\n\r\nPOST /containers/create?name=nfxraw-77 HTTP/1.0\r\nHost: d\r\nContent-Type: application/json\r\nConnection: keep-alive\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     200,
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-77"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-77?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F10-bare-lf-head",
+   "description": "request line and headers end in bare LF (no CR), privileged body",
+   "send": [
+    "POST /containers/create?name=nfxraw-78 HTTP/1.1\nHost: d\nContent-Type: application/json\nContent-Length: 144\n\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-78",
+     "nfxraw-79"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-78?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-79?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F11-bare-lf-ping-then-create",
+   "description": "a bare-LF ping, then a CRLF privileged create: 400/431, close, nothing forwarded",
+   "send": [
+    "GET /_ping HTTP/1.1\nHost: d\n\n",
+    "POST /containers/create?name=nfxraw-80 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-80",
+     "nfxraw-81"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-80?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-81?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F12-cl-te-chunked-privileged",
+   "description": "Content-Length and Transfer-Encoding: chunked together",
+   "send": [
+    "POST /containers/create?name=nfxraw-82 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nContent-Length: 155\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-82",
+     "nfxraw-83"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-82?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-83?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F13-cl-te-smuggled-create",
+   "description": "CL covers an empty chunked body plus a privileged request; TE ends it at the 0 chunk",
+   "send": [
+    "POST /containers/create?name=nfxraw-84 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nContent-Length: 262\r\n\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-85 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-84",
+     "nfxraw-85"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-84?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-85?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F14-duplicate-cl-first-small",
+   "description": "two Content-Length headers, the smaller first",
+   "send": [
+    "POST /containers/create?name=nfxraw-86 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 111\r\nContent-Length: 368\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"]}POST /containers/create?name=nfxraw-87 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-86",
+     "nfxraw-87"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-86?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-87?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F15-duplicate-cl-first-large",
+   "description": "two Content-Length headers, the larger first",
+   "send": [
+    "POST /containers/create?name=nfxraw-88 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 368\r\nContent-Length: 111\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"]}POST /containers/create?name=nfxraw-89 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-88",
+     "nfxraw-89"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-88?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-89?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F16-te-chunked-identity",
+   "description": "Transfer-Encoding: chunked, identity",
+   "send": [
+    "POST /containers/create?name=nfxraw-90 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked, identity\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-91 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-90",
+     "nfxraw-91"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-90?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-91?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F17-te-xchunked",
+   "description": "Transfer-Encoding: xchunked",
+   "send": [
+    "POST /containers/create?name=nfxraw-92 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: xchunked\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-93 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-92",
+     "nfxraw-93"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-92?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-93?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F18-te-gzip-chunked",
+   "description": "Transfer-Encoding: gzip, chunked",
+   "send": [
+    "POST /containers/create?name=nfxraw-94 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: gzip, chunked\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-95 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-94",
+     "nfxraw-95"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-94?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-95?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F19-te-identity-chunked",
+   "description": "Transfer-Encoding: identity, chunked",
+   "send": [
+    "POST /containers/create?name=nfxraw-96 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: identity, chunked\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-97 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-96",
+     "nfxraw-97"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-96?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-97?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F20-te-chunked-space-tab",
+   "description": "Transfer-Encoding: chunked \t",
+   "send": [
+    "POST /containers/create?name=nfxraw-98 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked \t\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-99 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-98",
+     "nfxraw-99"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-98?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-99?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F21-chunk-size-plus-sign",
+   "description": "chunk size '+90'",
+   "send": [
+    "POST /containers/create?name=nfxraw-100 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n+90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-101 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-100",
+     "nfxraw-101"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-100?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-101?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F22-chunk-size-negative",
+   "description": "chunk size '-1'",
+   "send": [
+    "POST /containers/create?name=nfxraw-102 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n-1\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-103 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-102",
+     "nfxraw-103"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-102?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-103?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F23-chunk-size-overflow",
+   "description": "chunk size 'ffffffffffffffffff'",
+   "send": [
+    "POST /containers/create?name=nfxraw-104 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffffff\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-105 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-104",
+     "nfxraw-105"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-104?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-105?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F24-chunk-size-underscore",
+   "description": "chunk size '1_0'",
+   "send": [
+    "POST /containers/create?name=nfxraw-106 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n1_0\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\n\r\nPOST /containers/create?name=nfxraw-107 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-106",
+     "nfxraw-107"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-106?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-107?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F25-chunk-trailers-with-cl",
+   "description": "chunked body with trailers and a Content-Length",
+   "send": [
+    "POST /containers/create?name=nfxraw-108 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nTrailer: X-Nfx\r\nContent-Length: 0\r\n\r\n90\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}\r\n0\r\nX-Nfx: 'POST /containers/create?name=nfxraw-109 HTTP/1.1\\r\\nHost: d\\r\\nContent-Type: application/json\\r\\nContent-Length: 144\\r\\n\\r\\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}'\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-108",
+     "nfxraw-109"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-108?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-109?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F26-obs-fold",
+   "description": "an obsolete line-folded header value",
+   "send": [
+    "POST /containers/create?name=nfxraw-110 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\n ; charset=utf-8\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}POST /containers/create?name=nfxraw-111 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-110",
+     "nfxraw-111"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-110?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-111?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F27-nul-in-header",
+   "description": "a NUL byte in a header value",
+   "send": [
+    "POST /containers/create?name=nfxraw-112 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nX-Nfx: a\u0000b\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}POST /containers/create?name=nfxraw-113 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-112",
+     "nfxraw-113"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-112?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-113?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F28-space-before-colon",
+   "description": "whitespace between a header name and the colon",
+   "send": [
+    "POST /containers/create?name=nfxraw-114 HTTP/1.1\r\nHost: d\r\nContent-Length : 144\r\nContent-Type: application/json\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}POST /containers/create?name=nfxraw-115 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-114",
+     "nfxraw-115"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-114?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-115?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F29-header-33-kib",
+   "description": "a 33 KiB header value",
+   "send": [
+    "POST /containers/create?name=nfxraw-116 HTTP/1.1\r\nHost: d\r\nX-Nfx: ",
+    {
+     "fill": 33792,
+     "text": "a"
+    },
+    "\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-116",
+     "nfxraw-117"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-116?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-117?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F30-headers-101",
+   "description": "101 header lines",
+   "send": [
+    "POST /containers/create?name=nfxraw-118 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nX-Nfx-0: v\r\nX-Nfx-1: v\r\nX-Nfx-2: v\r\nX-Nfx-3: v\r\nX-Nfx-4: v\r\nX-Nfx-5: v\r\nX-Nfx-6: v\r\nX-Nfx-7: v\r\nX-Nfx-8: v\r\nX-Nfx-9: v\r\nX-Nfx-10: v\r\nX-Nfx-11: v\r\nX-Nfx-12: v\r\nX-Nfx-13: v\r\nX-Nfx-14: v\r\nX-Nfx-15: v\r\nX-Nfx-16: v\r\nX-Nfx-17: v\r\nX-Nfx-18: v\r\nX-Nfx-19: v\r\nX-Nfx-20: v\r\nX-Nfx-21: v\r\nX-Nfx-22: v\r\nX-Nfx-23: v\r\nX-Nfx-24: v\r\nX-Nfx-25: v\r\nX-Nfx-26: v\r\nX-Nfx-27: v\r\nX-Nfx-28: v\r\nX-Nfx-29: v\r\nX-Nfx-30: v\r\nX-Nfx-31: v\r\nX-Nfx-32: v\r\nX-Nfx-33: v\r\nX-Nfx-34: v\r\nX-Nfx-35: v\r\nX-Nfx-36: v\r\nX-Nfx-37: v\r\nX-Nfx-38: v\r\nX-Nfx-39: v\r\nX-Nfx-40: v\r\nX-Nfx-41: v\r\nX-Nfx-42: v\r\nX-Nfx-43: v\r\nX-Nfx-44: v\r\nX-Nfx-45: v\r\nX-Nfx-46: v\r\nX-Nfx-47: v\r\nX-Nfx-48: v\r\nX-Nfx-49: v\r\nX-Nfx-50: v\r\nX-Nfx-51: v\r\nX-Nfx-52: v\r\nX-Nfx-53: v\r\nX-Nfx-54: v\r\nX-Nfx-55: v\r\nX-Nfx-56: v\r\nX-Nfx-57: v\r\nX-Nfx-58: v\r\nX-Nfx-59: v\r\nX-Nfx-60: v\r\nX-Nfx-61: v\r\nX-Nfx-62: v\r\nX-Nfx-63: v\r\nX-Nfx-64: v\r\nX-Nfx-65: v\r\nX-Nfx-66: v\r\nX-Nfx-67: v\r\nX-Nfx-68: v\r\nX-Nfx-69: v\r\nX-Nfx-70: v\r\nX-Nfx-71: v\r\nX-Nfx-72: v\r\nX-Nfx-73: v\r\nX-Nfx-74: v\r\nX-Nfx-75: v\r\nX-Nfx-76: v\r\nX-Nfx-77: v\r\nX-Nfx-78: v\r\nX-Nfx-79: v\r\nX-Nfx-80: v\r\nX-Nfx-81: v\r\nX-Nfx-82: v\r\nX-Nfx-83: v\r\nX-Nfx-84: v\r\nX-Nfx-85: v\r\nX-Nfx-86: v\r\nX-Nfx-87: v\r\nX-Nfx-88: v\r\nX-Nfx-89: v\r\nX-Nfx-90: v\r\nX-Nfx-91: v\r\nX-Nfx-92: v\r\nX-Nfx-93: v\r\nX-Nfx-94: v\r\nX-Nfx-95: v\r\nX-Nfx-96: v\r\nX-Nfx-97: v\r\nX-Nfx-98: v\r\nX-Nfx-99: v\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}POST /containers/create?name=nfxraw-119 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      431
+     ]
+    ],
+    "closed": true,
+    "forbidden_objects": [
+     "nfxraw-118",
+     "nfxraw-119"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-118?force=1"
+    },
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-119?force=1"
+    }
+   ]
+  },
+  {
+   "id": "F31-h2-prior-knowledge",
+   "description": "the HTTP/2 prior-knowledge preface",
+   "send": [
+    "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+   ],
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "closed": true,
+    "marsh_refusals": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "F32-h2c-upgrade-non-hijack",
+   "description": "Upgrade: h2c on a route that does not hijack",
+   "send": [
+    "GET /containers/json HTTP/1.1\r\nHost: d\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAMAAABkAAQAAP__\r\n\r\n"
+   ],
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "closed": true,
+    "marsh_refusals": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "F33-connect-method",
+   "description": "CONNECT",
+   "send": [
+    "CONNECT d:80 HTTP/1.1\r\nHost: d:80\r\n\r\n"
+   ],
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "closed": true,
+    "marsh_refusals": true
+   },
+   "cleanup": []
+  }
+ ]
+}

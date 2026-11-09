@@ -1,0 +1,5 @@
+#!/bin/sh
+# nfx: a plain `curl` in a Kit job carries the synthetic placeholder header of the
+# SEC-17 injection control (jobs run as the Mac user with that user's HOME, so a
+# ~/.curlrc would not be read). Services containers use their own curl.
+exec /usr/bin/curl -K /etc/nfx-curlrc "$@"

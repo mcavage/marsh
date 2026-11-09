@@ -1,0 +1,14 @@
+{
+ "comment": "Shape only: frame bodies are placeholders for E1's protocol. SEC-12: handshake g1, wait for the harness to restart the VM (it touches /run/nfx/go-g2 when g2 is up), then send a stale ready and mark. SEC-21: handshake, then ONE invalid frame per run (oversize, truncated, unknown type, duplicate or stale channel ID, ports [0] / [70000] / 10k entries / another scope's port, snapshot ID ../../x, restore fields with markup/ANSI/newlines) and stay connected.",
+ "framing": "u32be",
+ "stay": true,
+ "steps": [
+  {"op": "expect", "name": "hello", "where": {"t": "hello"}, "timeout": 60},
+  {"op": "send", "frame": {"t": "ready", "generation": "$hello.generation"}},
+  {"op": "mark", "label": "handshake-complete"},
+  {"op": "wait_for_file", "name": "go-invalid", "timeout": 300},
+  {"op": "mark", "label": "before-invalid-frame"},
+  {"op": "send", "frame": {"t": "ports", "ports": [0]}, "note": "ports-zero"},
+  {"op": "mark", "label": "after-invalid-frame"}
+ ]
+}

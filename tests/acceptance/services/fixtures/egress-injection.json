@@ -1,0 +1,8 @@
+{
+ "comment": "The synthetic header-injection rule of SEC-17 (DECISIONS 17, TEST-PLAN delta 9). sbx can only substitute a PLACEHOLDER with a value in requests to a host, so the Kit image puts a `curl` wrapper first on PATH that adds `-K /etc/nfx-curlrc` (`header = \"X-Nfx-Synthetic: nfx-ph-kit\"`; jobs run as the Mac user with that user's HOME, so a ~/.curlrc would not be read): a plain `curl https://httpbin.org/headers` in a Kit job sends the placeholder, and a Kit-scoped sbx secret (placeholder -> `nfx-<run>`) makes the echo show `X-Nfx-Synthetic: nfx-<run>` (the plan's positive control). The negative control sends the SAME placeholder header from the services side, explicitly, and its echo must still show the raw placeholder: a shared (non-Kit-scoped) substitution would turn it into `nfx-<run>` and fail c1. {run} is the harness run id. Managed by synthetic_injection.py. Plan change to approve: native header injection exists in sbx only for cloud sandboxes, so the trigger is a placeholder (recorded in the H1b result file).",
+ "host": "httpbin.org",
+ "header": "X-Nfx-Synthetic",
+ "value": "nfx-{run}",
+ "placeholder": "nfx-ph-kit",
+ "scope": "kit"
+}

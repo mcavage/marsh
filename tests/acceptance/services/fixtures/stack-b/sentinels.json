@@ -1,0 +1,71 @@
+{
+ "fixture": "stack-b",
+ "comment": "A lean local Supabase stack (project_id b; container names supabase_<svc>_b). After `supabase start -x ...` and `load.sh --seed-only`: read the database with psql in supabase_db_b (no API keys needed). The API keys come from `supabase status -o env` into the environment and are never written to evidence. Lean start: `supabase start -x realtime,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor`.",
+ "project_id": "b",
+ "services": {
+  "db": {
+   "class": "restorable",
+   "container": "supabase_db_b",
+   "volumes": [
+    "supabase_db_b"
+   ]
+  },
+  "storage": {
+   "class": "restorable",
+   "container": "supabase_storage_b",
+   "volumes": [
+    "supabase_storage_b"
+   ]
+  },
+  "rest": {
+   "class": "fresh",
+   "container": "supabase_rest_b",
+   "note": "stateless PostgREST"
+  },
+  "kong": {
+   "class": "fresh",
+   "container": "supabase_kong_b",
+   "note": "stateless gateway"
+  },
+  "auth": {
+   "class": "fresh",
+   "container": "supabase_auth_b",
+   "note": "stateless; `supabase status` prints the API keys only while auth runs, and load.sh needs them"
+  }
+ },
+ "lean_exclude": [
+  "realtime",
+  "imgproxy",
+  "mailpit",
+  "postgres-meta",
+  "studio",
+  "edge-runtime",
+  "logflare",
+  "vector",
+  "supavisor"
+ ],
+ "db": {
+  "user": "postgres",
+  "database": "postgres",
+  "expected": {
+   "items": 1000,
+   "tokens": 0,
+   "buckets": [
+    "uploads"
+   ]
+  }
+ },
+ "storage": {
+  "bucket": "uploads",
+  "objects": {
+   "seed.bin": {
+    "bytes": 1048576,
+    "sha256": "3714b445cbcd86638566b0b43c7ed6d8d9fe0f7fa4131bf6cdc6866297863af3"
+   }
+  }
+ },
+ "writer": {
+  "command": "load.sh",
+  "pairs": "storage object tok-<ns> first, then row tokens(token=<ns>); ~10/s"
+ }
+}

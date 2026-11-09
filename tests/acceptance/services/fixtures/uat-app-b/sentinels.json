@@ -1,0 +1,61 @@
+{
+ "fixture": "uat-app-b",
+ "comment": "After supabase start (lean or full) and seed-users.sh (UAT_RUN=<run>): 3 auth users and 3 avatar objects. Read users from auth.users and objects from storage.objects with psql in supabase_db_uatb; bytes through the storage API with the service key (read into env, never printed).",
+ "project_id": "uatb",
+ "url": "http://127.0.0.1:54323",
+ "services": {
+  "db": {
+   "class": "restorable",
+   "container": "supabase_db_uatb",
+   "volumes": [
+    "supabase_db_uatb"
+   ]
+  },
+  "storage": {
+   "class": "restorable",
+   "container": "supabase_storage_uatb",
+   "volumes": [
+    "supabase_storage_uatb"
+   ]
+  },
+  "auth": {
+   "class": "fresh",
+   "container": "supabase_auth_uatb",
+   "note": "its users live in the database"
+  },
+  "rest": {
+   "class": "fresh",
+   "container": "supabase_rest_uatb"
+  },
+  "kong": {
+   "class": "fresh",
+   "container": "supabase_kong_uatb"
+  }
+ },
+ "db": {
+  "user": "postgres",
+  "database": "postgres",
+  "expected": {
+   "users": 3,
+   "buckets": [
+    "avatars"
+   ]
+  }
+ },
+ "users": {
+  "emails": [
+   "<run>-user-1@example.test",
+   "<run>-user-2@example.test",
+   "<run>-user-3@example.test"
+  ]
+ },
+ "avatars": {
+  "bucket": "avatars",
+  "bytes": 2048,
+  "sha256": {
+   "1.png": "e4c2a92ffd7a6bc27bee5371166d701cc00996aad2fd7c84d5c888a9bcf1403e",
+   "2.png": "9920f55a54f7206ed54a33e848a6f8e5f4fa448784ddc8ed4058d5667e1d8481",
+   "3.png": "0f5c67ee75df99d9f1a09e1f473ca4098db2c5f580263b42e2bd868d741c2ee1"
+  }
+ }
+}

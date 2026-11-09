@@ -169,11 +169,26 @@ stores the `sbx` path.
 ## Uninstall
 
 Finish jobs and leave every marsh shell with `exit`. In your **Mac
-terminal**, remove marsh's VMs and stop its daemon:
+terminal**, remove marsh's Kit and shell VMs and stop its daemon:
 
 ```sh
 marsh stop
 ```
+
+`marsh stop` **keeps** the services VMs of projects that use
+[Docker](docker.md): it stops them, and their Docker disks and data stay.
+If you also want that data gone, run this **before** you uninstall or delete
+marsh's data, once for each `MARSH_HOME` you used:
+
+```sh
+marsh reset --include-services
+```
+
+It lists each project whose services VM, Docker disk, and data it will delete
+and asks you to confirm (`--yes` skips the question). That data cannot be
+recovered. marsh removes only VMs it recorded in its own list, so once that list
+is gone, a services VM left behind has to be found with `sbx ls` and removed with
+`sbx rm`.
 
 For Homebrew:
 
@@ -189,8 +204,9 @@ rm -f ~/.local/bin/{marsh,msh,marshd,marsh-mcp} ~/.local/share/man/man1/{marsh,m
 rm -rf ~/.local/libexec/marsh ~/.local/share/licenses/marsh
 ```
 
-These commands leave user data in place. Remove any of the following only
-if you no longer need its contents:
+These commands leave user data in place, including the services data above if
+you did not delete it. Remove any of the following only if you no longer need
+its contents:
 
 | Path | Contents |
 | --- | --- |

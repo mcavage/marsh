@@ -127,6 +127,7 @@ pub fn recorded_scope_vms(
     account_home: &Path,
     control_override: Option<&Path>,
     selected_home: &Path,
+    include_services: bool,
 ) -> io::Result<Vec<String>> {
     let Ok(selected) = selected_home.canonicalize() else {
         return Ok(Vec::new());
@@ -138,15 +139,19 @@ pub fn recorded_scope_vms(
     let control_root = control_root.canonicalize().unwrap_or(control_root);
     let scope = control_root.join(scope_control_leaf(&selected));
     // Local VMs, then owned Docker Cloud sandboxes.
-    let mut names = recorded_names(&scope.join("vm-ownership.json"), "vms")?;
+    let mut names = recorded_names(&scope.join("vm-ownership.json"), "vms", include_services)?;
     names.extend(recorded_names(
         &scope.join("cloud").join("cloud-ownership.json"),
         "entries",
+        true,
     )?);
     Ok(names)
 }
 
-fn recorded_names(map: &Path, key: &str) -> io::Result<Vec<String>> {
+/// Names in one ownership map. A services VM is kept by `marsh stop` and the
+/// default `marsh reset`, so it counts as left behind only for
+/// `include_services`.
+fn recorded_names(map: &Path, key: &str, include_services: bool) -> io::Result<Vec<String>> {
     let bytes = match fs::read(map) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -157,6 +162,16 @@ fn recorded_names(map: &Path, key: &str) -> io::Result<Vec<String>> {
     Ok(value
         .get(key)
         .and_then(serde_json::Value::as_object)
-        .map(|entries| entries.keys().cloned().collect())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|(_, entry)| {
+                    include_services
+                        || entry.get("purpose").and_then(serde_json::Value::as_str)
+                            != Some("services")
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
         .unwrap_or_default())
 }

@@ -7,6 +7,7 @@ use crate::{
     registered_commands::{RegisteredCommands, install_registered_commands},
     session::SessionConfig,
 };
+use serde_json::Value;
 use std::{ffi::OsString, fmt, io::Write, sync::Arc};
 
 const RESULTS_HELP: &str = "\
@@ -32,6 +33,44 @@ The daemon does this by itself when it starts and hourly; `marsh gc` does it
 now. Lists each VM it removed or kept, and why. VMs another home or tool owns
 are listed as not ours and never touched. --dry-run removes nothing. Exits 1
 if a removal failed.
+";
+
+const SERVICES_HELP: &str = "\
+Usage:
+  marsh docker status [--json]
+  marsh docker start [--json]
+  marsh docker stop [--json]
+  marsh docker rm [--yes] [--json]
+  marsh docker hold SECONDS [--json]
+  marsh docker release HOLDER [--json]
+  marsh docker internet on|off [--json]
+
+This project's Docker: a separate VM that mounts only this project and runs
+its Docker containers (`docker` and `docker compose` in an agent's job reach
+it). `marsh services ...` means the same. On by default for every project, and
+nothing starts until it is first used. Turn it off for this project with `marsh config docker off`
+in its folder (`marsh config docker default off` makes it opt-in for the whole home). While it is off `start` and `hold` refuse; `status`,
+`stop`, `rm` and `release` still work, so turning it off never strands a VM (a
+running one is stopped, its holders revoked, its data kept). Host only: a shell
+or a job cannot run these.
+
+status: every project of this home with a Docker VM, and this one.
+start: create the VM if needed (with a Docker disk of `marsh config
+services-disk-size`, default 40g) and wait until it is ready.
+stop: stop the VM, keeping its disk and data.
+rm: remove this project's VM and its disk (asks first, unless --yes). `marsh
+stop` keeps Docker VMs (it stops them), and `marsh reset` skips them unless
+given `--include-services`.
+hold / release: keep the VM running for SECONDS (or until released); they
+exercise the lease that holders will use. After the last holder goes, an idle
+timer (`marsh config services-idle-seconds`, default 900) stops the VM; idle
+never removes it.
+internet on|off: grant or revoke Internet for this project's Docker
+containers. Off by default: containers cannot start connections out (a name
+lookup fails too), while image pulls from the default registries (Docker Hub,
+ghcr.io) still work. Any sbx policy that marsh did not create (an organization
+or global rule, or one for this VM) wins: the command is refused and `status`
+shows `internet.governed`. Host only; a job cannot run it.
 ";
 
 const WORKERS_HELP: &str = "\
@@ -189,6 +228,9 @@ pub fn prepare(
         ProductCommand::Gc { dry_run, json } => {
             return gc_command(client.as_ref(), dry_run, json, &mut stdout);
         }
+        ProductCommand::Services(command) => {
+            return services_command(client.as_ref(), command, &session, &mut stdout);
+        }
         ProductCommand::WorkersForgetCloud { name } => {
             writeln!(stdout, "{}", client.forget_cloud_create(&name)?)?;
             return Ok(ProductOutcome::Complete(0));
@@ -199,8 +241,37 @@ pub fn prepare(
         ProductCommand::WorkersStop { selection, json } => {
             return workers_stop(client.as_ref(), &selection, json, &mut stdout);
         }
-        ProductCommand::Reset { json } | ProductCommand::Stop { json } => {
-            let reset = matches!(parsed.command, ProductCommand::Reset { .. });
+        ProductCommand::Reset {
+            json,
+            include_services,
+            yes,
+        } => {
+            let home = session
+                .home_backing
+                .parent()
+                .unwrap_or(&session.home_backing);
+            let confirmed = if include_services {
+                let Some(projects) =
+                    confirm_services_in_reset(client.as_ref(), &session, yes, &mut stderr)?
+                else {
+                    writeln!(stderr, "marsh: reset cancelled; nothing was removed")?;
+                    return Ok(ProductOutcome::Complete(1));
+                };
+                Some(projects)
+            } else {
+                None
+            };
+            let kept = detached_before(client.as_ref(), &mut stderr)?;
+            let report = match confirmed {
+                Some(projects) => client.reset_scope_including_services(projects)?,
+                None => client.reset_scope()?,
+            };
+            let outcome = write_lifecycle_report(&report, home, json, &mut stdout, &mut stderr)?;
+            detached_kept(&mut stderr, kept, "reset")?;
+            return Ok(outcome);
+        }
+        ProductCommand::Stop { json } => {
+            let reset = false;
             let home = session
                 .home_backing
                 .parent()
@@ -587,6 +658,53 @@ fn scope_lifecycle(
     write_lifecycle_report(&report, home, json, stdout, stderr)
 }
 
+/// `marsh reset --include-services`: show the projects whose services data
+/// the reset would delete and ask (`yes` skips the question; with no terminal
+/// the caller must pass it). Returns the confirmed project keys, or `None`
+/// when the user said no.
+fn confirm_services_in_reset(
+    client: &dyn DaemonClient,
+    session: &SessionConfig,
+    yes: bool,
+    stderr: &mut impl Write,
+) -> Result<Option<Vec<String>>, ProductError> {
+    use std::io::{BufRead as _, IsTerminal as _};
+    let root = std::fs::canonicalize(&session.launch_directory).map_err(|error| {
+        ProductError::Operation(format!("{}: {error}", session.launch_directory.display()))
+    })?;
+    let status = client.services(&marsh_daemon::ServicesRequest::Status { root })?;
+    let projects = status["projects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|project| project["vm"].is_string())
+        .filter_map(|project| project["root"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    if projects.is_empty() {
+        return Ok(Some(projects));
+    }
+    writeln!(
+        stderr,
+        "marsh: --include-services deletes the Docker VM, Docker disk and data of:"
+    )?;
+    for project in &projects {
+        writeln!(stderr, "  {project}")?;
+    }
+    if yes {
+        return Ok(Some(projects));
+    }
+    if !std::io::stdin().is_terminal() {
+        return Err(ProductError::Operation(
+            "marsh reset --include-services deletes that data: pass --yes to confirm".into(),
+        ));
+    }
+    write!(stderr, "Delete it? [y/N] ")?;
+    stderr.flush()?;
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes").then_some(projects))
+}
+
 /// Print a lifecycle report: the facts on stderr, the report on stdout with
 /// `--json`. Exit status 1 unless the daemon verified every cleanup.
 ///
@@ -642,13 +760,33 @@ pub fn lifecycle_summary(
         1 => facts.push(format!("1 VM removed ({})", removed[0])),
         count => facts.push(format!("{count} VMs removed ({})", removed.join(", "))),
     }
+    let services_kept = report
+        .components
+        .iter()
+        .filter(|component| {
+            component.kind == "services" && component.state == ScopeCleanupState::Kept
+        })
+        .count();
+    if services_kept > 0 {
+        facts.push(format!(
+            "{services_kept} Docker VM{} kept with its data (`marsh docker rm`, or `marsh reset --include-services`, removes it)",
+            if services_kept == 1 { "" } else { "s" }
+        ));
+    }
     if report.components.iter().any(|component| {
         component.kind == "dev-grant" && component.state == ScopeCleanupState::Removed
     }) {
         facts.push("development grants revoked".into());
     }
     if removed.is_empty() && report.cleanup_complete {
-        facts.insert(0, "no VMs were running".into());
+        facts.insert(
+            0,
+            if services_kept > 0 {
+                "no Kit or shell VMs were running".into()
+            } else {
+                "no VMs were running".into()
+            },
+        );
     }
     if report.cleanup_complete && report.action == ScopeLifecycleAction::Stop {
         facts.push("daemon stopped".into());
@@ -711,6 +849,144 @@ fn workers_stop(
         .iter()
         .any(|entry| matches!(entry.action.as_str(), "refused" | "failed" | "removed"));
     Ok(ProductOutcome::Complete(i32::from(incomplete)))
+}
+
+/// `marsh services ...`: build the request for this project, print the reply.
+fn services_command(
+    client: &dyn DaemonClient,
+    command: crate::cli::ServicesCommand,
+    session: &SessionConfig,
+    stdout: &mut impl Write,
+) -> Result<ProductOutcome, ProductError> {
+    use crate::cli::ServicesCommand as Command;
+    use marsh_daemon::ServicesRequest as Request;
+    if matches!(command, Command::Help) {
+        return write_help(stdout, SERVICES_HELP);
+    }
+    let root = std::fs::canonicalize(&session.launch_directory).map_err(|error| {
+        ProductError::Operation(format!("{}: {error}", session.launch_directory.display()))
+    })?;
+    let (request, json) = match command {
+        Command::Status { json } => (Request::Status { root }, json),
+        Command::Start { json } => (Request::Start { root }, json),
+        Command::Stop { json } => (Request::Stop { root }, json),
+        Command::Hold { seconds, json } => (Request::Hold { root, seconds }, json),
+        Command::Release { holder, json } => (Request::Release { root, holder }, json),
+        Command::Internet { on, json } => (Request::Internet { root, on }, json),
+        Command::Remove { yes, json } => {
+            if !yes && !confirm_services_removal(&root)? {
+                writeln!(stdout, "not removed")?;
+                return Ok(ProductOutcome::Complete(1));
+            }
+            (Request::Remove { root }, json)
+        }
+        Command::Help => unreachable!("answered above"),
+    };
+    let document = client.services(&request)?;
+    if json {
+        write_json(stdout, &document)?;
+    } else {
+        write_services(stdout, &request, &document)?;
+    }
+    Ok(ProductOutcome::Complete(0))
+}
+
+/// Ask on the terminal; with no terminal the caller must pass `--yes`.
+fn confirm_services_removal(root: &std::path::Path) -> Result<bool, ProductError> {
+    use std::io::{BufRead as _, IsTerminal as _};
+    if !std::io::stdin().is_terminal() {
+        return Err(ProductError::Operation(
+            "marsh docker rm removes the VM and its disk: pass --yes to confirm".into(),
+        ));
+    }
+    eprint!(
+        "Remove the Docker VM of {} and its Docker disk? [y/N] ",
+        root.display()
+    );
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
+}
+
+fn write_services(
+    stdout: &mut impl Write,
+    request: &marsh_daemon::ServicesRequest,
+    document: &Value,
+) -> Result<(), ProductError> {
+    use marsh_daemon::ServicesRequest as Request;
+    let text = |value: &Value, key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_owned()
+    };
+    match request {
+        Request::Status { .. } => {
+            let enabled = document["enabled_projects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            if enabled.is_empty() {
+                writeln!(stdout, "Docker: on for no project")?;
+            } else {
+                writeln!(stdout, "Docker: on for {}", enabled.join(", "))?;
+            }
+            for project in document["projects"].as_array().into_iter().flatten() {
+                writeln!(
+                    stdout,
+                    "{}  {}  {}{}",
+                    text(project, "root"),
+                    text(project, "state"),
+                    text(project, "vm"),
+                    project
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .map_or_else(String::new, |reason| format!("  ({reason})")),
+                )?;
+            }
+        }
+        Request::Start { .. } | Request::Hold { .. } => {
+            writeln!(
+                stdout,
+                "Docker VM {} is {} for {}",
+                text(document, "vm"),
+                text(document, "state"),
+                text(document, "root")
+            )?;
+            if let Some(holder) = document.get("holder").and_then(Value::as_str) {
+                writeln!(stdout, "holder {holder}")?;
+            }
+        }
+        Request::Release { holder, .. } => writeln!(stdout, "released {holder}")?,
+        Request::Internet { on, .. } => writeln!(
+            stdout,
+            "Internet is {} for this project's Docker: {}",
+            if *on { "on" } else { "off" },
+            text(&document["internet"], "effective")
+        )?,
+        Request::Stop { .. } => writeln!(
+            stdout,
+            "{}",
+            if document["stopped"].as_bool().unwrap_or(false) {
+                "stopped the Docker VM; its data is kept"
+            } else {
+                "the Docker VM was not running"
+            }
+        )?,
+        Request::Remove { .. } => writeln!(
+            stdout,
+            "{}",
+            if document["removed"].as_bool().unwrap_or(false) {
+                "removed the Docker VM and its disk"
+            } else {
+                "there was no Docker VM to remove"
+            }
+        )?,
+    }
+    Ok(())
 }
 
 fn gc_command(
@@ -1767,6 +2043,22 @@ mod tests {
         assert_eq!(
             lifecycle_summary(&idle, home),
             "marsh: reset /Users/x/.marsh: no VMs were running\nmarsh: daemon still running; the next shell starts fresh VMs\n"
+        );
+
+        let kept = ScopeLifecycleReport {
+            action: ScopeLifecycleAction::Stop,
+            cleanup_complete: true,
+            components: vec![component(
+                "services",
+                "/Users/x/app",
+                S::Kept,
+                Some("marsh-v-ab12cd34"),
+                Some("kept (stopped); its data stays"),
+            )],
+        };
+        assert_eq!(
+            lifecycle_summary(&kept, home),
+            "marsh: stopped /Users/x/.marsh: no Kit or shell VMs were running, 1 Docker VM kept with its data (`marsh docker rm`, or `marsh reset --include-services`, removes it), daemon stopped\n"
         );
 
         let partial = ScopeLifecycleReport {

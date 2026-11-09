@@ -47,6 +47,7 @@ pub mod checkpoint;
 mod client_liveness;
 mod daemon_startup;
 pub mod events;
+pub mod lane_services;
 pub mod limits;
 mod receipt_journal;
 pub use daemon_startup::{
@@ -84,6 +85,7 @@ pub use mcp_publication::{
     validate_publication_sandbox_output,
 };
 pub mod dev_broker;
+pub mod ignored;
 pub mod relay;
 pub mod relay_cleanup;
 pub use dev_broker::DevBroker;
@@ -687,12 +689,23 @@ pub enum PublicRequest {
     GcVms {
         dry_run: bool,
     },
+    /// `marsh services ...`: a project's services VM. Host only: a shell's
+    /// relay and a job's capability are refused (`RequestAuthority`).
+    Services {
+        request: ServicesRequest,
+    },
     /// Forget the ownership record of one unresolved cloud create, on the
     /// operator's word that nothing was created (`marsh workers forget cloud`).
     ForgetCloudCreate {
         name: String,
     },
     ResetScope,
+    /// `marsh reset --include-services`: a reset that also removes the
+    /// services VMs (and their data) of exactly the projects in `confirmed`,
+    /// the keys the user was shown and confirmed. Host only.
+    ResetScopeIncludingServices {
+        confirmed: Vec<String>,
+    },
     StopScope,
     Prepare {
         selection: LoadSelection,
@@ -896,6 +909,29 @@ pub enum PublicRequest {
     },
 }
 
+/// One `marsh services` operation on the project at `root` (a canonical,
+/// absolute path the host CLI resolved; the daemon checks it again).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ServicesRequest {
+    /// `marsh services status`: every known project, and this one.
+    Status { root: PathBuf },
+    /// `marsh services start`: ensure the VM is ready.
+    Start { root: PathBuf },
+    /// `marsh services stop`: stop the VM, keeping its data.
+    Stop { root: PathBuf },
+    /// `marsh services rm`: remove the VM and its disk.
+    Remove { root: PathBuf },
+    /// `marsh services hold SECONDS`: a lease holder that expires on its own
+    /// (the exercise path for holders that arrive in later tasks).
+    Hold { root: PathBuf, seconds: u64 },
+    /// `marsh services release HOLDER`.
+    Release { root: PathBuf, holder: String },
+    /// `marsh services internet on|off`: the user's Internet grant for the
+    /// project's services (SECURITY-DESIGN A5). Host only.
+    Internet { root: PathBuf, on: bool },
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckpointAction {
@@ -1042,6 +1078,13 @@ pub enum PublicReply {
     SplitOpened {
         id: String,
         lanes: BTreeMap<String, PathBuf>,
+        /// `split --open --from` of a checkpoint with app data: each lane's
+        /// restore, by label (C3; `docs/design/services.md`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        restore: Option<BTreeMap<String, lane_services::LaneRestore>>,
+        /// Why there is no `restore` when a checkpoint was named.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        restore_note: Option<String>,
     },
     /// A JSON document (`SplitClose` manifest, checkpoints, storage).
     Document {
@@ -1075,6 +1118,8 @@ pub enum ScopeLifecycleAction {
 pub enum ScopeCleanupState {
     Removed,
     Absent,
+    /// Left in place on purpose (a services VM that `stop` and `reset` keep).
+    Kept,
     CleanupUncertain,
 }
 
@@ -1206,6 +1251,17 @@ impl ExecuteSpec {
             && (cwd.starts_with(&self.session.launch_directory)
                 || cwd.starts_with(&self.session.guest_home))
     }
+}
+
+/// What the daemon names when it asks the backend to restore a lane (C3).
+pub struct LaneCall<'a> {
+    pub root: &'a Path,
+    pub workspace: &'a str,
+    /// Where the checkpointed stacks' folders are relative to, when that is not
+    /// the project root (a checkpoint of a lane).
+    pub source: Option<&'a Path>,
+    pub lane_dir: &'a Path,
+    pub fork: &'a str,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1443,6 +1499,12 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
         Vec::new()
     }
+    /// Features only this backend and build can offer, listed after
+    /// [`FEATURES`] in `marsh status --json` and the event stream's hello
+    /// (`services-v1`: only when this build can run services).
+    fn extra_features(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
     /// Add what only the backend knows to `marsh status` (VM quarantines
     /// held by the stock adapter, and why recovery left them).
     fn annotate_status(&self, _status: &mut StatusDocument) {}
@@ -1472,6 +1534,121 @@ pub trait DaemonBackend: Send + Sync + 'static {
     ) -> Result<WorkersStopReport, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
+    /// `marsh services ...` (host only): the JSON document the CLI prints.
+    fn services(
+        &self,
+        _request: ServicesRequest,
+        _store: &DaemonStore,
+    ) -> Result<serde_json::Value, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    /// One pass of the services idle timer and lease expiry, from the
+    /// server's background thread, every second. Never delays a request.
+    fn services_pass(&self) {}
+    /// A checkpoint's services snapshot of `workspace` under `checkpoint_id`
+    /// (C12). Goes through the relay of the project's services VM **only if
+    /// it is ready**: it never starts or creates the VM. What it came to is
+    /// the [`checkpoint::ServicesCapture`]; no outcome here fails the file
+    /// checkpoint.
+    fn capture_services(
+        &self,
+        _root: &Path,
+        _workspace: &str,
+        _checkpoint_id: &str,
+    ) -> checkpoint::ServicesCapture {
+        checkpoint::ServicesCapture::Off
+    }
+    /// The bounds of the folder local data (git-ignored files) a checkpoint of
+    /// `root` saves (C5), or `None` for a backend that saves none
+    /// (`ignored: null`). The real backend saves it whether or not Docker is on.
+    fn ignored_limits(&self, _root: &Path) -> Option<ignored::Limits> {
+        None
+    }
+    /// Drop one services snapshot. `Ok(existed)`; `Err` says why it was not
+    /// dropped (not ready, busy), and the orphan collector retries later.
+    fn drop_services(&self, _root: &Path, _snapshot_id: &str) -> Result<bool, String> {
+        Err("services snapshots are unavailable".into())
+    }
+    /// The snapshots the project's services agent holds. `Err` while the VM
+    /// is not ready: nothing is started to find out.
+    fn list_services(&self, _root: &Path) -> Result<Vec<checkpoint::ServicesSnapshotInfo>, String> {
+        Err("services snapshots are unavailable".into())
+    }
+    /// What a checkpoint of `workspace` made while the VM is stopped may
+    /// reference, decided from what marsh recorded at the stop (per
+    /// workspace, bound to the owned VM's identity). Never starts anything.
+    fn services_reuse(&self, _root: &Path, _workspace: &str) -> checkpoint::ServicesReuse {
+        checkpoint::ServicesReuse::None
+    }
+    /// A lane's workspace has checkpoints (`true`) or none left (`false`): the
+    /// stop cutover captures every tracked workspace, and a workspace no
+    /// longer tracked is no longer protected.
+    fn services_track(&self, _root: &Path, _workspace: &str, _tracked: bool) {}
+    /// Recovery, once at start: the lane workspaces that still have a checkpoint
+    /// record (`live`). A lane the backend recorded a capture for that is not
+    /// among them lost its record (a crash between publishing the snapshot and
+    /// recording the checkpoint, or its directory): the capture is no longer
+    /// protected and is untracked, so the collector reclaims it unless a record,
+    /// a pending checkpoint or a lease still names it.
+    fn services_reconcile(&self, _live: &std::collections::BTreeSet<(PathBuf, String)>) {}
+    /// Snapshot ids the orphan collector must leave alone for `root`: every
+    /// workspace's last capture and any capture still being recorded.
+    fn services_protected(&self, _root: &Path) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
+    /// A lane's restore, phase one (C3): the backend asks the project's
+    /// services agent (starting the VM if it is stopped) to create the fork in
+    /// the lane's workspace and install `snapshot`'s data, and returns the raw
+    /// result for the daemon to validate (E1-R2). Nothing in the result is
+    /// trusted here.
+    fn services_restore_prepare(
+        &self,
+        _call: &LaneCall<'_>,
+        _snapshot: &str,
+    ) -> Result<serde_json::Value, lane_services::CallFailure> {
+        Err(lane_services::CallFailure::new(
+            lane_services::Problem::Off,
+            "services are not available",
+        ))
+    }
+    /// A lane's restore, phase two: after the daemon wrote the lane files.
+    fn services_restore_up(
+        &self,
+        _call: &LaneCall<'_>,
+    ) -> Result<serde_json::Value, lane_services::CallFailure> {
+        Err(lane_services::CallFailure::new(
+            lane_services::Problem::Off,
+            "services are not available",
+        ))
+    }
+    /// Drops everything of one lane workspace: containers, volumes, networks
+    /// and its ledger scope, by workspace only. Never starts a stopped VM.
+    fn services_drop_workspace(
+        &self,
+        _root: &Path,
+        _workspace: &str,
+    ) -> lane_services::DropOutcome {
+        lane_services::DropOutcome::Nothing
+    }
+    /// Whether services are turned on for the project (a checkpoint with no
+    /// app data of a project that expects some says so).
+    fn services_enabled(&self, _root: &Path) -> bool {
+        false
+    }
+    /// A lane of an open split exists (`Some(ports)`: original port number to
+    /// the fork's published number, empty until the restore says) or is gone
+    /// (`None`). Only a registered lane's workspace gives its jobs an endpoint
+    /// (C3), so a job of a lane closed meanwhile gets none.
+    fn services_lane(&self, _root: &Path, _workspace: &str, _ports: Option<&BTreeMap<u16, u16>>) {}
+    /// A harness barrier on the Mac (`hold-*`): `<point>.reached` appears
+    /// under `test-holds` while the mode is on, until `<point>.release`.
+    fn test_hold(&self, _point: &str) {}
+    /// The projects whose services snapshots may need collecting: every
+    /// project with a recorded capture and every owned services VM, found
+    /// without checkpoint records and without starting anything.
+    fn services_snapshot_roots(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
     /// `marsh gc`: one garbage collection of this daemon's VMs now.
     fn gc_vms(&self, _dry_run: bool, _store: &DaemonStore) -> Result<VmGcReport, DaemonError> {
         Err(DaemonError::BackendUnavailable)
@@ -1500,6 +1677,15 @@ pub trait DaemonBackend: Send + Sync + 'static {
                 detail: Some(DaemonError::BackendUnavailable.to_string()),
             }],
         }
+    }
+    /// `marsh reset --include-services`: remove the services VMs of exactly
+    /// the `confirmed` projects (keys as `marsh services status` lists them).
+    fn remove_services(
+        &self,
+        _confirmed: &[String],
+        _deadline: Instant,
+    ) -> Vec<ScopeCleanupComponent> {
+        Vec::new()
     }
     fn prepare(
         &self,
@@ -1776,6 +1962,10 @@ pub struct StatusDocument {
     /// skills store (`marsh config skills-mirror`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills_mirror: Option<Box<SkillsMirrorStatus>>,
+    /// Test-build break modes this daemon's own environment selected
+    /// (`docs/design/test-breaks.md`). Always empty in release builds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_breaks: Vec<String>,
     /// This daemon's marsh version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -1787,6 +1977,97 @@ pub struct StatusDocument {
     /// daemon, or starting it failed (this daemon keeps running).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_notice: Option<String>,
+}
+
+/// Break modes that `marsh_contracts::break_mode` may report. Add each new
+/// mode here and in the table in `docs/design/test-breaks.md`.
+#[cfg(feature = "test-breaks")]
+const KNOWN_TEST_BREAKS: &[&str] = &[
+    "demo",
+    // C12: services snapshots in checkpoints (`checkpoint::breaks` here,
+    // `services_snapshots::breaks` in marsh-backend).
+    checkpoint::breaks::RETENTION_KEEP_SNAPSHOTS,
+    checkpoint::breaks::ORPHAN_GC_OFF,
+    checkpoint::breaks::REUSE_LEASE_OFF,
+    checkpoint::breaks::CAPTURE_ADMISSION_BLOCKS,
+    checkpoint::breaks::ORPHAN_ROOTS_FROM_RECORDS,
+    checkpoint::breaks::LANE_CAPTURE_ROOT,
+    checkpoint::breaks::MANIFEST_REFS_UNCHECKED,
+    "backend-services-disconnected",
+    "capture-ensure-vm",
+    "reuse-last-snapshot-off",
+    "idle-final-capture-off",
+    "admit-ignore-pool",
+    "stop-fence-off",
+    "stop-pause-off",
+    "stop-base-only",
+    "reuse-ignores-failure",
+    "idle-ignores-inflight",
+    "capture-gate-ignored",
+    "journal-write-fail",
+    "journal-marker-fail",
+    "journal-crash-after-intent",
+    "journal-intent-off",
+    "journal-neither-ignored",
+    "journal-vm-unbound",
+    "journal-loss-silent",
+    "lane-reconcile-off",
+    "hold-checkpoint-before-space-check",
+    // E4: reaping a job's services containers.
+    "reap-off",
+    "shell-reap-on-exit",
+    // The mode names of C4, C5 and P2, each with the TEST-PLAN name the
+    // harness catalogue uses (the same defect).
+    "services-feature-off",
+    "feature-hidden",
+    ignored::breaks::IGNORED_SKIP,
+    ignored::breaks::IGNORED_CAPTURE_OFF,
+    ignored::breaks::IGNORED_FOLLOW_SYMLINK,
+    ignored::breaks::IGNORED_FOLLOW_OUTSIDE_SYMLINK,
+    "capture-no-skip",
+    "capture-block-next-prompt",
+    // C3: app data in lanes (`lane_services::breaks`; the backend's lane scope
+    // mode `lane-scope-root` and the agent's `restore-*` modes are in
+    // marsh-backend and the agent).
+    lane_services::breaks::RESTORE_FILES_FROM_AGENT,
+    lane_services::breaks::RESTORE_LINE_TRUST_VM,
+    lane_services::breaks::LANE_SCOPE_ROOT,
+    lane_services::breaks::LANE_DROP_OFF,
+    lane_services::breaks::DROP_NOOP,
+    lane_services::breaks::RESTORE_SILENT_FAIL,
+    lane_services::breaks::LINE_ALWAYS_OK,
+    lane_services::breaks::LINE_OMIT_FRESH,
+    lane_services::breaks::LINE_INTERNAL_WORDS,
+    lane_services::breaks::LANE_PORTS_UNMAPPED,
+    lane_services::breaks::LANE_FILES_FOLLOW_SYMLINKS,
+    lane_services::breaks::APPLY_INCLUDE_GENERATED,
+    lane_services::breaks::HOLD_LANE_FILES_WRITE,
+    lane_services::breaks::HOLD_RESTORE_AFTER_LEASE,
+    "hold-cutover-after-capture",
+    "hold-cutover-after-count",
+    // The cutover's engine queries (`marsh-sbx` reads them).
+    "fault-engine-query",
+    "engine-query-fail-open",
+];
+#[cfg(not(feature = "test-breaks"))]
+const KNOWN_TEST_BREAKS: &[&str] = &["demo"];
+
+/// Every break mode this build can attest (test builds list the C12 modes;
+/// release builds only `demo`).
+#[must_use]
+pub fn known_test_breaks() -> &'static [&'static str] {
+    KNOWN_TEST_BREAKS
+}
+
+/// The known break modes the daemon's environment selected (feature
+/// `test-breaks` only; empty otherwise).
+#[must_use]
+pub fn active_test_breaks() -> Vec<String> {
+    KNOWN_TEST_BREAKS
+        .iter()
+        .filter(|mode| marsh_contracts::break_mode(mode))
+        .map(ToString::to_string)
+        .collect()
 }
 
 /// Key in `$MARSH_HOME/config.json`, written by `marsh config skills-mirror`
@@ -2423,9 +2704,11 @@ impl PublicRequest {
             | Self::ResetWorkers { .. }
             | Self::StopWorkers { .. }
             | Self::GcVms { .. }
+            | Self::Services { .. }
             | Self::ForgetCloudCreate { .. }
             | Self::UninstallKit { .. }
             | Self::ResetScope
+            | Self::ResetScopeIncludingServices { .. }
             | Self::StopScope => RequestAuthority::HostLifecycle,
             Self::AcpPublishedPrompt { .. }
             | Self::AcpPublishedStatus { .. }
@@ -4404,6 +4687,7 @@ impl DaemonStore {
             peer_review: None,
             worker_recoveries: state.worker_recoveries.clone(),
             skills_mirror: None,
+            test_breaks: active_test_breaks(),
             version: Some(env!("CARGO_PKG_VERSION").into()),
             update_pending: None,
             update_notice: None,
@@ -4839,6 +5123,12 @@ impl Server {
 
     #[must_use]
     pub fn with_backend(mut self, backend: Arc<dyn DaemonBackend>) -> Self {
+        // Checkpoints reach the services VMs through the backend (C12).
+        self.splits
+            .checkpoints
+            .attach_backend(&Arc::downgrade(&backend));
+        // The open lanes of a daemon that restarted are known to it again.
+        self.splits.register_open_lanes(&*backend);
         self.backend = backend;
         self
     }
@@ -5110,6 +5400,7 @@ impl Server {
             self.spawn_kit_updater(Arc::clone(&stop)),
             self.spawn_sbxenv_watcher(Arc::clone(&stop)),
             self.spawn_skills_mirror(Arc::clone(&stop)),
+            self.spawn_services_timer(Arc::clone(&stop)),
             self.spawn_cloud_collector(Arc::clone(&stop)),
             self.spawn_session_reaper(Arc::clone(&stop)),
         ];
@@ -5280,6 +5571,62 @@ impl Server {
         }
     }
 
+    /// The services idle timer and lease expiry: a background thread that
+    /// asks the backend every second; it does nothing unless a lease holder
+    /// expired or an idle deadline passed.
+    fn spawn_services_timer(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        let backend = Arc::downgrade(&self.backend);
+        let splits = Arc::downgrade(&self.splits);
+        let spawned = thread::Builder::new()
+            .name("marsh-services-timer".into())
+            .spawn(move || {
+                let mut next_orphan_pass = Instant::now();
+                loop {
+                    let until = Instant::now() + SERVICES_TIMER_INTERVAL;
+                    while Instant::now() < until {
+                        if stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                    let Some(backend) = backend.upgrade() else {
+                        return;
+                    };
+                    let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        backend.services_pass();
+                    }));
+                    if pass.is_err() {
+                        eprintln!("marshd: a services timer pass panicked; it runs again");
+                    }
+                    // Orphaned services snapshots, every few seconds; the
+                    // first pass after a start is the start's collection.
+                    if Instant::now() >= next_orphan_pass {
+                        next_orphan_pass = Instant::now() + SERVICES_ORPHAN_INTERVAL;
+                        if let Some(splits) = splits.upgrade() {
+                            let pass =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    splits.checkpoints.collect_orphans();
+                                    // Lanes whose services could not be dropped yet.
+                                    splits.lane_drops.retry(&*backend);
+                                }));
+                            if pass.is_err() {
+                                eprintln!(
+                                    "marshd: an orphan snapshot pass panicked; it runs again"
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("marshd: cannot start the services timer: {error}");
+                None
+            }
+        }
+    }
+
     fn spawn_cloud_collector(&self, stop: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         let backend = Arc::downgrade(&self.backend);
         let store = Arc::downgrade(&self.store.0);
@@ -5420,6 +5767,9 @@ const CLOUD_COLLECTOR_INTERVAL: Duration = Duration::from_secs(30);
 const KIT_UPDATER_INTERVAL: Duration = Duration::from_mins(1);
 const SBXENV_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 const SKILLS_MIRROR_INTERVAL: Duration = Duration::from_secs(1);
+const SERVICES_TIMER_INTERVAL: Duration = Duration::from_secs(1);
+/// How often the services timer looks for orphaned snapshots.
+const SERVICES_ORPHAN_INTERVAL: Duration = Duration::from_secs(5);
 
 struct StopOnDrop(Arc<AtomicBool>);
 
@@ -5616,8 +5966,13 @@ impl ConnectionHandler {
             );
         };
         stream.set_read_timeout(None)?;
+        let features: Vec<&str> = FEATURES
+            .iter()
+            .copied()
+            .chain(self.backend.extra_features())
+            .collect();
         let hello =
-            serde_json::json!({"type": "hello", "seq": subscription.seq, "features": FEATURES});
+            serde_json::json!({"type": "hello", "seq": subscription.seq, "features": features});
         let mut line = hello.to_string();
         loop {
             write_frame(&mut stream, &PublicReply::Event { line })?;
@@ -5714,14 +6069,35 @@ impl ConnectionHandler {
         &self,
         stream: &mut UnixStream,
         action: ScopeLifecycleAction,
+        include_services: Option<&[String]>,
     ) -> Result<(), DaemonError> {
         if action == ScopeLifecycleAction::Stop {
             self.acp.revoke_publications_for_scope_stop();
         }
         let deadline = Instant::now() + self.scope_lifecycle_timeout;
-        let report = self
+        let mut report = self
             .backend
             .teardown_scope(action, self.store.clone(), deadline);
+        // `reset --include-services`: the services VMs of the projects the
+        // user confirmed go after the ordinary reset.
+        if let Some(confirmed) = include_services {
+            let removed = self.backend.remove_services(confirmed, deadline);
+            report.cleanup_complete &= removed
+                .iter()
+                .all(|component| component.state != ScopeCleanupState::CleanupUncertain);
+            // The default reset reported every services VM as kept; this step
+            // says what became of the ones it handled, once.
+            let handled = removed
+                .iter()
+                .filter_map(|component| component.vm.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            report.components.retain(|component| {
+                !(component.kind == "services"
+                    && component.state == ScopeCleanupState::Kept
+                    && component.vm.as_ref().is_some_and(|vm| handled.contains(vm)))
+            });
+            report.components.extend(removed);
+        }
         write_frame(stream, &PublicReply::ScopeLifecycle(report.clone()))?;
         if action == ScopeLifecycleAction::Stop && report.cleanup_complete {
             self.shutdown_requested.store(true, Ordering::Release);
@@ -5990,10 +6366,12 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &mcp_publication_reply(reply))
             }
             PublicRequest::ResetScope => {
-                self.handle_scope_lifecycle(&mut stream, ScopeLifecycleAction::Reset)
+                self.handle_scope_lifecycle(&mut stream, ScopeLifecycleAction::Reset, None)
             }
+            PublicRequest::ResetScopeIncludingServices { confirmed } => self
+                .handle_scope_lifecycle(&mut stream, ScopeLifecycleAction::Reset, Some(&confirmed)),
             PublicRequest::StopScope => {
-                self.handle_scope_lifecycle(&mut stream, ScopeLifecycleAction::Stop)
+                self.handle_scope_lifecycle(&mut stream, ScopeLifecycleAction::Stop, None)
             }
             PublicRequest::Execute(spec) => {
                 // authorize_request_session has replaced caller-supplied roots
@@ -6664,6 +7042,19 @@ impl ConnectionHandler {
                     &mut stream,
                     &self.store.open_url(open_url::Caller::Job(&job), &url),
                 ),
+                // Test break `services-cli-in-job` (E5, SEC-09 c1): the job's
+                // capability is served a host-only services request.
+                PublicRequest::Services { .. }
+                    if marsh_contracts::break_mode("services-cli-in-job") =>
+                {
+                    let reply = dispatch_request(
+                        &self.store,
+                        self.backend.as_ref(),
+                        &self.build_identity,
+                        request.body,
+                    );
+                    write_frame(&mut stream, &reply)
+                }
                 _ => Self::reject_unauthorized(
                     &mut stream,
                     "the job capability admits only ProcessRun, ProcessShow, jobs, SplitCreate, SplitJoin, and OpenUrl",
@@ -6681,7 +7072,10 @@ impl ConnectionHandler {
         }
         let lifecycle_request = matches!(
             request.body,
-            PublicRequest::ResetScope | PublicRequest::StopScope | PublicRequest::Shutdown
+            PublicRequest::ResetScope
+                | PublicRequest::ResetScopeIncludingServices { .. }
+                | PublicRequest::StopScope
+                | PublicRequest::Shutdown
         );
         if lifecycle_request
             || matches!(
@@ -6700,7 +7094,9 @@ impl ConnectionHandler {
             // and a reset or stop waits briefly for them.
             let waits = matches!(
                 request.body,
-                PublicRequest::ResetScope | PublicRequest::StopScope
+                PublicRequest::ResetScope
+                    | PublicRequest::ResetScopeIncludingServices { .. }
+                    | PublicRequest::StopScope
             );
             let deadline = Instant::now() + Duration::from_secs(15);
             loop {
@@ -7029,6 +7425,9 @@ impl ConnectionHandler {
                     .map(|(pending, _)| pending);
                 status.update_notice = self.upgrade.as_ref().and_then(|watch| watch.notice());
                 self.backend.annotate_status(&mut status);
+                status
+                    .features
+                    .extend(self.backend.extra_features().into_iter().map(String::from));
                 write_frame(&mut stream, &PublicReply::Status(Box::new(status)))
             }
             PublicRequest::ResetWorkers { selection } => {
@@ -7121,9 +7520,11 @@ fn authorize_request_session(
         | PublicRequest::ResetWorkers { .. }
         | PublicRequest::StopWorkers { .. }
         | PublicRequest::GcVms { .. }
+        | PublicRequest::Services { .. }
         | PublicRequest::ForgetCloudCreate { .. }
         | PublicRequest::UninstallKit { .. }
         | PublicRequest::ResetScope
+        | PublicRequest::ResetScopeIncludingServices { .. }
         | PublicRequest::StopScope
         | PublicRequest::AttachShell { .. }
         | PublicRequest::AttachPinnedShell { .. }
@@ -7169,12 +7570,13 @@ fn dispatch_request(
             update_identity: None,
             version: Some(env!("CARGO_PKG_VERSION").into()),
         },
-        PublicRequest::Shutdown | PublicRequest::ResetScope | PublicRequest::StopScope => {
-            PublicReply::Error {
-                code: ErrorCode::Internal,
-                message: "request was not handled by the host lifecycle path".into(),
-            }
-        }
+        PublicRequest::Shutdown
+        | PublicRequest::ResetScope
+        | PublicRequest::ResetScopeIncludingServices { .. }
+        | PublicRequest::StopScope => PublicReply::Error {
+            code: ErrorCode::Internal,
+            message: "request was not handled by the host lifecycle path".into(),
+        },
         PublicRequest::RegisteredCommands => match backend.registered_commands() {
             Ok(mut commands) => {
                 commands.sort();
@@ -7211,6 +7613,10 @@ fn dispatch_request(
         },
         PublicRequest::GcVms { dry_run } => match backend.gc_vms(dry_run, store) {
             Ok(report) => PublicReply::VmGc(report),
+            Err(error) => public_error(&error),
+        },
+        PublicRequest::Services { request } => match backend.services(request, store) {
+            Ok(document) => PublicReply::Document { document },
             Err(error) => public_error(&error),
         },
         PublicRequest::ForgetCloudCreate { name } => match backend.forget_cloud_create(&name) {
@@ -7307,7 +7713,11 @@ fn dispatch_request(
             Err(error) => public_error(&error),
         },
         PublicRequest::Status { session_id } => {
-            PublicReply::Status(Box::new(store.status(session_id)))
+            let mut status = store.status(session_id);
+            status
+                .features
+                .extend(backend.extra_features().into_iter().map(String::from));
+            PublicReply::Status(Box::new(status))
         }
         PublicRequest::Jobs => PublicReply::Jobs(store.jobs()),
         PublicRequest::ShowJob { job_id } => match store.job(&job_id) {
@@ -8396,6 +8806,33 @@ impl Client {
         })
     }
 
+    /// `marsh services ...`. A create can pull an image and boot a VM, so
+    /// there is no read deadline.
+    ///
+    /// # Errors
+    /// Returns the daemon's refusal or transport errors.
+    pub fn services(&self, request: &ServicesRequest) -> Result<serde_json::Value, DaemonError> {
+        Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
+            let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
+            stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+            write_frame(
+                &mut stream,
+                &Envelope {
+                    protocol: PROTOCOL.into(),
+                    token: self.token.clone(),
+                    body: PublicRequest::Services {
+                        request: request.clone(),
+                    },
+                },
+            )?;
+            stream.set_read_timeout(None)?;
+            match read_frame(&mut stream)? {
+                PublicReply::Document { document } => Ok(document),
+                reply => Err(unexpected_reply(reply)),
+            }
+        })
+    }
+
     pub fn gc_vms(&self, dry_run: bool) -> Result<VmGcReport, DaemonError> {
         Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
             let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
@@ -8426,6 +8863,14 @@ impl Client {
 
     pub fn reset_scope(&self) -> Result<ScopeLifecycleReport, DaemonError> {
         self.scope_lifecycle(&PublicRequest::ResetScope)
+    }
+
+    /// `marsh reset --include-services` for the confirmed projects.
+    pub fn reset_scope_including_services(
+        &self,
+        confirmed: Vec<String>,
+    ) -> Result<ScopeLifecycleReport, DaemonError> {
+        self.scope_lifecycle(&PublicRequest::ResetScopeIncludingServices { confirmed })
     }
 
     pub fn stop_scope(&self) -> Result<ScopeLifecycleReport, DaemonError> {

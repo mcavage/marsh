@@ -1,0 +1,1553 @@
+{
+ "description": "SEC-02 corpus: each case is a forbidden request on its own connection. Expect a local refusal (403 `marsh: ` or 400) and no object named nfxraw-* afterwards.",
+ "cases": [
+  {
+   "id": "E01-key-case-lower",
+   "description": "hostconfig/privileged lowercase (Go's decoder matches case-insensitively)",
+   "send": [
+    "POST /containers/create?name=nfxraw-1 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"cmd\":[\"true\"],\"hostconfig\":{\"privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-1"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-1?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E02-key-case-hostconfig-title",
+   "description": "hostconfig.Privileged",
+   "send": [
+    "POST /containers/create?name=nfxraw-2 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 129\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"hostconfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-2"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-2?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E03-key-case-upper",
+   "description": "HOSTCONFIG/PRIVILEGED",
+   "send": [
+    "POST /containers/create?name=nfxraw-3 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"IMAGE\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"CMD\":[\"true\"],\"HOSTCONFIG\":{\"PRIVILEGED\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-3"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-3?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E04-key-case-binds-lower",
+   "description": "HostConfig.binds lowercase mounting /",
+   "send": [
+    "POST /containers/create?name=nfxraw-4 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 128\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"binds\":[\"/:/h\"]}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-4"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-4?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E05-key-case-binds-mixed",
+   "description": "hostCONFIG.bINDS mounting /",
+   "send": [
+    "POST /containers/create?name=nfxraw-5 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 128\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"hostCONFIG\":{\"bINDS\":[\"/:/h\"]}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-5"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-5?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E06-duplicate-key-last-wins",
+   "description": "HostConfig twice: benign first, privileged last",
+   "send": [
+    "POST /containers/create?name=nfxraw-6 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 145\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{},\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-6"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-6?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E07-duplicate-key-first-wins",
+   "description": "HostConfig twice: privileged first, benign last",
+   "send": [
+    "POST /containers/create?name=nfxraw-7 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 145\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":true},\"HostConfig\":{}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-7"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-7?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E08-duplicate-key-mixed-case",
+   "description": "HostConfig benign, hostconfig privileged",
+   "send": [
+    "POST /containers/create?name=nfxraw-8 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 145\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{},\"hostconfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-8"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-8?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E09-duplicate-inner-key-mixed-case",
+   "description": "Privileged false, then PRIVILEGED true",
+   "send": [
+    "POST /containers/create?name=nfxraw-9 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 148\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":false,\"PRIVILEGED\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-9"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-9?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E10-type-privileged-string-true",
+   "description": "Privileged: \"true\"",
+   "send": [
+    "POST /containers/create?name=nfxraw-10 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 131\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":\"true\"}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-10"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-10?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E11-type-privileged-number-one",
+   "description": "Privileged: 1",
+   "send": [
+    "POST /containers/create?name=nfxraw-11 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 126\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":1}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-11"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-11?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E12-type-privileged-null",
+   "description": "Privileged: null",
+   "send": [
+    "POST /containers/create?name=nfxraw-12 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 129\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":null}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-12"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-12?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E13-type-privileged-array-true",
+   "description": "Privileged: [true]",
+   "send": [
+    "POST /containers/create?name=nfxraw-13 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 131\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":[true]}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-13"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-13?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E14-trailing-xyz",
+   "description": "valid privileged JSON followed by xyz",
+   "send": [
+    "POST /containers/create?name=nfxraw-14 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 147\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}xyz"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-14"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-14?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E15-two-documents",
+   "description": "a benign JSON value, then a privileged one",
+   "send": [
+    "POST /containers/create?name=nfxraw-15 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 241\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\"}\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-15"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-15?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E16-bom-prefixed",
+   "description": "UTF-8 byte order mark before a privileged body",
+   "send": [
+    "POST /containers/create?name=nfxraw-16 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 147\r\n\r\n\u00ef\u00bb\u00bf{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-16"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-16?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E17-utf16-body",
+   "description": "a privileged body encoded as UTF-16 with a BOM",
+   "send": [
+    "POST /containers/create?name=nfxraw-17 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json; charset=utf-16\r\nContent-Length: 290\r\n\r\n",
+    {
+     "hex": "fffe7b00220049006d0061006700650022003a002200620075007300790062006f0078003a0031002e003300370040007300680061003200350036003a00610037006400620063003300310039006200310034003300380031003100350061003200300037006500310031003900330030006400630034006200620033006500360034003300640063006200330065006300300062006400640036003900340062006200330036006300640038006600610064003200380039006500630022002c00220043006d00640022003a005b002200740072007500650022005d002c00220048006f007300740043006f006e0066006900670022003a007b002200500072006900760069006c00650067006500640022003a0074007200750065007d007d00"
+    }
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-17"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-17?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E18-invalid-utf8",
+   "description": "a privileged body with invalid UTF-8 inside a string",
+   "send": [
+    "POST /containers/create?name=nfxraw-18 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 154\r\n\r\n",
+    {
+     "hex": "7b22496d616765223a2262757379626f783a312e3337407368613235363a61376462633331396231343338313135613230376531313933306463346262336536343364636233656330626464363934626233366364386661643238396563222c22436d64223a5b2274727565225d2c22486f7374436f6e666967223a7b2250726976696c65676564223a747275657d2c2258223a22fffec0227d"
+    }
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-18"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-18?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E19-depth-10000",
+   "description": "privileged create with nesting depth 10000",
+   "send": [
+    "POST /containers/create?name=nfxraw-19 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 20137\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":true},\"Deep\":",
+    {
+     "fill": 10000,
+     "text": "["
+    },
+    {
+     "fill": 10000,
+     "text": "]"
+    },
+    "}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-19"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-19?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E20-body-16-mib",
+   "description": "a 16 MiB privileged create",
+   "send": [
+    "POST /containers/create?name=nfxraw-20 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 16777216\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"HostConfig\":{\"Privileged\":true},\"Pad\":\"",
+    {
+     "fill": 16777078,
+     "text": "x"
+    },
+    "\"}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403,
+      413
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-20"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-20?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E21-route-unversioned",
+   "description": "privileged create via POST /containers/create",
+   "send": [
+    "POST /containers/create?name=nfxraw-21 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-21"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-21?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E22-route-v1.24-below-minimum",
+   "description": "privileged create via POST /v1.24/containers/create",
+   "send": [
+    "POST /v1.24/containers/create?name=nfxraw-22 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-22"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-22?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E23-route-v1.47",
+   "description": "privileged create via POST /v1.47/containers/create",
+   "send": [
+    "POST /v1.47/containers/create?name=nfxraw-23 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-23"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-23?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E24-route-v1.47.0",
+   "description": "privileged create via POST /v1.47.0/containers/create",
+   "send": [
+    "POST /v1.47.0/containers/create?name=nfxraw-24 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     403
+    ],
+    "marsh_refusals": true,
+    "forbidden_objects": [
+     "nfxraw-24"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-24?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E25-route-v01.47",
+   "description": "privileged create via POST /v01.47/containers/create",
+   "send": [
+    "POST /v01.47/containers/create?name=nfxraw-25 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-25"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-25?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E26-route-double-slash",
+   "description": "privileged create via POST //containers/create",
+   "send": [
+    "POST //containers/create?name=nfxraw-26 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-26"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-26?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E27-route-versioned-double-slash",
+   "description": "privileged create via POST /v1.47.0//containers/create",
+   "send": [
+    "POST /v1.47.0//containers/create?name=nfxraw-27 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-27"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-27?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E28-route-dot-segment",
+   "description": "privileged create via POST /./containers/create",
+   "send": [
+    "POST /./containers/create?name=nfxraw-28 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-28"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-28?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E29-route-pct-encoded-letter",
+   "description": "privileged create via POST /containers/%63reate",
+   "send": [
+    "POST /containers/%63reate?name=nfxraw-29 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-29"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-29?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E30-route-pct-encoded-slash",
+   "description": "privileged create via POST /containers%2Fcreate",
+   "send": [
+    "POST /containers%2Fcreate?name=nfxraw-30 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-30"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-30?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E31-route-pct-encoded-versioned",
+   "description": "privileged create via POST /v1.47.0/containers/%63reate",
+   "send": [
+    "POST /v1.47.0/containers/%63reate?name=nfxraw-31 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-31"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-31?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E32-route-absolute-form",
+   "description": "privileged create via POST http://d/containers/create",
+   "send": [
+    "POST http://d/containers/create?name=nfxraw-32 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-32"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-32?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E33-route-trailing-slash",
+   "description": "privileged create via POST /containers/create/",
+   "send": [
+    "POST /containers/create/?name=nfxraw-33 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-33"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-33?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E34-route-lowercase-method",
+   "description": "privileged create via post /containers/create",
+   "send": [
+    "post /containers/create?name=nfxraw-34 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-34"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-34?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E35-route-put-method",
+   "description": "privileged create via PUT /containers/create",
+   "send": [
+    "PUT /containers/create?name=nfxraw-35 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true,
+    "forbidden_objects": [
+     "nfxraw-35"
+    ]
+   },
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxraw-35?force=1"
+    }
+   ]
+  },
+  {
+   "id": "E36-get-with-body",
+   "description": "a body on GET /containers/json",
+   "send": [
+    "GET /containers/json HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 144\r\n\r\n{\"Image\":\"busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec\",\"Cmd\":[\"true\"],\"HostConfig\":{\"Privileged\":true}}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E37-legacy-start-hostconfig",
+   "description": "POST /v1.23/containers/X/start carrying a HostConfig",
+   "send": [
+    "POST /v1.23/containers/nfx-none/start HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 36\r\n\r\n{\"Privileged\":true,\"Binds\":[\"/:/h\"]}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E38-update-devices",
+   "description": "POST /containers/X/update with Resources.Devices",
+   "send": [
+    "POST /containers/nfx-none/update HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 94\r\n\r\n{\"Devices\":[{\"PathOnHost\":\"/dev/loop0\",\"PathInContainer\":\"/dev/x\",\"CgroupPermissions\":\"rwm\"}]}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E39-update-above-maxima",
+   "description": "POST /containers/X/update with huge limits",
+   "send": [
+    "POST /containers/nfx-none/update HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 69\r\n\r\n{\"Memory\":9223372036854771712,\"NanoCpus\":999999999999,\"PidsLimit\":-1}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E40-images-load",
+   "description": "POST /images/load with a traversal tar",
+   "send": [
+    "POST /images/load HTTP/1.1\r\nHost: d\r\nContent-Type: application/x-tar\r\nContent-Length: 10240\r\n\r\n",
+    {
+     "hex": "2e2e2f2e2e2f6e66782d657363617065000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303030303634340030303030303030003030303030303000303030303030303030303400303030303030303030303000303130333431002030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007573746172003030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e66780a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E41-images-create-fromsrc",
+   "description": "POST /images/create?fromSrc=",
+   "send": [
+    "POST /images/create?fromSrc=http%3A%2F%2Fexample.invalid%2Fx.tar&repo=nfx%2Fx HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E42-images-push",
+   "description": "POST /images/busybox/push",
+   "send": [
+    "POST /images/busybox/push HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E43-auth",
+   "description": "POST /auth",
+   "send": [
+    "POST /auth HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 65\r\n\r\n{\"username\":\"u\",\"password\":\"p\",\"serveraddress\":\"example.invalid\"}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E44-commit-other-scope",
+   "description": "POST /commit?repo=other-scope",
+   "send": [
+    "POST /commit?container=nfx-none&repo=nfx-other-scope%2Fx HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E45-plugins-get",
+   "description": "GET /plugins",
+   "send": [
+    "GET /plugins HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E46-plugins-post",
+   "description": "POST /plugins",
+   "send": [
+    "POST /plugins HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E47-plugins-put",
+   "description": "PUT /plugins",
+   "send": [
+    "PUT /plugins HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E48-plugins-delete",
+   "description": "DELETE /plugins",
+   "send": [
+    "DELETE /plugins HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E49-swarm-get",
+   "description": "GET /swarm",
+   "send": [
+    "GET /swarm HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E50-swarm-post",
+   "description": "POST /swarm",
+   "send": [
+    "POST /swarm HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E51-swarm-put",
+   "description": "PUT /swarm",
+   "send": [
+    "PUT /swarm HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E52-swarm-delete",
+   "description": "DELETE /swarm",
+   "send": [
+    "DELETE /swarm HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E53-services-get",
+   "description": "GET /services",
+   "send": [
+    "GET /services HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E54-services-post",
+   "description": "POST /services",
+   "send": [
+    "POST /services HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E55-services-put",
+   "description": "PUT /services",
+   "send": [
+    "PUT /services HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E56-services-delete",
+   "description": "DELETE /services",
+   "send": [
+    "DELETE /services HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E57-secrets-get",
+   "description": "GET /secrets",
+   "send": [
+    "GET /secrets HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E58-secrets-post",
+   "description": "POST /secrets",
+   "send": [
+    "POST /secrets HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E59-secrets-put",
+   "description": "PUT /secrets",
+   "send": [
+    "PUT /secrets HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E60-secrets-delete",
+   "description": "DELETE /secrets",
+   "send": [
+    "DELETE /secrets HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E61-configs-get",
+   "description": "GET /configs",
+   "send": [
+    "GET /configs HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E62-configs-post",
+   "description": "POST /configs",
+   "send": [
+    "POST /configs HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E63-configs-put",
+   "description": "PUT /configs",
+   "send": [
+    "PUT /configs HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E64-configs-delete",
+   "description": "DELETE /configs",
+   "send": [
+    "DELETE /configs HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E65-nodes-get",
+   "description": "GET /nodes",
+   "send": [
+    "GET /nodes HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E66-nodes-post",
+   "description": "POST /nodes",
+   "send": [
+    "POST /nodes HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E67-nodes-put",
+   "description": "PUT /nodes",
+   "send": [
+    "PUT /nodes HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  },
+  {
+   "id": "E68-nodes-delete",
+   "description": "DELETE /nodes",
+   "send": [
+    "DELETE /nodes HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     [
+      400,
+      403
+     ]
+    ],
+    "marsh_refusals": true,
+    "close_on_400": true
+   },
+   "cleanup": []
+  }
+ ]
+}

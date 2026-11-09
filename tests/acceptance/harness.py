@@ -652,7 +652,7 @@ class ProductScope(IsolatedScope):
         source_identity_value = source_identity(
             pathlib.Path(arguments.source_tree), arguments.source_revision
         )
-        self.root = disposable_root(self.ROOT_PREFIX)
+        self.root = self.make_root()
         try:
             self.project = self.root / "project"
             self.home = self.root / "home"
@@ -682,6 +682,10 @@ class ProductScope(IsolatedScope):
         self.source["verified_build_receipt"] = build_receipt
         self.stock_before = None
         self.records: list[dict[str, Any]] = []
+
+    def make_root(self) -> pathlib.Path:
+        """Create this scope's disposable root; a suite with its own naming overrides it."""
+        return disposable_root(self.ROOT_PREFIX)
 
     def run(
         self,
@@ -1177,12 +1181,10 @@ def scenario_list(suite: type[ScenarioSuite]) -> list[tuple[str, str]]:
             for scenario in suite.ORDER]
 
 
-def suite_main(suite: type[ScenarioSuite], parser: argparse.ArgumentParser) -> int:
-    arguments = parser.parse_args()
-    if arguments.list:
-        for scenario, summary in scenario_list(suite):
-            print(f"{scenario}\t{summary}")
-        return 0
+def resolve_arguments(suite: type[ScenarioSuite], parser: argparse.ArgumentParser,
+                      arguments: argparse.Namespace) -> argparse.Namespace | None:
+    """Fill in the installed product, Kit, source revision and evidence directory
+    (None, after saying why, when the product is not installed)."""
     if not arguments.kit:
         parser.error("--kit is required")
     prefix = pathlib.Path(arguments.prefix).expanduser().resolve()
@@ -1190,7 +1192,7 @@ def suite_main(suite: type[ScenarioSuite], parser: argparse.ArgumentParser) -> i
     arguments.guest_artifacts = prefix / "libexec" / "marsh"
     if not os.access(arguments.marsh, os.X_OK):
         print(f"{suite.LABEL}: no installed product at {arguments.marsh} (run `make dev`)")
-        return 1
+        return None
     kit = pathlib.Path(arguments.kit).expanduser()
     if kit.is_file():
         arguments.kit = json.loads(kit.read_text())["fixture"]
@@ -1200,14 +1202,29 @@ def suite_main(suite: type[ScenarioSuite], parser: argparse.ArgumentParser) -> i
             timeout=30, check=True).stdout.strip()
     if arguments.evidence is None:
         arguments.evidence = f"/private/tmp/marsh-dev-{suite.LABEL}-{os.getuid()}"
-    harness = suite(arguments)
+    return arguments
+
+
+def run_harness(harness: ScenarioSuite) -> int:
     try:
         harness.run_all()
     except KeyboardInterrupt:
-        return harness.finish(InterruptedError(f"{suite.LABEL} acceptance interrupted"))
+        return harness.finish(InterruptedError(f"{harness.LABEL} acceptance interrupted"))
     except Exception as error:
         return harness.finish(error)
     return harness.finish(None)
+
+
+def suite_main(suite: type[ScenarioSuite], parser: argparse.ArgumentParser) -> int:
+    arguments = parser.parse_args()
+    if arguments.list:
+        for scenario, summary in scenario_list(suite):
+            print(f"{scenario}\t{summary}")
+        return 0
+    arguments = resolve_arguments(suite, parser, arguments)
+    if arguments is None:
+        return 1
+    return run_harness(suite(arguments))
 
 
 class AcpScope(IsolatedScope):

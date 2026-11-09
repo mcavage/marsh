@@ -84,7 +84,8 @@ find your repository's test command, and check where it is defined.
 
 When finished, run `exit` to leave marsh, then `marsh stop` from your Mac
 terminal. Stop refuses while any marsh shells or jobs remain active. It
-removes marsh's VMs without deleting your project or saved guest home.
+removes the Kit and shell VMs without deleting your project or saved guest home,
+and keeps the data of any [services](docs/services.md) you turned on.
 
 ## Know what can change
 

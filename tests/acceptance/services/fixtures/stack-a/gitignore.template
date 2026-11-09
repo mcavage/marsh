@@ -1,0 +1,6 @@
+.env
+.env.*
+data/
+public/uploads/
+.next/
+node_modules/

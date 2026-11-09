@@ -23,7 +23,10 @@ use std::{
 };
 use thiserror::Error;
 
+mod breaks;
 mod capability;
+mod forward;
+pub use breaks::WORKER_MODES;
 mod output;
 pub use output::InterruptibleWriter;
 mod transport;
@@ -96,6 +99,32 @@ pub enum WorkerRequest {
         attempt: String,
         channel: u32,
     },
+    /// The daemon will send no more bytes on an endpoint channel (E2): the
+    /// job's connection gets a half close after the queued data.
+    ChanEof {
+        attempt: String,
+        channel: u32,
+    },
+    /// The daemon read this many more chunks of an endpoint channel's job
+    /// bytes (credit, `marsh_contracts::process::ENDPOINT_WINDOW`).
+    ChanCredit {
+        attempt: String,
+        channel: u32,
+        chunks: u32,
+    },
+    /// The daemon could not open an endpoint channel; the job's connection
+    /// reads this (a Docker connection as an HTTP error) and closes.
+    ChanRefused {
+        attempt: String,
+        channel: u32,
+        message: String,
+    },
+    /// The ports the job's workspace publishes now (the whole set). The worker
+    /// forwards exactly these, in the job's own network namespace.
+    Ports {
+        attempt: String,
+        ports: Vec<u16>,
+    },
 }
 
 /// Multiplexed worker-to-daemon protocol for one retained worker transport.
@@ -146,7 +175,33 @@ pub enum WorkerResponse {
         attempt: String,
         channel: u32,
     },
+    /// A connection to the job's `docker.sock` or to a forwarded port (E2).
+    /// Its bytes travel as `CapData`, with credit both ways.
+    ChanOpen {
+        attempt: String,
+        channel: u32,
+        kind: marsh_contracts::process::ChannelKind,
+    },
+    /// The job half-closed its side of an endpoint channel.
+    ChanEof {
+        attempt: String,
+        channel: u32,
+    },
+    /// The worker wrote this many more chunks of daemon bytes to the job.
+    ChanCredit {
+        attempt: String,
+        channel: u32,
+        chunks: u32,
+    },
+    /// What became of one forwarded port (E2).
+    PortReport {
+        attempt: String,
+        port: u16,
+        state: PortState,
+    },
 }
+
+pub use marsh_contracts::process::PortState;
 
 mod base64_bytes {
     use serde::{Deserialize, Deserializer, Serializer};
@@ -1067,15 +1122,24 @@ impl ControlSource for MailboxControlSource {
 struct MultiplexedEventSink {
     attempt: String,
     output: Publisher,
+    /// The job's container once it exists: what the port forwards inspect.
+    container: Arc<Mutex<Option<ContainerId>>>,
 }
 
 impl EventSink for MultiplexedEventSink {
     fn publish(&mut self, event: &WorkerEvent) -> Result<(), WorkerError> {
         let response = match event {
-            WorkerEvent::Started { container_id } => WorkerResponse::Started {
-                attempt: self.attempt.clone(),
-                container_id: container_id.clone(),
-            },
+            WorkerEvent::Started { container_id } => {
+                *self
+                    .container
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(container_id.clone());
+                WorkerResponse::Started {
+                    attempt: self.attempt.clone(),
+                    container_id: container_id.clone(),
+                }
+            }
             WorkerEvent::SetupFailed { .. } => return Ok(()),
         };
         self.output.send(&response)
@@ -1199,6 +1263,7 @@ pub fn serve_retained(
     let output = transport_writer.publisher();
     let controls: AttemptControls = Arc::new(Mutex::new(BTreeMap::new()));
     let capabilities: capability::Streams = Arc::new(Mutex::new(BTreeMap::new()));
+    let forwarders: capability::Forwarders = Arc::new(Mutex::new(BTreeMap::new()));
     let mut tasks = RetainedTasks {
         handles: Vec::new(),
         controls: controls.clone(),
@@ -1240,6 +1305,29 @@ pub fn serve_retained(
             } => capability::deliver(&capabilities, &attempt, channel, &bytes),
             WorkerRequest::CapClose { attempt, channel } => {
                 capability::close(&capabilities, &attempt, channel);
+            }
+            WorkerRequest::ChanEof { attempt, channel } => {
+                capability::daemon_eof(&capabilities, &attempt, channel);
+            }
+            WorkerRequest::ChanCredit {
+                attempt,
+                channel,
+                chunks,
+            } => capability::credit(&capabilities, &attempt, channel, chunks),
+            WorkerRequest::ChanRefused {
+                attempt,
+                channel,
+                message,
+            } => capability::refuse(&capabilities, &attempt, channel, &message),
+            WorkerRequest::Ports { attempt, ports } => {
+                let forwards = forwarders
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&attempt)
+                    .cloned();
+                if let Some(forwards) = forwards {
+                    forwards.set_ports(&ports);
+                }
             }
             WorkerRequest::Start {
                 attempt,
@@ -1283,6 +1371,7 @@ pub fn serve_retained(
                     .insert(attempt.clone(), Arc::clone(&mailbox));
                 // Every Kit job gets its own capability (`docs/design/processes.md` s4).
                 spec.split_capability = None;
+                let container_slot: Arc<Mutex<Option<ContainerId>>> = Arc::default();
                 let capability = match spec.capability.clone().map(|job| {
                     capability::Capability::start(
                         &attempt,
@@ -1291,6 +1380,9 @@ pub fn serve_retained(
                         output.clone(),
                         Arc::clone(&capabilities),
                         &job,
+                        Arc::clone(&forwarders),
+                        Arc::clone(&worker.runtime),
+                        Arc::clone(&container_slot),
                     )
                 }) {
                     None => None,
@@ -1325,6 +1417,7 @@ pub fn serve_retained(
                     let mut events = MultiplexedEventSink {
                         attempt: attempt.clone(),
                         output: task_output.clone(),
+                        container: container_slot,
                     };
                     let report = task_worker.run_with_events(
                         &spec,
@@ -1379,7 +1472,11 @@ pub fn serve_retained(
                     WorkerRequest::Ping { .. }
                     | WorkerRequest::Start { .. }
                     | WorkerRequest::CapData { .. }
-                    | WorkerRequest::CapClose { .. } => unreachable!(),
+                    | WorkerRequest::CapClose { .. }
+                    | WorkerRequest::ChanEof { .. }
+                    | WorkerRequest::ChanCredit { .. }
+                    | WorkerRequest::ChanRefused { .. }
+                    | WorkerRequest::Ports { .. } => unreachable!(),
                 };
                 let active = controls
                     .lock()

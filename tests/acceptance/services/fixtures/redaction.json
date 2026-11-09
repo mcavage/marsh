@@ -1,0 +1,10 @@
+{
+ "comment": "Synthetic-secret patterns (H-10, harness delta 7). Applied to every evidence byte: commands, JSON, frames, .env, inspect output, screenshots (OCR text). Fixture values are synthetic; Supabase local keys are read into env and never written, and `supabase status` output is redacted by the generic JWT pattern.",
+ "patterns": [
+  {"name": "hostile-compose canary", "regex": "NFX-CANARY-SECRET-[0-9a-f]{8}"},
+  {"name": "synthetic proxy credential", "regex": "nfx-synthetic-credential-[A-Za-z0-9_-]{6,}"},
+  {"name": "jwt-shaped token", "regex": "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}"},
+  {"name": "stack-a database password in URLs", "regex": "(postgres(?:ql)?://[^:/@\\s]+:)[^@\\s]+(@)", "replace": "\\1[redacted]\\2"}
+ ],
+ "replacement": "[redacted:nfx]"
+}

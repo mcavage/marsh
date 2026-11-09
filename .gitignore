@@ -9,3 +9,7 @@ __pycache__/
 /.pi-sessions/
 /.marsh-evidence/
 **/*_TTrace_*
+
+# Installed on demand by tests/acceptance/services/fixtures/stage.py
+tests/acceptance/services/fixtures/tc/node_modules/
+tests/acceptance/services/fixtures/devserver/node_modules/

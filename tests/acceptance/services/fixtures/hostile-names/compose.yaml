@@ -1,0 +1,60 @@
+# Valid service IDs and volume names; hostile text lives in the labels (names.json).
+services:
+  web:
+    image: busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    command: ["sleep", "1d"]
+    volumes:
+      - data:/d
+    labels:
+      nfx.hostile.markdown-link: "[click me](https://evil.example/x)"
+      nfx.hostile.markdown-emphasis: "**bold** _it_ `code`"
+      nfx.hostile.ansi: "\u001b[31mred\u001b[0m\u001b[2J"
+      nfx.hostile.yaml-newline-injection: "web\n    privileged: true\n  evil"
+      nfx.hostile.quotes: "a\"b'c\\d"
+      nfx.hostile.interpolation: "$${HOME}-$$(id)"
+      nfx.hostile.html: "<img src=x onerror=alert(1)>"
+      nfx.hostile.bidi: "\u202eevil\u202c"
+      nfx.hostile.yaml-syntax: "a: b\n- c: [d, {e: f}]"
+      nfx.hostile.long: "L-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+  worker:
+    image: busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    command: ["sleep", "1d"]
+    volumes:
+      - cache:/d
+    labels:
+      nfx.hostile.markdown-link: "[click me](https://evil.example/x)"
+      nfx.hostile.markdown-emphasis: "**bold** _it_ `code`"
+      nfx.hostile.ansi: "\u001b[31mred\u001b[0m\u001b[2J"
+      nfx.hostile.yaml-newline-injection: "web\n    privileged: true\n  evil"
+      nfx.hostile.quotes: "a\"b'c\\d"
+      nfx.hostile.interpolation: "$${HOME}-$$(id)"
+      nfx.hostile.html: "<img src=x onerror=alert(1)>"
+      nfx.hostile.bidi: "\u202eevil\u202c"
+      nfx.hostile.yaml-syntax: "a: b\n- c: [d, {e: f}]"
+      nfx.hostile.long: "L-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+
+volumes:
+  data:
+    labels:
+      nfx.hostile.markdown-link: "[click me](https://evil.example/x)"
+      nfx.hostile.markdown-emphasis: "**bold** _it_ `code`"
+      nfx.hostile.ansi: "\u001b[31mred\u001b[0m\u001b[2J"
+      nfx.hostile.yaml-newline-injection: "web\n    privileged: true\n  evil"
+      nfx.hostile.quotes: "a\"b'c\\d"
+      nfx.hostile.interpolation: "$${HOME}-$$(id)"
+      nfx.hostile.html: "<img src=x onerror=alert(1)>"
+      nfx.hostile.bidi: "\u202eevil\u202c"
+      nfx.hostile.yaml-syntax: "a: b\n- c: [d, {e: f}]"
+      nfx.hostile.long: "L-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+  cache:
+    labels:
+      nfx.hostile.markdown-link: "[click me](https://evil.example/x)"
+      nfx.hostile.markdown-emphasis: "**bold** _it_ `code`"
+      nfx.hostile.ansi: "\u001b[31mred\u001b[0m\u001b[2J"
+      nfx.hostile.yaml-newline-injection: "web\n    privileged: true\n  evil"
+      nfx.hostile.quotes: "a\"b'c\\d"
+      nfx.hostile.interpolation: "$${HOME}-$$(id)"
+      nfx.hostile.html: "<img src=x onerror=alert(1)>"
+      nfx.hostile.bidi: "\u202eevil\u202c"
+      nfx.hostile.yaml-syntax: "a: b\n- c: [d, {e: f}]"
+      nfx.hostile.long: "L-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"

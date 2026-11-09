@@ -1,0 +1,51 @@
+{
+ "description": "Benign requests: a plain engine and a filtering endpoint both answer these.",
+ "cases": [
+  {
+   "id": "B01-ping",
+   "description": "GET /_ping",
+   "send": [
+    "GET /_ping HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     200
+    ],
+    "closed": false
+   },
+   "cleanup": []
+  },
+  {
+   "id": "B02-version-prefix-ping",
+   "description": "GET /v1.47.0/_ping (versioned path)",
+   "send": [
+    "GET /v1.47.0/_ping HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "expect": {
+    "statuses": [
+     200
+    ],
+    "closed": false
+   },
+   "cleanup": []
+  },
+  {
+   "id": "B03-ping-then-ping",
+   "description": "two pipelined pings on one connection",
+   "send": [
+    "GET /_ping HTTP/1.1\r\nHost: d\r\n\r\nGET /_ping HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 2,
+   "expect": {
+    "statuses": [
+     200,
+     200
+    ],
+    "closed": false
+   },
+   "cleanup": []
+  }
+ ]
+}

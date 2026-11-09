@@ -127,6 +127,14 @@ pub trait DaemonClient: Send + Sync + 'static {
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("reset is unavailable".into()))
     }
+    fn reset_scope_including_services(
+        &self,
+        _confirmed: Vec<String>,
+    ) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
+        Err(ClientError(
+            "reset --include-services is unavailable".into(),
+        ))
+    }
     fn gc_vms(&self, _dry_run: bool) -> Result<marsh_daemon::VmGcReport, ClientError> {
         Err(ClientError("gc is unavailable".into()))
     }
@@ -138,6 +146,10 @@ pub trait DaemonClient: Send + Sync + 'static {
     }
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("stop is unavailable".into()))
+    }
+    /// `marsh services ...`: the daemon's JSON document.
+    fn services(&self, _request: &marsh_daemon::ServicesRequest) -> Result<Value, ClientError> {
+        Err(ClientError("services are unavailable".into()))
     }
     fn status_json(&self) -> Result<Value, ClientError>;
     /// A detached cloud run's control (`docs/design/cloud-detach.md`).
@@ -1603,6 +1615,15 @@ impl DaemonClient for LocalDaemonClient {
         self.0.reset_scope().map_err(map_daemon_error)
     }
 
+    fn reset_scope_including_services(
+        &self,
+        confirmed: Vec<String>,
+    ) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
+        self.0
+            .reset_scope_including_services(confirmed)
+            .map_err(map_daemon_error)
+    }
+
     fn gc_vms(&self, dry_run: bool) -> Result<marsh_daemon::VmGcReport, ClientError> {
         self.0.gc_vms(dry_run).map_err(map_daemon_error)
     }
@@ -1620,6 +1641,10 @@ impl DaemonClient for LocalDaemonClient {
 
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         self.0.stop_scope().map_err(map_daemon_error)
+    }
+
+    fn services(&self, request: &marsh_daemon::ServicesRequest) -> Result<Value, ClientError> {
+        self.0.services(request).map_err(map_daemon_error)
     }
 
     fn cloud_detached(

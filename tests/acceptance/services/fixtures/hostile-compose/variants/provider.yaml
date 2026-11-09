@@ -1,0 +1,7 @@
+# Hostile variant: provider
+services:
+  hostile:
+    provider:
+      type: nfx-provider
+      options:
+        mode: "1"

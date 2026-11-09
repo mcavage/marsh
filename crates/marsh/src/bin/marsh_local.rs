@@ -4,6 +4,7 @@
 //! image's own); invoked directly it is Brush (compatibility tests).
 
 fn main() {
+    let _ = marsh_provenance::embed!();
     let arguments = std::env::args_os().collect::<Vec<_>>();
     // Inside a daemon-owned cloud sandbox only: the host drives these steps.
     if arguments

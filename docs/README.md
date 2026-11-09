@@ -31,6 +31,8 @@ containers, and lets you combine their work with shell syntax.
 - [Agents running agents](agents.md): child jobs, launch limits, cancellation.
 - [Split and join](split.md): project copies and patch handling.
 - [Fanout and collect](fanout.md): parallel commands on shared files.
+- [Docker](docker.md): a Docker endpoint for each project's agents and
+  shell (`docker run`, Compose, Testcontainers), with Internet off by default.
 - [Docker Cloud (preview)](cloud.md): `cloud { ... }` runs a block in a cloud
   sandbox and writes its file changes back.
 - [Agent sessions (ACP)](acp.md): long-lived sessions for ACP clients.
@@ -40,7 +42,8 @@ containers, and lets you combine their work with shell syntax.
 
 - [Configuration](configuration.md): settings and paths.
 - [Troubleshooting](troubleshooting.md): refused jobs, stuck VMs, cleanup.
-- [Security model](security.md): process authority and isolation boundaries.
+- [Security model](security.md): process authority and isolation boundaries,
+  including Docker services.
 - [FAQ](faq.md): costs, authentication, comparisons with other tools.
 - `man marsh`: command options ([source](man/marsh.1.md)).
 

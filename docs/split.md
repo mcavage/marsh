@@ -394,7 +394,10 @@ c=$(marsh checkpoint --lane "$SPLIT_ID/a" --label a-turn-1)   # prints its ID
 marsh split --open --from "$c" a2
 ```
 
-An open split makes forks ("lanes") with no command and returns at once. You
+An open split makes forks ("lanes") with no command and returns at once (made
+`--from` a checkpoint, it returns after each lane's local data is restored (the
+git-ignored files in the folder, and the Docker data when Docker is on), and the
+reply gains a `restore` entry per lane: [Docker](docker.md#checkpoints-and-branch-from-here)). You
 then run agents in them yourself, for as long as you like, and close the split
 to collect each lane's patch:
 

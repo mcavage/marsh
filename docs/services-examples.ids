@@ -1,0 +1,46 @@
+# Services examples that DOC-01 must find, once each, in docker.md, shell.md,
+# security.md and faq.md. Each is marked in the guide as
+#   <!-- services-example id=ID fixture=NAME run=KIND [after=ID] status=/stdout=/stderr=... -->
+# on the line above its code block; the attributes are the example's executable
+# contract (tests/acceptance/services/fixtures/doc_inventory.py documents them).
+# A.4 commands
+config-services-on
+config-services-off
+services-start
+services-status
+services-status-json
+services-internet
+internet-on-reaches-out
+services-internet-off
+internet-off-blocked
+services-hold-release
+services-stop
+services-rm
+reset-include-services
+shell-docker-host
+# Compatibility matrix, "Works unchanged" column (one or more per row)
+docker-run-published-port
+docker-run-exec-logs
+compose-up
+named-volume-tmpfs
+bind-mount-project
+docker-socket-mount
+docker-pull-allowed
+docker-build
+testcontainers
+resource-limit-default
+# Compatibility matrix, "Refused" column
+refused-privileged
+refused-host-network
+refused-bridge-network
+refused-device
+refused-outside-bind
+refused-git-write
+refused-reserved-label
+refused-push
+refused-load
+refused-build-remote
+refused-registry
+resource-limit-over-cap
+# Builds and the cache (SEC-24 c1)
+buildkit-cache-shared

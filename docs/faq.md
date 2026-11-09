@@ -13,7 +13,9 @@ with `split`, tracks nested agent calls in one tree, and cancels that tree
 together.
 
 Docker Sandboxes manages the VMs, network policies, and provider credential
-proxy. No job receives a Docker socket or an SBX control socket. The mounted
+proxy. No job receives an SBX control socket or a Kit VM's Docker socket. Jobs of a
+project [Docker](docker.md) is on for (every project, by default) get a filtered Docker endpoint
+for that project's own services, and nothing else. The mounted
 project remains writable: outside a split, an agent can delete it. See
 [What can go wrong](#what-can-go-wrong).
 
@@ -135,6 +137,89 @@ Not yet. Release binaries are also unsigned and not notarized. The
 [Troubleshooting](troubleshooting.md) covers
 failure recovery.
 
+## Docker services
+
+### Can an agent run `docker` or `docker compose`?
+
+Yes. Docker is on by default, so in any project its jobs and your shell get a
+Docker endpoint for that project alone: `docker run`, Compose, and Testcontainers
+work without setup (the job's image needs the `docker` command). Turn it off for
+a project with `marsh config docker off`; then a job has no Docker at all.
+
+### Where do the containers run?
+
+In a separate VM for that project, not on your Mac and not in the Kit or shell
+VMs. It mounts your project folder, read/write, so a container can change
+project files. Its ports are on `localhost` inside jobs and the marsh shell, not
+on your Mac's own `localhost`.
+
+### Why can't my container reach the Internet?
+
+Services have no Internet by default: a container cannot open new connections
+out, and name lookups fail. Image pulls from Docker Hub and `ghcr.io` still
+work, because Docker does them itself. Turn Internet on for the project with
+`marsh services internet on`. If an organization or global network policy
+governs the VM, the command refuses and `marsh services status --json` shows
+`internet.governed`; that policy wins. Internet off is not a promise that
+nothing can reach out: a build's own fetches and pushes through BuildKit are
+not blocked by it (see [Builds and the cache](docker.md#builds-and-the-cache)).
+
+### How do I see what is running?
+
+`marsh services status` shows each project's services VM and its state.
+`marsh services status --json` adds, per project, the containers, the
+published ports, and the Internet setting.
+
+### What happens to my containers when a job ends?
+
+A Compose stack and a container with a restart policy a job created stay, so the
+agent's `docker compose up` keeps serving the next turn. A one-off `docker run`
+container, and one a Testcontainers run started, is removed when the job ends.
+Containers you start from the marsh shell stay until you remove them. Volumes
+and images are kept. After 15 minutes of nothing using the services, the VM
+stops; its data stays, and your containers do not start again by themselves
+(a restart policy may bring some back). See
+[What survives when a job ends](docker.md#what-survives-when-a-job-ends).
+
+### Is my data kept? How do I delete it?
+
+Services data is deleted only on purpose: `marsh services rm` (one project's
+whole services VM, with all its containers and saved app data), or
+`marsh reset --include-services` (which lists the projects and asks first).
+`marsh stop`, `marsh reset`, idle stop, and turning services off all keep it.
+To remove only some containers, use Docker (`docker compose down`,
+`docker rm -f`).
+
+### Do checkpoints include my database?
+
+Often, for a project with services on: a checkpoint tries to save the contents
+of the project's Docker volumes along with its files. It can skip the app data
+or record a gap (not enough space, a service that cannot be saved), and a
+checkpoint taken while the VM was stopped may reuse an older copy or have none.
+The checkpoint's record says which. Starting a lane from a checkpoint (Branch
+from here) restores what was saved into the lane's own containers, and reports
+what came back and what did not. See
+[Checkpoints and Branch from here](docker.md#checkpoints-and-branch-from-here).
+
+### Can a container get my credentials, or run as privileged?
+
+Not privileged: the filter refuses it, along with host networking and mounts
+outside the project. Credentials: a firewall in the VM blocks the path through
+which Docker Sandboxes injects your provider credentials, and the VM holds
+throwaway values in their place for the credentials it can shadow. That does not
+cover secrets in your project files (a container that mounts them can read them),
+secrets you pass into a container or build, a credential Docker Sandboxes does
+not let marsh shadow (`marsh services status --json` lists them), or someone who
+gets root in the VM, which defeats the filter and the firewall. See
+[Docker services](security.md#docker-services) for what is refused and the risks
+marsh accepts.
+
+### Why does a port say it is already in use in the shell VM?
+
+One shell VM serves all projects of a home, so the first shell to claim a
+forwarded port keeps it. Close the other shell, or use another port or
+`MARSH_HOME`. See [the shell](shell.md#docker-for-a-project-with-docker-on).
+
 ## Agents and logins
 
 ### Which agents work?
@@ -217,8 +302,18 @@ a source directory requires Docker Desktop with Buildx.
 ### How do I remove everything?
 
 Finish jobs, run `exit` in every marsh shell, then run `marsh stop` in your
-Mac terminal. Stop refuses while shells or jobs remain active. Follow
-[Uninstall](install.md#uninstall) to remove the program and, if wanted,
+Mac terminal. Stop refuses while shells or jobs remain active. It removes the
+Kit and shell VMs and stops the daemon. It **keeps** the services VMs of
+projects that use [Docker](docker.md), stopped, with their disks and data.
+
+If you want that data gone too, run `marsh reset --include-services` **before**
+you uninstall or delete anything marsh keeps. It lists each project whose
+services VM, Docker disk, and data it will delete and asks you to confirm
+(`--yes` skips the question). That deletes the data for good. Repeat it for each
+`MARSH_HOME` you used, since each home has its own services VMs. (A services VM
+is a Docker Sandboxes VM that marsh recorded in its ownership list, so removing
+marsh's data first would leave it behind for you to find with `sbx ls`.) Then
+follow [Uninstall](install.md#uninstall) to remove the program and, if wanted,
 its saved data.
 
 ### Why "marsh"?

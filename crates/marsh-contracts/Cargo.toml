@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+links = "marsh_contracts"
+
+[features]
+# Deliberate E2E behavior breaks (docs/design/test-breaks.md). Off in releases.
+test-breaks = []
 
 [lints]
 workspace = true

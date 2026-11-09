@@ -224,7 +224,7 @@ jobs:
       - name: Build Linux arm64 guest binaries
         run: |
           docker buildx build --platform linux/arm64 \
-            --build-arg CARGO_JOBS=4 \
+            --build-arg CARGO_JOBS=4 --build-arg RELEASE_PACKAGING=1 \
             --target export --output type=local,dest=out/guest \
             -f packaging/linux-arm64/Dockerfile .
           ls -l out/guest
@@ -355,7 +355,9 @@ jobs:
           name: images
           path: target/images
       - name: Host binaries
-        run: cargo build --workspace --release --locked
+        env:
+          MARSH_RELEASE_PACKAGING: "1"
+        run: make build-host
       - name: Package
         run: |
           chmod 755 target/libexec/marsh/*-linux-arm64

@@ -14,15 +14,16 @@ run's leak. Under a Linux
 subreaper other than init an orphan is not seen.
 
 The leak's whole orphaned tree is reported (helpers and descendants without
-the marker included). Survivors get a short grace period to finish exiting, then are printed,
-SIGKILLed, and the script exits 1. Zombies are not running and are ignored.
+the marker included). Survivors get a short grace period to finish exiting, then are printed
+and the script exits 1. It never signals anything: a match by executable path or
+environment marker is not proof of ownership, so the owner stops each reported
+pid by hand. Zombies are not running and are ignored.
 """
 from __future__ import annotations
 
 import argparse
 import ctypes
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -165,12 +166,11 @@ def main() -> int:
         stdout=sys.stderr,
         check=False,
     )
-    for pid in survivors:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    print("killed them; a test spawned a process it did not reap (tests/leaked_processes.py)", file=sys.stderr)
+    print(
+        "not killed: a test spawned a process it did not reap (tests/leaked_processes.py). "
+        "Inspect the pids above and stop each one yourself, by exact pid, only if it is yours.",
+        file=sys.stderr,
+    )
     return 1
 
 
