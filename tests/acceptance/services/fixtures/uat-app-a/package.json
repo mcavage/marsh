@@ -5,5 +5,5 @@
   "description": "UAT J1/J6: a notes app (Next.js + Postgres). Scaffold: `npm install` runs in the project before the journey; node_modules is not vendored.",
   "scripts": { "dev": "next dev -p 3000" },
   "dependencies": { "next": "16.4.5", "pg": "8.13.1", "react": "18.3.1", "react-dom": "18.3.1" },
-  "devDependencies": { "@types/node": "22.7.5", "@types/pg": "8.11.10", "@types/react": "18.3.11", "typescript": "5.6.3" }
+  "devDependencies": { "@types/node": "22.7.5", "@types/pg": "8.11.10", "@types/react": "18.3.11", "typescript": "7.0.2" }
 }
