@@ -21,7 +21,13 @@ use std::{
 };
 
 fn main() {
-    let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    let _ = marsh_provenance::embed!();
+    let mut arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    // The one place a daemon may select test-break modes from its own
+    // environment: only with `--test-breaks-from-env`, only in a build with the
+    // guarded `test-breaks` feature (marsh-contracts); a release build leaves
+    // the arguments alone and refuses the flag below as a usage error.
+    marsh_contracts::test_breaks::init_from_daemon_launch(&mut arguments);
     if arguments
         .first()
         .is_some_and(|word| word == "--prebuild-kit-images")
@@ -53,19 +59,26 @@ fn main() {
         println!("marshd {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    if let Err(error) = run() {
+    if let Err(error) = run(&arguments) {
         eprintln!("marshd: {error}");
         std::process::exit(1);
     }
 }
 
 #[allow(clippy::too_many_lines)] // Startup wires one host authority boundary.
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error>> {
     let startup_lock = marsh_daemon::adopt_startup_lock()?;
+    let breaks = marsh_sbx::services_breaks::active();
+    if !breaks.is_empty() {
+        eprintln!(
+            "marshd: TEST BUILD: break modes active: {}",
+            breaks.join(", ")
+        );
+    }
     let real_home =
         marsh_backend::account_home::trusted_account_home(env::var_os("HOME").as_deref())?;
     let defaults = JobDefaults::from_environment(|name| env::var_os(name))?;
-    let home = daemon_home()?;
+    let home = daemon_home(arguments)?;
     let control_home = host_control_home(
         &real_home,
         &home,
@@ -203,6 +216,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_sbxenvs()?
         .with_auto_update(env::var_os("MARSH_AUTO_UPDATE"), home.clone())
         .with_vm_idle_override(env::var("MARSH_VM_IDLE_SECONDS").ok())
+        .with_services(env::var("MARSH_SERVICES_IDLE_SECONDS").ok().as_deref())
+        .with_services_pool_reserve(
+            env::var("MARSH_SERVICES_POOL_RESERVE_BYTES")
+                .ok()
+                .as_deref(),
+        )
+        .with_services_stop_wait(env::var("MARSH_SERVICES_STOP_WAIT_SECONDS").ok().as_deref())
+        .with_services_artifacts(guest_artifacts.clone())
         .with_skills_home(env::var_os("MARSH_SKILLS_HOME").map(PathBuf::from));
     // A dev or local build runs the Kits it installed, before any job starts.
     for name in backend.bring_shipped_source_kits() {
@@ -431,8 +452,8 @@ fn resolve_program(variable: &str, program: &str) -> Result<PathBuf, Box<dyn std
         .ok_or_else(|| format!("{program} was not found on PATH; set {variable}").into())
 }
 
-fn daemon_home() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let mut arguments = env::args_os().skip(1);
+fn daemon_home(arguments: &[std::ffi::OsString]) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let mut arguments = arguments.iter();
     let home = match arguments.next() {
         None => env::var_os("MARSH_HOME")
             .map(PathBuf::from)
@@ -445,7 +466,7 @@ fn daemon_home() -> Result<PathBuf, Box<dyn std::error::Error>> {
     };
     if arguments
         .next()
-        .is_some_and(|word| !marsh_daemon::is_handover_flag(&word))
+        .is_some_and(|word| !marsh_daemon::is_handover_flag(word))
         || arguments.next().is_some()
     {
         return Err("usage: marshd [--home PATH]".into());

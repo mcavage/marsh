@@ -8,13 +8,14 @@ and development shells have the explicit grants described below.
 
 | Can a job ... | Answer | What enforces it |
 |---|---|---|
-| Run a command directly on your Mac | Not through ordinary job execution | The VM boundary; jobs receive no host-command relay or Docker, containerd, or `sbx` control socket |
+| Run a command directly on your Mac | Not through ordinary job execution | The VM boundary; jobs receive no host-command relay, no containerd or `sbx` control socket, and no Kit VM's Docker engine |
 | Read your real home directory | Not implicitly | Only the project, guest home, and explicitly configured extra directories are mounted |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
 | Read other jobs' logins and history | Yes, when they use the same guest home, unless the job's Kit takes no home | The persistent guest home is shared within a scope; `org.marsh/home@1` keeps it out of a Kit's VM ([Mounts](kits.md#mounts)) |
 | Start other registered commands | Yes, within limits | The job capability socket; `MARSH_SPAWN` narrows it |
 | Reach the network | As its Kit's policy allows | `sbx` enforces the policy; marsh does not inspect traffic |
+| Use Docker | In any project Docker is on for (every project, unless you turned it off), and only that project's own Docker | A filtered endpoint to the project's own services VM; [Docker services](#docker-services) |
 
 marsh has not been independently reviewed or audited. To report a
 vulnerability, see [SECURITY.md](../SECURITY.md).
@@ -84,13 +85,174 @@ VM for its Kit. A job sees:
 - placeholders for proxy-managed credentials; the provider keys stay with the
   `sbx` proxy. Saved agent logins live in the shared guest home.
 
-A job has no Docker, containerd, or `sbx` socket. Its one channel to the daemon
-is a socket that lets it:
+A job has no containerd or `sbx` socket and never a Kit VM's Docker engine.
+**Jobs of a services-enabled project get a filtered endpoint for that project's
+own services VM, never a Kit VM's engine**
+(`/run/marsh/docker.sock`; [Docker services](#docker-services)). Its one
+channel to the daemon is a socket that lets it:
 
 - start registered commands and splits, within the
   [limits](agents.md#limits-and-messages) and `MARSH_SPAWN`
 - list its own jobs
 - ask the Mac to open a web link
+
+### Docker services
+
+In a project [Docker](docker.md) is on for (the default for every project), each job gets a Docker
+socket, `/run/marsh/docker.sock` (mode 0600, owned by the job's user). It leads
+to **that project's own services VM**: a VM that holds only that project's
+containers, run by a Docker engine (the program that runs containers) that
+exists only for that project. The endpoint never leads to a Kit VM's Docker, to
+the shell VM's Docker, or to another project's services. Docker is on by default;
+only you can turn it off or change that default, and a job can neither grant
+itself the socket nor change the setting. Having it on starts nothing: the VM is
+created when a job first uses the endpoint. A network policy from your organization
+or global rules still applies to the project's containers. marsh sets
+`DOCKER_HOST` and `TESTCONTAINERS_HOST_OVERRIDE` from its own record of the job
+and refuses or drops `DOCKER_*` values from the exported launch sources (your
+shell's environment, a Kit's settings). A process inside a job can still change
+its own environment; that changes where that process's client connects and
+gives it no other route to an engine.
+
+**A filter sits between the job and Docker.** The filter runs inside the
+services VM. It rebuilds each request from parts it has checked, allows a fixed
+list of requests, and refuses everything else with a `marsh:` message. On the
+Docker API it refuses:
+
+- privileged containers, host networking, host PID or IPC, devices, and
+  capabilities beyond a short list (`NET_BIND_SERVICE`, `NET_RAW`, `NET_ADMIN`,
+  `SYS_NICE`, `SYS_PTRACE`);
+- bind mounts of anything outside the project. Inside the project, `.git` and
+  `.marsh` are mounted read-only **in the ordinary case**; there are exceptions
+  (see [Services risks marsh accepts](#services-risks-marsh-accepts)). A bind
+  source is pinned when the container is created, so swapping a folder for a
+  symlink afterward does not redirect it;
+- pushing, logging in, loading or importing images, builds from a remote
+  context, plugins, swarm, and every other request not on the list;
+- another workspace's objects: lists and events show only the caller's own
+  containers, volumes, and networks, and joining a network or taking volumes
+  from another scope is refused;
+- labels that start with `dev.marsh.`, which marsh uses to tell whose object
+  is whose;
+- ports that are not on loopback: a request to publish elsewhere is rewritten
+  to `127.0.0.1`.
+
+**The filter does not read BuildKit's own stream.** `docker build` talks to the
+engine over a second channel (gRPC) that the filter relays without parsing. A
+remote context or frontend that BuildKit fetches, and a push BuildKit makes
+inside that stream, are therefore not refused by the filter, and the engine's
+Internet-off gate does not apply to them (the gate drops connections from
+containers; the engine's own traffic, which is also how pulls work, is exempt).
+What applies is the services VM's Docker Sandboxes network policy and the
+firewall below. BuildKit's extra permissions (`security.insecure`,
+`network.host`) are off. See [Builds and the cache](docker.md#builds-and-the-cache).
+
+A container that mounts the Docker socket gets a different socket with the same
+filter and the same limits as the job that made it. It never gets the real
+engine socket.
+
+**Containers get default limits** (4 GiB of memory, 4 CPUs, 4096 processes) and
+caps on how many connections a job, a project, and the daemon may hold open.
+
+**What the services VM can touch on your Mac.** It mounts the project folder
+read/write at its Mac path, so a container, and an agent driving Docker, can
+read, change, and delete project files, as a direct job can. It does not mount
+your home or the guest home. The daemon relays opaque bytes between the job and
+the services VM, does not parse Docker requests, and dials nothing on your Mac
+for the services VM. Port forwards into a job are made inside that job's own
+network, opened before any listener exists and only into that network; if that
+step fails, nothing listens anywhere. A forward goes into a job's network only
+when the namespace has IPv6 for `::1`; `127.0.0.1` is always used.
+
+**Internet is off by default** for a project's Docker. The gate drops new
+connections from containers to anywhere outside the project's container
+networks, and only you can open it (`marsh services internet on`). A policy that
+governs the project's VM wins over your choice. A job cannot turn it on. The
+gate does not cover the engine's own traffic (pulls, and BuildKit's own fetches
+and pushes, above). See [Internet](docker.md#internet).
+
+#### Your credentials
+
+Docker Sandboxes attaches every credential it holds, and its MCP gateway, to
+every sandbox it creates, a services VM included. Left alone, a container could
+send its traffic through the sandbox proxy and act as you on GitHub, Anthropic,
+and OpenAI, and reach MCP tools that act on your Mac. marsh limits that in two
+layers:
+
+1. **A firewall inside the VM's engine** drops TCP and UDP from every container,
+   and from the engine itself, to the sandbox's gateway addresses, except DNS on
+   port 53. It is installed before any container can run. If the rules go
+   missing, or the gateway address changes so they no longer cover it, the
+   engine is treated as lost and its services stop. The proxy is blocked by name,
+   by IPv4 and IPv6 address, and on other ports.
+2. **Dummy secrets.** When it creates a services VM, marsh gives that VM its own
+   throwaway value for each credential Docker Sandboxes lets it shadow (GitHub,
+   Anthropic, and OpenAI at least), so a request through the proxy gets a 401
+   instead of acting as you. marsh never reads or prints a secret value, and
+   never changes your real ones. A credential Docker Sandboxes does not let it
+   shadow stays exposed to whatever gets past the firewall.
+   `marsh services status --json` reports under `credential_exposure` which
+   secrets were shadowed and which could not be.
+
+marsh also creates the VM with no MCP servers of its own. These controls are
+about Docker Sandboxes' credentials. They do not protect secrets that sit in
+your project (a `.env` file a container can bind-mount), secrets you pass into a
+container or a build, or anything once root in the VM is compromised (next
+section).
+
+#### Services risks marsh accepts
+
+- **Root in the services VM defeats the filter, and the firewall, for that
+  project.** Anything that reaches root there already owns that project's
+  containers, data, and mounted project folder. The firewall lives inside the
+  VM, so root can also remove it. Docker Sandboxes' proxy and MCP gateway stay
+  attached to the VM: root can use them, and the gateway's tools can act on your
+  Mac, and your credentials act wherever they were not shadowed. The VM
+  boundary still separates it from other projects' services VMs, but it is not a
+  complete barrier to your Mac. marsh asked Docker Sandboxes for a way to create
+  a sandbox with no credential injection and no MCP gateway; until that exists
+  this is a defense, not an absence.
+- **BuildKit's own stream is not inspected.** A remote context, a frontend, or a
+  push made inside a BuildKit build is not refused by the filter and is not
+  stopped by the Internet-off gate. The services VM's Docker Sandboxes network
+  policy and the credential firewall still apply. See above.
+- **The BuildKit cache is shared across the lanes of one project.** A cache a
+  build in one lane writes is readable by a build in another lane of the same
+  project. It is the same user and the same project, and lanes are copies of one
+  tree. It does not cross projects. BuildKit's SSH and secret mounts are served
+  by the client in the job, never from your Mac.
+- **The `.git` and `.marsh` protection has exceptions.** The filter knows the
+  project's `.git` and `.marsh` by identity, not by name, so an ordinary rename
+  or a different letter case does not hide them. These cases are not covered,
+  and all need a job that can already write your project folder while it runs
+  (the same residuals are in
+  [the policy design](design/services-policy.md#pins-a3)):
+  - the first time the filter sees the project, it trusts what it finds. If
+    `.git` was renamed before the project's first Docker request, the renamed
+    folder is never recorded;
+  - a protected folder moved deeper into a subfolder is protected when a mount
+    targets it or sits inside it, but a mount of that subfolder, or of any folder
+    above it other than the project root, does not carry it as read-only;
+  - a mount of a single file works out its parent folders by name after opening
+    it, so a rename at that moment can hide a protected parent;
+  - a repository created after a container has mounted the project root is not
+    protected in that container. A container started afterward mounts the root
+    again and does protect it; the one already running is not repaired;
+  - if the filesystem ever gives a recorded folder's identity to an unrelated
+    folder, that folder is read-only when mounted.
+- **A container with `NET_RAW` can disturb the engine's DNS check.** The
+  engine looks up the gateway address again from time to time, and a container
+  that may forge network packets can forge that answer. It cannot weaken the
+  firewall. The worst it can do is make marsh decide the engine is lost, and
+  the project's services stop until you start them again. It is an
+  availability risk only.
+- **Anyone in the shell VM can use a forwarded port.** One shell VM serves all
+  projects of a home, and its forwards do not check who connects. Another
+  project's shell can reach a port you forwarded there, just as projects in one
+  home can already read each other's files. Use a separate `MARSH_HOME` to keep
+  projects apart. A job's forwards are in its own network and are not shared.
+- **Images are shared by the lanes of a project.** An image one lane pulls or
+  builds is there for the others.
 
 ### Opening links on the Mac
 
@@ -174,7 +336,18 @@ Agents' own sandboxes
 Network
 : Docker Sandboxes enforces each Kit's network policy. The agent Kits can reach
   their providers and the hosts their policy allows. marsh does not inspect
-  traffic.
+  traffic. A project's [Docker](docker.md) has its own setting, off by
+  default; once you turn Internet on, its containers reach whatever your
+  Docker Sandboxes policy allows.
+
+Docker services
+: A job of a project with services on can run containers in that project's
+  services VM, read and write that project's data there, use any port those
+  containers publish, and change project files through a bind mount. It cannot
+  start privileged containers, and its Docker endpoint leads to that project's
+  services only. The filter does not read BuildKit's own stream, and root in the
+  services VM defeats it. See [Docker services](#docker-services) for what the
+  filter refuses and the risks marsh accepts.
 
 Agents running agents
 : A job can start other registered commands. Each gets its own Kit's network

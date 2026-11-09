@@ -181,6 +181,19 @@ pub struct BranchRecord {
     /// whether a lane job was live).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub live: u32,
+    /// What restoring the checkpoint's app data into this lane came to
+    /// (`split --open --from`): validated on the Mac, journaled so a restart
+    /// still knows the lane's ports (C3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore: Option<crate::lane_services::LaneRestore>,
+    /// Files the daemon wrote into the fork for the restore (`compose.fork.yaml`,
+    /// `.env`), as paths below the fork: `split apply` never carries them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generated: Vec<String>,
+    /// What came along from the folder (git-ignored local data) when this lane
+    /// was made `--from` a checkpoint; folded into `restore` when it ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<crate::lane_services::FolderData>,
     #[serde(skip)]
     spec: Option<BranchSpec>,
 }
@@ -376,9 +389,9 @@ impl SplitRecord {
         self.branches.iter().all(|branch| branch.kind == "lane")
     }
 
-    /// `marsh events`: `{"id","state","root","branches":[{"label","state","job_id"}]}`.
+    /// `marsh events`: `{"id","state","root","branches":[{"label","state","job_id"}],"restore":{LABEL:...}?}`.
     fn event(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut event = serde_json::json!({
             "id": self.id,
             "state": self.state,
             "root": self.root,
@@ -388,7 +401,23 @@ impl SplitRecord {
                 "state": branch.state,
                 "job_id": branch.job_id,
             })).collect::<Vec<_>>(),
-        })
+        });
+        if let Some(restore) = self.restores() {
+            event["restore"] = serde_json::json!(restore);
+        }
+        event
+    }
+
+    /// Each lane's restore result by label: what `split --open --from` replied
+    /// and what the `split` event carries (C3). `None` when no lane has one.
+    #[must_use]
+    pub fn restores(&self) -> Option<BTreeMap<String, crate::lane_services::LaneRestore>> {
+        let map: BTreeMap<_, _> = self
+            .branches
+            .iter()
+            .filter_map(|branch| Some((branch.label.clone(), branch.restore.clone()?)))
+            .collect();
+        (!map.is_empty()).then_some(map)
     }
 
     fn manifest(&self) -> serde_json::Value {
@@ -450,6 +479,21 @@ struct Inner {
     /// `closing` split not here is one whose close stopped at a journal
     /// write: a retried close or cancel resumes it.
     closers: std::collections::BTreeSet<String>,
+    /// Open lane splits whose app data is being restored now (not journaled):
+    /// a close or cancel waits for it, so it never races the drop.
+    restoring: std::collections::BTreeSet<String>,
+}
+
+/// Ends the restore's claim on its split (`Inner::restoring`), however it ends.
+struct Restoring<'a> {
+    engine: &'a SplitEngine,
+    id: &'a str,
+}
+
+impl Drop for Restoring<'_> {
+    fn drop(&mut self) {
+        self.engine.lock().restoring.remove(self.id);
+    }
 }
 
 /// Ends a close's claim on its split (`Inner::closers`), however it ends.
@@ -478,6 +522,8 @@ pub struct SplitEngine {
     roots: Mutex<std::collections::BTreeSet<PathBuf>>,
     /// Serializes journal snapshots with their commits (`save_checked`).
     saving: Mutex<()>,
+    /// Lanes whose services are still to be dropped (C3).
+    pub lane_drops: crate::lane_services::LaneDrops,
 }
 
 /// Kept splits are removed this long after they were kept.
@@ -615,6 +661,7 @@ impl SplitEngine {
             kept_retention_ms: AtomicU64::new(KEPT_RETENTION_MS),
             roots: Mutex::new(roots),
             saving: Mutex::new(()),
+            lane_drops: crate::lane_services::LaneDrops::open(journal_home),
         });
         engine.save();
         let sweeper = Arc::clone(&engine);
@@ -909,6 +956,11 @@ impl SplitEngine {
             name: lane.to_owned(),
             tree,
             git,
+            ports: branch
+                .restore
+                .as_ref()
+                .map(|restore| restore.ports.clone())
+                .unwrap_or_default(),
         };
         // Files stay while the record does: a remove or the collector takes
         // the record before any file, so an unchanged record is a copy of a
@@ -1205,9 +1257,11 @@ impl SplitEngine {
         let engine = Arc::clone(self);
         let store = store.clone();
         thread::spawn(move || {
+            engine.wait_restore(&record.id);
             let ended = engine.settle_lanes(&record.id, &store, CANCEL_GRACE + LANE_SETTLE, || {
                 Self::cancel_lane_jobs(&record.id, &store);
             });
+            engine.drop_lane_services(&record);
             let reason = if ended.iter().all(|ended| *ended) {
                 format!(
                     "cancelled; every lane ended; {}",
@@ -1390,10 +1444,14 @@ impl SplitEngine {
         self.save_checked()
             .map_err(|error| Self::unjournaled(id, &error))?;
         let settled = Instant::now();
+        self.wait_restore(id);
         let ended = self.settle_lanes(id, store, LANE_SETTLE, || {});
         let record = self
             .record(id)
             .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
+        // The lanes' app data goes with the lanes: no container of theirs is
+        // left writing into a fork while it is captured.
+        self.drop_lane_services(&record);
         let split = record.open();
         for (index, ended) in ended.iter().enumerate() {
             let branch = &record.branches[index];
@@ -1470,6 +1528,87 @@ impl SplitEngine {
             });
         }
         Ok(record.manifest())
+    }
+
+    /// The services workspace of each lane of a lane split, with its label.
+    fn lane_workspaces(record: &SplitRecord) -> Vec<(String, String)> {
+        record
+            .branches
+            .iter()
+            .filter(|branch| branch.kind == "lane")
+            .filter_map(|branch| {
+                crate::checkpoint::lane_workspace(&format!("{}/{}", record.id, branch.label))
+                    .map(|workspace| (workspace, branch.label.clone()))
+            })
+            .collect()
+    }
+
+    /// Tells the backend about every open lane (after a daemon restart): a lane
+    /// is open while its split is `run` and not closing, and its lane `running`.
+    pub fn register_open_lanes(&self, backend: &dyn DaemonBackend) {
+        let records: Vec<SplitRecord> = self
+            .lock()
+            .records
+            .values()
+            .filter(|record| record.lanes() && record.state == SplitState::Run && !record.closing)
+            .cloned()
+            .collect();
+        for record in records {
+            for branch in record
+                .branches
+                .iter()
+                .filter(|branch| branch.state == BranchState::Running)
+            {
+                if let Some(workspace) =
+                    crate::checkpoint::lane_workspace(&format!("{}/{}", record.id, branch.label))
+                {
+                    let ports = branch
+                        .restore
+                        .as_ref()
+                        .map(crate::lane_services::LaneRestore::port_map)
+                        .unwrap_or_default();
+                    backend.services_lane(&record.root, &workspace, Some(&ports));
+                }
+            }
+        }
+    }
+
+    /// Waits (at most 150 s) for the app data restore of an open split to
+    /// notice that it was closed and stop. A close or cancel calls this after
+    /// it fenced the split, so the restore sees `closing` at its next step.
+    fn wait_restore(&self, id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(150);
+        while self.lock().restoring.contains(id) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// Drops every lane's services (containers, volumes, networks, ledger
+    /// scope) by workspace, through the agent (C3). What could not be dropped
+    /// (the VM is stopped) is journaled and retried by the services timer.
+    /// `apply` never calls this: it merges files only.
+    fn drop_lane_services(&self, record: &SplitRecord) {
+        let Some(backend) = self.checkpoints.backend() else {
+            return;
+        };
+        let workspaces: Vec<String> = Self::lane_workspaces(record)
+            .into_iter()
+            .map(|(workspace, _)| workspace)
+            .collect();
+        // The lanes are gone first, for their jobs' endpoints (a job of a closed
+        // lane gets none); then their objects.
+        for workspace in &workspaces {
+            backend.services_lane(&record.root, workspace, None);
+        }
+        thread::scope(|scope| {
+            for workspace in &workspaces {
+                let backend = &backend;
+                scope.spawn(move || {
+                    self.lane_drops
+                        .drop_lane(&**backend, &record.root, workspace);
+                });
+            }
+        });
     }
 
     fn children(&self, split: &str, label: Option<&str>) -> Vec<String> {
@@ -1584,6 +1723,10 @@ impl SplitEngine {
             record
         };
         self.save();
+        if record.lanes() {
+            // Whatever an earlier drop left (or never reached): by workspace.
+            self.drop_lane_services(&record);
+        }
         let gone = record.state == SplitState::Cancelled
             && split_fs::splits_dir(&record.root, false)
                 .and_then(|splits| splits.stat(&record.id))
@@ -1727,10 +1870,12 @@ impl SplitEngine {
         }
         let _detach =
             Detach((caller == Creator::Host).then(|| (store, spec.session.session_id.clone())));
-        let plan = match self.plan(&caller, &spec, backend, store) {
+        let mut plan = match self.plan(&caller, &spec, backend, store) {
             Ok(plan) => plan,
             Err(message) => return error(&mut stream, message),
         };
+        let hold = plan.hold.take();
+        let facts = plan.checkpoint.take();
         // Spool stdin to EOF before the snapshot.
         stream.set_read_timeout(None)?;
         let mut spool = Vec::new();
@@ -1764,14 +1909,44 @@ impl SplitEngine {
         if spec.open {
             // Lanes run no command: the split stays `run` until `SplitClose`,
             // with no lease, deadline, or create stream.
-            self.lock().records.insert(id.clone(), record.clone());
+            let from_checkpoint = spec.from.is_some();
+            // Each lane's workspace is known to the backend from now on: its
+            // jobs get an endpoint scoped to it, and nothing else's.
+            for (workspace, _) in Self::lane_workspaces(&record) {
+                backend.services_lane(&record.root, &workspace, Some(&BTreeMap::new()));
+            }
+            {
+                let mut inner = self.lock();
+                if from_checkpoint {
+                    inner.restoring.insert(id.clone());
+                }
+                inner.records.insert(id.clone(), record.clone());
+            }
             self.save();
             let lanes = record
                 .branches
                 .iter()
                 .map(|branch| (branch.label.clone(), branch.fork.clone()))
                 .collect();
-            return write_frame(&mut stream, &PublicReply::SplitOpened { id, lanes });
+            let (restore, restore_note) = if from_checkpoint {
+                let _restoring = Restoring {
+                    engine: self,
+                    id: &id,
+                };
+                self.restore_lanes(&record, facts.as_ref(), backend)
+            } else {
+                (None, None)
+            };
+            drop(hold);
+            return write_frame(
+                &mut stream,
+                &PublicReply::SplitOpened {
+                    id,
+                    lanes,
+                    restore,
+                    restore_note,
+                },
+            );
         }
         let runtime = Arc::new(Runtime::default());
         {
@@ -1967,6 +2142,171 @@ impl SplitEngine {
         Ok(())
     }
 
+    /// Restores the checkpoint's app data into each lane of a new open split
+    /// (C3), the lanes in parallel. Returns each lane's result by label, or
+    /// the note that says why there is none (the checkpoint has no app data
+    /// and the project expects none). Every lane opens whatever happens: a
+    /// failed restore is `ok: false` with its gaps, never silent.
+    #[allow(clippy::too_many_lines)] // One restore of every lane, in order.
+    fn restore_lanes(
+        self: &Arc<Self>,
+        record: &SplitRecord,
+        facts: Option<&CheckpointFacts>,
+        backend: &dyn DaemonBackend,
+    ) -> (
+        Option<BTreeMap<String, crate::lane_services::LaneRestore>>,
+        Option<String>,
+    ) {
+        use crate::lane_services::{self as lanes, LaneRestore, Problem};
+        let Some(facts) = facts else {
+            return (None, None);
+        };
+        // The record of what the checkpoint holds, and the snapshot to read.
+        let services = facts.services.as_ref();
+        let snapshot = services.and_then(|record| record.restore_source().map(str::to_owned));
+        // Docker data is expected when the checkpoint recorded a capture (even
+        // a gap). With Docker on by default, a project whose Docker was never
+        // used has `services: null` and nothing to restore (DECISIONS 31).
+        let expected = services.is_some();
+        if !expected {
+            // Docker is off: the folder's local data may still have come along.
+            if record
+                .branches
+                .iter()
+                .any(|branch| branch.folder.as_ref().is_some_and(|f| !f.is_empty()))
+            {
+                let mut by_label = BTreeMap::new();
+                self.update(&record.id, |stored| {
+                    for saved in &mut stored.branches {
+                        let folder = saved.folder.clone().unwrap_or_default();
+                        let restore = lanes::LaneRestore::folder_only(folder);
+                        by_label.insert(saved.label.clone(), restore.clone());
+                        saved.restore = Some(restore);
+                    }
+                });
+                return (Some(by_label), None);
+            }
+            return (
+                None,
+                Some("no local data in this checkpoint; nothing was restored".into()),
+            );
+        }
+        let record_gaps = services
+            .map(|record| record.gaps.clone())
+            .unwrap_or_default();
+        let source = facts.lane.as_deref().and_then(|lane| {
+            let (split, label) = lane.split_once('/')?;
+            (crate::split_confinement::split_id(split)
+                && crate::split_confinement::split_label(label))
+            .then(|| record.root.join(".marsh/split").join(split).join(label))
+        });
+        let id = record.id.clone();
+        let aborted = || {
+            self.record(&id)
+                .is_none_or(|r| r.closing || r.state != SplitState::Run)
+        };
+        let split = record.open();
+        if snapshot.is_some() {
+            backend.test_hold(lanes::breaks::HOLD_RESTORE_AFTER_LEASE);
+        }
+        let results: Vec<(lanes::LaneRestore, Vec<String>)> = thread::scope(|scope| {
+            let handles: Vec<_> = record
+                .branches
+                .iter()
+                .map(|branch| {
+                    let (snapshot, record_gaps, source, split, aborted) =
+                        (&snapshot, &record_gaps, &source, &split, &aborted);
+                    let facts = &*facts;
+                    scope.spawn(move || {
+                        let failed = |problem, gaps: Vec<String>| {
+                            (LaneRestore::failed(problem, gaps), Vec::new())
+                        };
+                        let Some(snapshot) = snapshot else {
+                            let mut gaps = record_gaps.clone();
+                            if gaps.is_empty() {
+                                gaps.push("the checkpoint holds no Docker data".into());
+                            }
+                            return failed(Problem::NotSaved, gaps);
+                        };
+                        let workspace = crate::checkpoint::lane_workspace(&format!(
+                            "{}/{}",
+                            record.id, branch.label
+                        ));
+                        let (Some(workspace), Ok(split)) = (workspace, split) else {
+                            return failed(
+                                Problem::LaneName,
+                                vec!["this lane has no name for Docker data".into()],
+                            );
+                        };
+                        let fork = lanes::fork_name(&workspace);
+                        let outcome = lanes::restore_lane(
+                            backend,
+                            &lanes::LaneRequest {
+                                root: &record.root,
+                                snapshot,
+                                workspace: &workspace,
+                                fork: &fork,
+                                source: source.as_deref(),
+                                label: &branch.label,
+                                lane_path: &branch.fork,
+                                split,
+                                identity: branch.identity,
+                                record_gaps,
+                                aborted,
+                            },
+                        );
+                        let mut restore = outcome.restore;
+                        restore.ports = lanes::compose_ports(&facts.lane_ports, &restore.ports);
+                        (restore, outcome.generated)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle.join().unwrap_or_else(|_| {
+                        (
+                            LaneRestore::failed(
+                                Problem::Failed,
+                                vec!["the restore stopped unexpectedly".into()],
+                            ),
+                            Vec::new(),
+                        )
+                    })
+                })
+                .collect()
+        });
+        let results: Vec<(lanes::LaneRestore, Vec<String>)> = results
+            .into_iter()
+            .zip(&record.branches)
+            .map(|((restore, generated), branch)| match &branch.folder {
+                Some(folder) => (restore.with_folder(folder.clone()), generated),
+                None => (restore, generated),
+            })
+            .collect();
+        for (branch, (restore, _)) in record.branches.iter().zip(&results) {
+            if let Some(workspace) =
+                crate::checkpoint::lane_workspace(&format!("{}/{}", record.id, branch.label))
+            {
+                backend.services_lane(&record.root, &workspace, Some(&restore.port_map()));
+            }
+        }
+        let mut by_label = BTreeMap::new();
+        self.update(&record.id, |stored| {
+            for ((branch, (restore, generated)), saved) in record
+                .branches
+                .iter()
+                .zip(results)
+                .zip(&mut stored.branches)
+            {
+                by_label.insert(branch.label.clone(), restore.clone());
+                saved.restore = Some(restore);
+                saved.generated = generated;
+            }
+        });
+        (Some(by_label), None)
+    }
+
     /// Admission before any effect: labels, caps, depth, registered argv.
     #[allow(clippy::too_many_lines)] // Admission before any effect, in one place.
     fn plan(
@@ -2048,12 +2388,29 @@ impl SplitEngine {
         }
         check_branches(&spec.branches, nested_caller, spec.open, &registered)?;
         let project = spec.session.launch_directory.clone();
+        let mut ignored = None;
+        let mut hold = None;
+        let mut checkpoint_facts = None;
         let (parent, depth, source, pool, git) = if let Some(from) = &spec.from {
             let (checkpoint, lease) = self
                 .checkpoints
                 .lease(&project, from)
                 .ok_or_else(|| format!("split: no checkpoint {from} in {}", project.display()))?;
+            // An open split restores the checkpoint's app data after its files
+            // are cloned: a second lease keeps the checkpoint (and so the
+            // snapshot its record names) until the restore is done.
+            hold = spec
+                .open
+                .then(|| self.checkpoints.lease(&project, from))
+                .flatten()
+                .map(|(_, lease)| lease);
+            checkpoint_facts = Some(CheckpointFacts {
+                services: checkpoint.services.clone(),
+                lane: checkpoint.lane.clone(),
+                lane_ports: checkpoint.lane_ports.clone(),
+            });
             let dir = checkpoint.open()?;
+            ignored.clone_from(&checkpoint.ignored);
             let git = checkpoint
                 .git
                 .then(|| {
@@ -2132,6 +2489,9 @@ impl SplitEngine {
             depth,
             pool,
             git,
+            ignored,
+            hold,
+            checkpoint: checkpoint_facts,
         })
     }
 
@@ -2315,8 +2675,19 @@ impl SplitEngine {
             out.ok_or("out directory is missing")?,
             &split.open("store.git").map_err(io)?,
             i128::from(branch.forked_ns),
+            &Self::generated(branch),
         )?;
         Ok(changes.len())
+    }
+
+    /// The files the daemon wrote into a lane for its app data restore: kept
+    /// out of what `split apply` carries (C3), unless `apply-include-generated`.
+    fn generated(branch: &BranchRecord) -> Vec<String> {
+        if marsh_contracts::break_mode(crate::lane_services::breaks::APPLY_INCLUDE_GENERATED) {
+            Vec::new()
+        } else {
+            branch.generated.clone()
+        }
     }
 
     /// Run one branch to its confirmed end: `(status, stdout, stderr)`, or an
@@ -2676,6 +3047,15 @@ impl Source<'_> {
     }
 }
 
+/// What a split made `--from` a checkpoint needs of its record.
+struct CheckpointFacts {
+    services: Option<crate::checkpoint::ServicesRecord>,
+    /// `SPLIT_ID/LABEL` when the checkpoint is of a lane.
+    lane: Option<String>,
+    /// That lane's own port map, to compose with the new lane's.
+    lane_ports: BTreeMap<String, u16>,
+}
+
 struct Plan<'a> {
     project: PathBuf,
     source: Source<'a>,
@@ -2684,6 +3064,12 @@ struct Plan<'a> {
     depth: u32,
     pool: String,
     git: Option<GitSnapshot>,
+    /// What the checkpoint a `--from` split starts from saved of the
+    /// git-ignored state (C5); copied into each lane.
+    ignored: Option<crate::ignored::IgnoredRecord>,
+    /// Keeps the checkpoint until the app data is restored (open splits).
+    hold: Option<crate::checkpoint::CheckpointLease<'a>>,
+    checkpoint: Option<CheckpointFacts>,
 }
 
 /// Why a branch has no result.
@@ -2797,6 +3183,22 @@ fn setup(
             let fork = split.open(label).map_err(io)?;
             let forked_ns = now_ns();
             let fork_identity = fork.fstat().map_err(io)?.identity;
+            // The checkpoint's folder local data (git-ignored files) goes into
+            // the lane before anything restores Docker data into it (C5; C3's
+            // restore follows and folds this into the lane's result).
+            let mut folder = None;
+            if let (Source::Checkpoint(_, checkpoint, _), Some(saved)) =
+                (&plan.source, &plan.ignored)
+            {
+                let copied = crate::ignored::copy_ignored_into_lane(checkpoint, &fork, saved);
+                for skipped in &copied.skipped {
+                    eprintln!(
+                        "marshd: split {id}, lane {}: local data {} not copied: {}",
+                        branch.label, skipped.path, skipped.reason
+                    );
+                }
+                folder = Some(crate::lane_services::FolderData::from(copied));
+            }
             if let (Some(git), Some(contents), Some(admin_root)) =
                 (&plan.git, &contents, &admin_root)
             {
@@ -2830,6 +3232,9 @@ fn setup(
                 started_unix_ms: spec.open.then(unix_ms),
                 finished_unix_ms: None,
                 live: 0,
+                restore: None,
+                generated: Vec::new(),
+                folder,
                 spec: Some(branch.clone()),
             });
         }
@@ -3149,6 +3554,9 @@ impl LocalSplit {
                     started_unix_ms: Some(unix_ms()),
                     finished_unix_ms: None,
                     live: 0,
+                    restore: None,
+                    generated: Vec::new(),
+                    folder: None,
                     spec: None,
                 });
             }
@@ -3236,6 +3644,7 @@ impl LocalSplit {
                 &out,
                 &split.open("store.git").map_err(io)?,
                 i128::from(branch.forked_ns),
+                &[],
             )?;
             Ok(changes.len())
         })();

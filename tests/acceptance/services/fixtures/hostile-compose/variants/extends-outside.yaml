@@ -1,0 +1,6 @@
+# Hostile variant: extends-outside
+services:
+  hostile:
+    extends:
+      file: ../nfx-outside/extends.yaml
+      service: base

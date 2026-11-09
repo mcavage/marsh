@@ -7,6 +7,7 @@
 mod byte_carrier;
 pub mod byte_exec;
 mod cancellation;
+pub mod loopback;
 pub use cancellation::Cancellation;
 mod process_owner;
 pub use process_owner::{
@@ -1130,6 +1131,16 @@ pub trait JobRuntime: Send + Sync {
         )
         .into())
     }
+    /// The network namespace file the engine reports for this exact container
+    /// (`NetworkSettings.SandboxKey`), or `None` while it has none (not
+    /// started). Port forwards open it before they listen (A6).
+    fn network_namespace(&self, _container: &ContainerId) -> Result<Option<PathBuf>, RuntimeError> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this runtime cannot report a container's network namespace",
+        )
+        .into())
+    }
 }
 
 /// Trusted executor configuration, never a job-frame or exported-env choice.
@@ -2213,6 +2224,38 @@ impl<R: CommandRunner> JobRuntime for DockerCliRuntime<R> {
         self.delete_cancellable(container, &Cancellation::default())
     }
 
+    fn network_namespace(&self, container: &ContainerId) -> Result<Option<PathBuf>, RuntimeError> {
+        let output = self.checked_cancellable(
+            "inspect network namespace",
+            &self.invocation([
+                "container",
+                "inspect",
+                "--format",
+                "{{.NetworkSettings.SandboxKey}}",
+                container.as_str(),
+            ]),
+            &Cancellation::default().with_timeout(Duration::from_secs(10)),
+            Some(Duration::from_secs(10)),
+        )?;
+        let key = std::str::from_utf8(&output)
+            .map_err(|_| RuntimeError::InvalidEngineResponse)?
+            .trim();
+        if key.is_empty() {
+            return Ok(None);
+        }
+        let path = PathBuf::from(key);
+        // An absolute, plain path to a file named like an engine netns entry.
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+            || path.parent().and_then(|parent| parent.file_name()) != Some("netns".as_ref())
+        {
+            return Err(RuntimeError::InvalidEngineResponse);
+        }
+        Ok(Some(path))
+    }
+
     fn delete_cancellable(
         &self,
         container: &ContainerId,
@@ -2649,6 +2692,7 @@ fn job_environment(
             start.insert(name.to_owned(), value.as_bytes().to_vec());
         }
     }
+    let started_env = started.clone();
     start.extend(started);
     let image_path = start.get("PATH").map_or_else(
         || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into(),
@@ -2663,6 +2707,20 @@ fn job_environment(
     // Programs that open a link find `/run/marsh/bin/xdg-open` (`marsh open`).
     if !start.contains_key("BROWSER") {
         added.push(("BROWSER", "xdg-open".to_owned()));
+    }
+    // A job of a services-enabled project: the filtered endpoint and
+    // Testcontainers' host, from a dedicated contract field, not from the
+    // exported environment (which refuses `DOCKER_*`). They come last, so they
+    // win over an image's own `ENV`.
+    if capability.services.is_some() {
+        for (name, value) in process::ENDPOINT_ENVIRONMENT {
+            // Test break `docker-env-open` (SEC-08 c2): a value the job already
+            // has from another source is left in place.
+            if marsh_contracts::break_mode("docker-env-open") && started_env.contains_key(name) {
+                continue;
+            }
+            added.push((name, value.to_owned()));
+        }
     }
     for (name, value) in &added {
         arguments.extend(["--env".into(), format!("{name}={value}").into()]);

@@ -1,0 +1,8 @@
+{
+  "name": "nfx-devserver",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An unchanged-dev-server stand-in: `npm run dev` serves stack A's database on :3000. Overlay onto stack-a with stage.py --with devserver.",
+  "scripts": { "dev": "node server.js" },
+  "dependencies": { "pg": "8.13.1" }
+}

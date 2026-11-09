@@ -7,6 +7,7 @@
 
 use crate::relay_cleanup::{RelayIdentity, current_identity};
 use crate::{DaemonError, read_frame, write_frame};
+use marsh_contracts::process::{ChannelKind, PortState};
 use serde::{Deserialize, Serialize};
 use std::net::Shutdown;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -23,6 +24,8 @@ use std::{
     thread,
     time::Duration,
 };
+
+mod forward;
 
 const CHUNK_BYTES: usize = 16 * 1024;
 // One shell's daemon connections at once; every job it runs holds one. Twice
@@ -42,18 +45,55 @@ const READ_WAKE: Duration = Duration::from_millis(100);
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TunnelFrame {
-    Initialize { token: String },
-    Identity { identity: RelayIdentity },
+    Initialize {
+        token: String,
+        /// The daemon's test break modes for the guest relay (an attested
+        /// field, DECISIONS 22): always empty in a release daemon.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        breaks: Vec<String>,
+    },
+    Identity {
+        identity: RelayIdentity,
+    },
     Ready,
-    Open { connection: u64 },
-    Data { connection: u64, bytes: Vec<u8> },
-    Credit { connection: u64 },
+    Open {
+        connection: u64,
+    },
+    /// A guest connection to the project's services endpoint (E2): the
+    /// shell's `docker.sock` or a forwarded port. The host pairs it with a
+    /// channel on the services relay instead of the daemon socket.
+    OpenService {
+        connection: u64,
+        service: ChannelKind,
+    },
+    /// The ports the project's base workspace publishes now (host to guest).
+    Ports {
+        ports: Vec<u16>,
+    },
+    /// What became of one forward in the shell VM (guest to host).
+    PortReport {
+        port: u16,
+        state: PortState,
+    },
+    Data {
+        connection: u64,
+        bytes: Vec<u8>,
+    },
+    Credit {
+        connection: u64,
+    },
     // Graceful half-close: deliver preceding data, then close only writes.
-    Eof { connection: u64 },
+    Eof {
+        connection: u64,
+    },
     // Graceful full close: deliver preceding data, then close both directions.
-    Finished { connection: u64 },
+    Finished {
+        connection: u64,
+    },
     // Abort: interrupt outstanding writes and discard queued data immediately.
-    Close { connection: u64 },
+    Close {
+        connection: u64,
+    },
     Shutdown,
     // Guest's final frame: listener closed, socket and token removed.
     Cleaned,
@@ -63,6 +103,8 @@ type SharedWriter<W> = Arc<Mutex<W>>;
 type Connections = Arc<Mutex<BTreeMap<u64, Connection>>>;
 
 struct Connection {
+    /// A services endpoint connection (E2), counted apart from daemon requests.
+    service: bool,
     stream: UnixStream,
     writer: mpsc::SyncSender<ConnectionWrite>,
     pending_chunks: Arc<AtomicUsize>,
@@ -213,6 +255,20 @@ where
     )
 }
 
+/// Tells the guest relay which ports the project publishes now (the whole
+/// set); it forwards exactly those in the shell VM.
+///
+/// # Errors
+/// Returns an error when the tunnel cannot be written.
+pub fn send_ports<W: Write>(tunnel: &Arc<Mutex<W>>, ports: &[u16]) -> Result<(), DaemonError> {
+    send(
+        tunnel,
+        &TunnelFrame::Ports {
+            ports: ports.to_vec(),
+        },
+    )
+}
+
 /// Asks the guest relay to stop. It closes its listener, removes its socket
 /// and token, and reports `Cleaned` as its final frame (see [`run_host_shared`]).
 ///
@@ -228,7 +284,7 @@ pub fn request_guest_shutdown<W: Write>(tunnel: &Arc<Mutex<W>>) -> Result<(), Da
 /// # Errors
 /// Returns relay protocol or I/O failures.
 pub fn run_host_shared<R, W, F>(
-    mut from_guest: R,
+    from_guest: R,
     tunnel: &Arc<Mutex<W>>,
     daemon_socket: &Path,
     session_token: String,
@@ -240,11 +296,75 @@ where
     W: Write + Send + 'static,
     F: FnOnce(Result<Option<RelayIdentity>, String>),
 {
+    run_host_shared_with_services(
+        from_guest,
+        tunnel,
+        daemon_socket,
+        session_token,
+        ready,
+        cleaned,
+        None,
+    )
+}
+
+/// What the host relay needs to serve a shell's services endpoint (E2): the
+/// project's channels on the services relay, and where forwards report to.
+pub trait ShellServices: Send + Sync {
+    /// Opens a channel to the project's filtered Docker endpoint or to one of
+    /// its published ports, with the shell's authority (the project, the base
+    /// workspace, attempt `shell`). The error is plain text for the user.
+    ///
+    /// # Errors
+    /// The refusal or unavailability, as text starting with `marsh:`.
+    fn open(&self, service: ChannelKind) -> Result<ServiceStream, String>;
+    /// What became of a forward the shell VM tried to make.
+    fn port_report(&self, port: u16, state: &PortState);
+    /// The test break modes the guest relay takes (attested, DECISIONS 22).
+    fn guest_breaks(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// One open services channel as plain byte halves.
+pub struct ServiceStream {
+    pub reader: Box<dyn Read + Send>,
+    pub writer: Box<dyn Write + Send>,
+    /// Half close: no more bytes will be written.
+    pub finish: Box<dyn Fn() + Send + Sync>,
+    /// Ends the channel at once.
+    pub close: Box<dyn Fn() + Send + Sync>,
+}
+
+/// At most this many services connections per shell (a descriptor pair each on the Mac).
+const MAX_SERVICE_CONNECTIONS: usize = 32;
+
+/// [`run_host_shared`] with the shell's services endpoint.
+///
+/// # Errors
+/// Returns relay protocol or I/O failures.
+#[allow(clippy::too_many_lines)] // One frame loop.
+pub fn run_host_shared_with_services<R, W, F>(
+    mut from_guest: R,
+    tunnel: &Arc<Mutex<W>>,
+    daemon_socket: &Path,
+    session_token: String,
+    ready: F,
+    cleaned: &AtomicBool,
+    services: Option<&Arc<dyn ShellServices>>,
+) -> Result<(), DaemonError>
+where
+    R: Read,
+    W: Write + Send + 'static,
+    F: FnOnce(Result<Option<RelayIdentity>, String>),
+{
     let tunnel = Arc::clone(tunnel);
     if let Err(error) = send(
         &tunnel,
         &TunnelFrame::Initialize {
             token: session_token,
+            breaks: services
+                .map(|services| services.guest_breaks())
+                .unwrap_or_default(),
         },
     ) {
         ready(Err(error.to_string()));
@@ -302,6 +422,50 @@ where
                     Arc::clone(&tunnel),
                 );
             }
+            Ok(TunnelFrame::OpenService {
+                connection,
+                service,
+            }) => {
+                let busy = connections
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .values()
+                    .filter(|open| open.service)
+                    .count()
+                    >= MAX_SERVICE_CONNECTIONS;
+                let (Some(services), false) = (services, busy) else {
+                    if let Err(error) = send(&tunnel, &TunnelFrame::Close { connection }) {
+                        break Err(error);
+                    }
+                    continue;
+                };
+                let Ok((ours, theirs)) = UnixStream::pair() else {
+                    if let Err(error) = send(&tunnel, &TunnelFrame::Close { connection }) {
+                        break Err(error);
+                    }
+                    continue;
+                };
+                // Registered before the next frame is read, so the guest's first
+                // bytes find their connection; the channel opens meanwhile.
+                let reader =
+                    match register_connection_as(connection, ours, &connections, &tunnel, true) {
+                        Ok(reader) => reader,
+                        Err(error) => break Err(error),
+                    };
+                spawn_reader(
+                    connection,
+                    reader,
+                    Arc::clone(&connections),
+                    Arc::clone(&tunnel),
+                );
+                let services = Arc::clone(services);
+                thread::spawn(move || serve_service(&*services, service, theirs));
+            }
+            Ok(TunnelFrame::PortReport { port, state }) => {
+                if let Some(services) = services {
+                    services.port_report(port, &state);
+                }
+            }
             Ok(TunnelFrame::Data { connection, bytes }) => {
                 if let Err(error) = forward_data(&connections, &tunnel, connection, bytes) {
                     break Err(error);
@@ -352,7 +516,7 @@ fn send_guest_ready<W: Write>(tunnel: &SharedWriter<W>) -> Result<(), DaemonErro
 
 /// Guest half used by the installed `marsh-relay` helper.
 pub fn run_guest<R, W>(
-    mut from_host: R,
+    from_host: R,
     to_host: W,
     socket_path: &Path,
     token_path: &Path,
@@ -361,63 +525,187 @@ where
     R: Read,
     W: Write + Send + 'static,
 {
-    let TunnelFrame::Initialize { token } = read_frame(&mut from_host)? else {
+    run_guest_with_endpoint(from_host, to_host, socket_path, token_path, None)
+}
+
+/// [`run_guest`], also serving the shell's services endpoint (E2): a second
+/// owner-only socket at `endpoint` (the shell's `DOCKER_HOST`), and loopback
+/// listeners for the ports the host reports, in the shell VM, first claimant
+/// wins.
+#[allow(clippy::too_many_lines)] // One frame loop and its acceptors.
+pub fn run_guest_with_endpoint<R, W>(
+    mut from_host: R,
+    to_host: W,
+    socket_path: &Path,
+    token_path: &Path,
+    endpoint: Option<&Path>,
+) -> Result<(), DaemonError>
+where
+    R: Read,
+    W: Write + Send + 'static,
+{
+    let TunnelFrame::Initialize { token, breaks } = read_frame(&mut from_host)? else {
         return Err(DaemonError::InvalidState(
             "host relay omitted initialization".into(),
         ));
     };
+    marsh_contracts::test_breaks::attest_guest(&breaks);
     prepare_guest_runtime(socket_path, token_path, &token)?;
-    let runtime = GuestRuntime::new(socket_path, token_path)?;
+    let runtime = GuestRuntime::new(socket_path, token_path, endpoint)?;
     let listener = UnixListener::bind(socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
     listener.set_nonblocking(true)?;
+    let docker = match endpoint {
+        Some(path) => {
+            let docker = UnixListener::bind(path)?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+            docker.set_nonblocking(true)?;
+            Some(docker)
+        }
+        None => None,
+    };
     let tunnel = Arc::new(Mutex::new(to_host));
     send_guest_ready(&tunnel)?;
     let connections: Connections = Arc::default();
-    let accept_connections = Arc::clone(&connections);
-    let accept_tunnel = Arc::clone(&tunnel);
+    let next = Arc::new(std::sync::atomic::AtomicU64::new(1));
     let stopping = Arc::new(AtomicBool::new(false));
-    let accept_stopping = Arc::clone(&stopping);
-    let acceptor = thread::spawn(move || {
-        let mut next = 1_u64;
-        while !accept_stopping.load(Ordering::Relaxed) {
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    if accept_connections
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .len()
-                        >= MAX_RELAY_CONNECTIONS
-                    {
-                        let _ = stream.shutdown(Shutdown::Both);
-                        continue;
+    let acceptor = {
+        let (connections, tunnel, stopping, next) = (
+            Arc::clone(&connections),
+            Arc::clone(&tunnel),
+            Arc::clone(&stopping),
+            Arc::clone(&next),
+        );
+        thread::spawn(move || {
+            while !stopping.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        if connections
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .values()
+                            .filter(|open| !open.service)
+                            .count()
+                            >= MAX_RELAY_CONNECTIONS
+                        {
+                            let _ = stream.shutdown(Shutdown::Both);
+                            continue;
+                        }
+                        if stream.set_nonblocking(false).is_err() {
+                            break;
+                        }
+                        let connection = next.fetch_add(1, Ordering::Relaxed);
+                        let Ok(reader) =
+                            register_guest_connection(connection, stream, &connections, &tunnel)
+                        else {
+                            break;
+                        };
+                        spawn_reader(
+                            connection,
+                            reader,
+                            Arc::clone(&connections),
+                            Arc::clone(&tunnel),
+                        );
                     }
-                    if stream.set_nonblocking(false).is_err() {
-                        break;
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
                     }
-                    let connection = next;
-                    next = next.saturating_add(1);
-                    let Ok(reader) = register_guest_connection(
-                        connection,
-                        stream,
-                        &accept_connections,
-                        &accept_tunnel,
-                    ) else {
-                        break;
-                    };
-                    spawn_reader(
-                        connection,
-                        reader,
-                        Arc::clone(&accept_connections),
-                        Arc::clone(&accept_tunnel),
-                    );
+                    Err(_) => break,
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(_) => break,
             }
-        }
+        })
+    };
+    let docker_acceptor = docker.map(|docker| {
+        let (connections, tunnel, stopping, next) = (
+            Arc::clone(&connections),
+            Arc::clone(&tunnel),
+            Arc::clone(&stopping),
+            Arc::clone(&next),
+        );
+        thread::spawn(move || {
+            while !stopping.load(Ordering::Relaxed) {
+                match docker.accept() {
+                    Ok((mut stream, _)) => {
+                        if service_connections(&connections) >= MAX_SERVICE_CONNECTIONS {
+                            let _ = stream.write_all(&marsh_contracts::process::docker_error_response(
+                                "429 Too Many Requests",
+                                "marsh: too many open connections to the Docker endpoint in this shell",
+                            ));
+                            let _ = stream.shutdown(Shutdown::Both);
+                            continue;
+                        }
+                        if stream.set_nonblocking(false).is_err() {
+                            break;
+                        }
+                        let connection = next.fetch_add(1, Ordering::Relaxed);
+                        let Ok(reader) = register_guest_service_connection(
+                            connection,
+                            stream,
+                            ChannelKind::Docker,
+                            &connections,
+                            &tunnel,
+                        ) else {
+                            break;
+                        };
+                        spawn_reader(
+                            connection,
+                            reader,
+                            Arc::clone(&connections),
+                            Arc::clone(&tunnel),
+                        );
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    });
+    let forwards = endpoint.map(|_| {
+        let (open_connections, open_tunnel, open_next) = (
+            Arc::clone(&connections),
+            Arc::clone(&tunnel),
+            Arc::clone(&next),
+        );
+        let report_tunnel = Arc::clone(&tunnel);
+        // `/run/marsh/<uid>/claims`: who holds each forwarded port, beside the
+        // session directories (used only to take a port over under a test break).
+        let claims = socket_path
+            .parent()
+            .and_then(Path::parent)
+            .map(|base| base.join("claims"));
+        forward::GuestForwards::start(
+            Box::new(move |stream, port| {
+                if service_connections(&open_connections) >= MAX_SERVICE_CONNECTIONS {
+                    return;
+                }
+                let Ok((ours, theirs)) = UnixStream::pair() else {
+                    return;
+                };
+                let connection = open_next.fetch_add(1, Ordering::Relaxed);
+                let Ok(reader) = register_guest_service_connection(
+                    connection,
+                    ours,
+                    ChannelKind::Tcp { port },
+                    &open_connections,
+                    &open_tunnel,
+                ) else {
+                    return;
+                };
+                spawn_reader(
+                    connection,
+                    reader,
+                    Arc::clone(&open_connections),
+                    Arc::clone(&open_tunnel),
+                );
+                forward::pump_tcp(theirs, stream);
+            }),
+            Box::new(move |port, state| {
+                let _ = send(&report_tunnel, &TunnelFrame::PortReport { port, state });
+            }),
+            claims,
+        )
     });
 
     let outcome = loop {
@@ -442,6 +730,11 @@ where
             Ok(TunnelFrame::Close { connection }) => {
                 abort_connection(&connections, connection);
             }
+            Ok(TunnelFrame::Ports { ports }) => {
+                if let Some(forwards) = &forwards {
+                    forwards.set_ports(&ports);
+                }
+            }
             Ok(TunnelFrame::Shutdown) => {
                 let _ = send(&tunnel, &TunnelFrame::Shutdown);
                 break Ok(());
@@ -458,21 +751,126 @@ where
         }
     };
     stopping.store(true, Ordering::Relaxed);
+    if let Some(forwards) = forwards {
+        forwards.shutdown();
+    }
     let _ = acceptor.join();
+    if let Some(docker_acceptor) = docker_acceptor {
+        let _ = docker_acceptor.join();
+    }
     close_all_connections(&connections);
     report_guest_cleaned(&tunnel, runtime, outcome.is_ok());
     outcome
 }
 
+fn service_connections(connections: &Connections) -> usize {
+    connections
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .filter(|open| open.service)
+        .count()
+}
+
+/// One services connection on the host: `peer` is the far end of the socket
+/// pair whose near end is the tunnel connection. The channel opens here; its
+/// refusal reads on the connection as a Docker error (or just a close), so the
+/// text reaches the shell through the ordinary path.
+fn serve_service(services: &dyn ShellServices, service: ChannelKind, peer: UnixStream) {
+    let _ = peer.set_read_timeout(Some(READ_WAKE));
+    let stream = match services.open(service) {
+        Ok(stream) => stream,
+        Err(message) => {
+            let mut peer = peer;
+            if matches!(service, ChannelKind::Docker) {
+                let _ = peer.write_all(&marsh_contracts::process::docker_error_response(
+                    "503 Service Unavailable",
+                    &message,
+                ));
+            }
+            let _ = peer.shutdown(Shutdown::Both);
+            return;
+        }
+    };
+    let ServiceStream {
+        mut reader,
+        mut writer,
+        finish,
+        close,
+    } = stream;
+    let Ok(mut to_shell) = peer.try_clone() else {
+        close();
+        return;
+    };
+    let close = Arc::new(close);
+    let down = {
+        let close = Arc::clone(&close);
+        thread::spawn(move || {
+            let mut buffer = vec![0_u8; CHUNK_BYTES];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => {
+                        let _ = to_shell.shutdown(Shutdown::Write);
+                        return;
+                    }
+                    Ok(count) => {
+                        if to_shell.write_all(&buffer[..count]).is_err() {
+                            close();
+                            return;
+                        }
+                    }
+                    Err(_) => {
+                        close();
+                        let _ = to_shell.shutdown(Shutdown::Both);
+                        return;
+                    }
+                }
+            }
+        })
+    };
+    let mut from_shell = peer;
+    let mut buffer = vec![0_u8; CHUNK_BYTES];
+    loop {
+        match from_shell.read(&mut buffer) {
+            Ok(0) => {
+                finish();
+                break;
+            }
+            Ok(count) => {
+                if writer.write_all(&buffer[..count]).is_err() {
+                    close();
+                    break;
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(_) => {
+                close();
+                break;
+            }
+        }
+    }
+    let _ = down.join();
+}
+
 /// In-band cleanup report: the host treats this final frame plus a successful
 /// exit of this exec as relay cleanup proof (no separate verify exec).
 fn report_guest_cleaned<W: Write>(tunnel: &SharedWriter<W>, runtime: GuestRuntime, ok: bool) {
-    let (socket, token) = (runtime.socket.clone(), runtime.token.clone());
+    let (socket, token, endpoint) = (
+        runtime.socket.clone(),
+        runtime.token.clone(),
+        runtime.endpoint.clone(),
+    );
     drop(runtime);
     let gone = |path: &Path| {
         fs::symlink_metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
     };
-    if ok && gone(&socket) && gone(&token) {
+    if ok && gone(&socket) && gone(&token) && endpoint.as_deref().is_none_or(gone) {
         let _ = send(tunnel, &TunnelFrame::Cleaned);
     }
 }
@@ -480,13 +878,16 @@ fn report_guest_cleaned<W: Write>(tunnel: &SharedWriter<W>, runtime: GuestRuntim
 struct GuestRuntime {
     socket: PathBuf,
     token: PathBuf,
+    endpoint: Option<PathBuf>,
     directory: PathBuf,
 }
 
 impl GuestRuntime {
-    fn new(socket: &Path, token: &Path) -> Result<Self, DaemonError> {
+    fn new(socket: &Path, token: &Path, endpoint: Option<&Path>) -> Result<Self, DaemonError> {
         let directory = parent(socket)?;
-        if directory != parent(token)? {
+        if directory != parent(token)?
+            || endpoint.is_some_and(|path| path.parent() != Some(directory))
+        {
             return Err(DaemonError::InvalidState(
                 "relay socket and token must share a private directory".into(),
             ));
@@ -494,6 +895,7 @@ impl GuestRuntime {
         Ok(Self {
             socket: socket.to_owned(),
             token: token.to_owned(),
+            endpoint: endpoint.map(Path::to_owned),
             directory: directory.to_owned(),
         })
     }
@@ -503,6 +905,9 @@ impl Drop for GuestRuntime {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.socket);
         let _ = fs::remove_file(&self.token);
+        if let Some(endpoint) = &self.endpoint {
+            let _ = fs::remove_file(endpoint);
+        }
         // remove_dir is intentionally non-recursive: an unexpected artifact
         // keeps the session directory in place instead of being deleted.
         let _ = fs::remove_dir(&self.directory);
@@ -755,11 +1160,47 @@ fn register_guest_connection<W: Write + Send + 'static>(
     Ok(reader)
 }
 
+fn register_guest_service_connection<W: Write + Send + 'static>(
+    connection: u64,
+    stream: UnixStream,
+    service: ChannelKind,
+    connections: &Connections,
+    tunnel: &SharedWriter<W>,
+) -> Result<ConnectionReader, DaemonError> {
+    let reader = register_connection_as(connection, stream, connections, tunnel, true)?;
+    if let Err(error) = send(
+        tunnel,
+        &TunnelFrame::OpenService {
+            connection,
+            service,
+        },
+    ) {
+        close_connection(
+            &mut connections
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            connection,
+        );
+        return Err(error);
+    }
+    Ok(reader)
+}
+
 fn register_connection<W: Write + Send + 'static>(
+    connection: u64,
+    stream: UnixStream,
+    connections: &Connections,
+    tunnel: &SharedWriter<W>,
+) -> Result<ConnectionReader, DaemonError> {
+    register_connection_as(connection, stream, connections, tunnel, false)
+}
+
+fn register_connection_as<W: Write + Send + 'static>(
     connection: u64,
     mut stream: UnixStream,
     connections: &Connections,
     tunnel: &SharedWriter<W>,
+    service: bool,
 ) -> Result<ConnectionReader, DaemonError> {
     let identity = Arc::new(());
     let send_window = Arc::new(SendWindow::new());
@@ -789,6 +1230,7 @@ fn register_connection<W: Write + Send + 'static>(
     guard.insert(
         connection,
         Connection {
+            service,
             stream: shutdown,
             writer,
             pending_chunks: Arc::clone(&pending_chunks),
@@ -1415,6 +1857,7 @@ mod tests {
             &mut host,
             &TunnelFrame::Initialize {
                 token: "a".repeat(64),
+                breaks: Vec::new(),
             },
         )
         .unwrap();
@@ -1490,7 +1933,7 @@ mod tests {
 
         prepare_guest_runtime(&socket, &token, &"a".repeat(64)).unwrap();
         fs::write(&socket, b"placeholder").unwrap();
-        drop(GuestRuntime::new(&socket, &token).unwrap());
+        drop(GuestRuntime::new(&socket, &token, None).unwrap());
 
         assert!(!runtime.exists());
     }

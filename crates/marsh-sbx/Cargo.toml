@@ -9,12 +9,16 @@ publish = false
 [features]
 # Explicit host-only isolation seams for dependent-crate caller tests. No env override.
 test-support = ["marsh-runtime/test-support"]
+# Deliberate E2E behavior breaks (SECURITY-DESIGN A10). Forwards to the one guarded
+# feature (marsh-contracts) and to the in-VM engine's break sites.
+test-breaks = ["marsh-contracts/test-breaks", "marsh-services/test-breaks"]
 
 [dependencies]
 marsh-contracts = { path = "../marsh-contracts" }
 marsh-runtime = { path = "../marsh-runtime" }
 marsh-worker = { path = "../marsh-worker" }
 marsh-host-identity = { path = "../marsh-host-identity" }
+marsh-services = { path = "../marsh-services" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

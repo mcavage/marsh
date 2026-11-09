@@ -1,0 +1,7 @@
+# syntax=docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753
+schemaVersion: "3"
+kind: mixin
+displayName: Docker CLI and Compose
+description: The docker CLI and the Compose plugin, so any agent image can use a project's private Docker endpoint
+provides: ["docker-cli@29.9.3", "docker-compose-plugin@5.7.0"]
+dockerfile: ./marsh-docker-cli.dockerfile

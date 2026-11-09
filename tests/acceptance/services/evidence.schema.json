@@ -1,0 +1,611 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mcavage/marsh/tests/acceptance/services/evidence.schema.json",
+  "title": "marsh services E2E evidence for one scenario (TEST-PLAN H-10)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run",
+    "scenario",
+    "title",
+    "tier",
+    "driver",
+    "outcome",
+    "failure",
+    "failed_check",
+    "blocked_on",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "break",
+    "active_breaks",
+    "checks",
+    "commands",
+    "observations",
+    "timings",
+    "versions",
+    "foreign",
+    "oracle"
+  ],
+  "properties": {
+    "schema": {
+      "const": "marsh.services-evidence/v1"
+    },
+    "run": {
+      "type": "string",
+      "pattern": "^[0-9]{12}[0-9a-f]{4}$"
+    },
+    "scenario": {
+      "type": "string",
+      "pattern": "^[A-Z]+(-[A-Z]+)?-[0-9]{2}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "tier": {
+      "enum": [
+        "smoke",
+        "full",
+        "perf",
+        "soak",
+        "break"
+      ]
+    },
+    "driver": {
+      "enum": [
+        "internal",
+        "product"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "passed",
+        "failed",
+        "pending",
+        "blocked"
+      ]
+    },
+    "failure": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "failed_check": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "blocked_on": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "break": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "modes",
+        "expected_checks",
+        "verified",
+        "variant",
+        "pass",
+        "verdict"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "normal",
+            "break"
+          ]
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expected_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verified": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "variant": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pass": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "verdict": {
+          "enum": [
+            "normal",
+            "verified",
+            "invalid-negative-control",
+            "not-detected",
+            "baseline-failed",
+            "pass-2-ok"
+          ]
+        }
+      }
+    },
+    "active_breaks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "daemon",
+        "agent"
+      ],
+      "properties": {
+        "daemon": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agent": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "outcome",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^c[0-9]+$"
+          },
+          "outcome": {
+            "enum": [
+              "passed",
+              "failed",
+              "skipped"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "argv",
+          "cwd",
+          "exit",
+          "started_ns",
+          "elapsed_ns",
+          "stdout",
+          "stderr"
+        ],
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "elapsed_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stdout": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "encoding",
+              "data",
+              "bytes",
+              "sha256",
+              "truncated"
+            ],
+            "properties": {
+              "encoding": {
+                "enum": [
+                  "utf-8",
+                  "base64"
+                ]
+              },
+              "data": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          "stderr": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "encoding",
+              "data",
+              "bytes",
+              "sha256",
+              "truncated"
+            ],
+            "properties": {
+              "encoding": {
+                "enum": [
+                  "utf-8",
+                  "base64"
+                ]
+              },
+              "data": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "argv",
+          "cwd",
+          "exit",
+          "started_ns",
+          "elapsed_ns",
+          "stdout",
+          "stderr",
+          "kind",
+          "engine",
+          "svc",
+          "write"
+        ],
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "elapsed_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stdout": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "encoding",
+              "data",
+              "bytes",
+              "sha256",
+              "truncated"
+            ],
+            "properties": {
+              "encoding": {
+                "enum": [
+                  "utf-8",
+                  "base64"
+                ]
+              },
+              "data": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          "stderr": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "encoding",
+              "data",
+              "bytes",
+              "sha256",
+              "truncated"
+            ],
+            "properties": {
+              "encoding": {
+                "enum": [
+                  "utf-8",
+                  "base64"
+                ]
+              },
+              "data": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "boot",
+              "prod"
+            ]
+          },
+          "svc": {
+            "type": "string"
+          },
+          "write": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "timings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "ns"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "gapped": {
+            "type": "boolean"
+          },
+          "retained": {
+            "type": "boolean"
+          },
+          "cold": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "marsh",
+        "sbx",
+        "macos",
+        "ram_bytes",
+        "free_disk_bytes",
+        "services_engine",
+        "kit",
+        "free_disk_end_bytes",
+        "host_load_start",
+        "host_load_end"
+      ],
+      "properties": {
+        "marsh": {
+          "type": "object"
+        },
+        "sbx": {
+          "type": [
+            "string",
+            "object"
+          ]
+        },
+        "macos": {
+          "type": "string"
+        },
+        "ram_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "free_disk_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "services_engine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kit": {
+          "type": "string"
+        },
+        "free_disk_end_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "host_load_start": {
+          "type": "object",
+          "required": [
+            "load1",
+            "load5",
+            "load15",
+            "cpus",
+            "running_sandboxes"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "load1": {
+              "type": "number"
+            },
+            "load5": {
+              "type": "number"
+            },
+            "load15": {
+              "type": "number"
+            },
+            "cpus": {
+              "type": "integer"
+            },
+            "running_sandboxes": {
+              "type": "integer"
+            }
+          }
+        },
+        "host_load_end": {
+          "type": "object",
+          "required": [
+            "load1",
+            "load5",
+            "load15",
+            "cpus",
+            "running_sandboxes"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "load1": {
+              "type": "number"
+            },
+            "load5": {
+              "type": "number"
+            },
+            "load15": {
+              "type": "number"
+            },
+            "cpus": {
+              "type": "integer"
+            },
+            "running_sandboxes": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "foreign": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "oracle": {
+      "enum": [
+        "equal",
+        "inconclusive-tolerated"
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+ "comment": "Images the harness builds itself. Each is built reproducibly (exact inputs, rewritten timestamps) and its image ID is PINNED here (`id`, and the digest-qualified `ref` scenarios must use). image_cache.py save/load verify every tar and the loaded image against it, and refuse a mismatch; --update-pin accepts a reviewed change. The tag alone is never trusted.",
+ "images": [
+  {
+   "tag": "nfx-tools:1",
+   "context": "nfx-tools",
+   "copy": {
+    "rawdocker.py": "nfx/rawdocker.py",
+    "ptyrun.py": "nfx/ptyrun.py",
+    "cases": "nfx/cases"
+   },
+   "id": "sha256:6b49773e1a97788c025de98cf7cd77f96e06c0d69d6ae935925cf2a0c491c246",
+   "ref": "nfx-tools:1@sha256:6b49773e1a97788c025de98cf7cd77f96e06c0d69d6ae935925cf2a0c491c246"
+  }
+ ]
+}

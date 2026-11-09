@@ -27,9 +27,13 @@ By topic:
 | [bash-compatibility.md](bash-compatibility.md) | Known Bash differences and the differential tests |
 | [mcp.md](mcp.md) | The host MCP server and published-command export ([test contract](../../tests/mcp/CONTRACT.md)) |
 | [ACP acceptance](../../tests/acceptance/ACP.md) | ACP sessions and their publication |
+| [services-policy.md](services-policy.md) | The services agent's Docker API policy: parsing, allowlist, pins, ledger |
 | [kit-publication.md](kit-publication.md) | Building and publishing Kits |
 | [supply-chain.md](supply-chain.md) | Build inputs, published images, notices |
+| [services.md](services.md) | The per-project services VM: identity, mounts, disk size, lease and idle stop, readiness |
+| [test-breaks.md](test-breaks.md) | `MARSH_TEST_BREAK` deliberate breaks for E2E tests (test builds only) |
 | [self-development.md](self-development.md) | `marsh --dev` and the dev broker |
+| [test-breaks.md](test-breaks.md) | `MARSH_TEST_BREAK` deliberate breaks for E2E tests (test builds only) |
 | [Brush patch record](../upstream/brush/README.md) | The upstream Brush revision and marsh's patch queue |
 
 Cloud placement (session-origin slice shipped as a preview; the rest proposed):

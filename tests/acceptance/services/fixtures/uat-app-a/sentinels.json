@@ -1,0 +1,39 @@
+{
+ "fixture": "uat-app-a",
+ "comment": "After seed.sh (UAT_RUN=<run>): 5 notes. `npm run dev` (run by the agent, not a service) serves them at :3000/api/notes.",
+ "url": "http://localhost:3000",
+ "services": {
+  "db": {
+   "class": "restorable",
+   "volumes": [
+    "pgdata"
+   ]
+  }
+ },
+ "db": {
+  "user": "postgres",
+  "database": "app",
+  "table": "notes",
+  "count": 5,
+  "titles": [
+   "note-1",
+   "note-2",
+   "note-3",
+   "note-4",
+   "note-5"
+  ],
+  "texts": "<run>-note-<n>-unique"
+ },
+ "tracked": {
+  "lib/version.ts": "export const VERSION = \"v1\";\n"
+ },
+ "api": {
+  "path": "/api/notes",
+  "version": "v1"
+ },
+ "fill": {
+  "make": "fill/unfill",
+  "volume": "nfx-fill",
+  "class": "volume-only"
+ }
+}

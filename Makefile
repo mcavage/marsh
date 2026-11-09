@@ -79,7 +79,7 @@ LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
 
-.PHONY: release help build build-host build-linux prepare-shell-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
+.PHONY: release help build build-host build-linux prepare-shell-image prepare-svc-engine-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
@@ -100,6 +100,8 @@ help:
 		'make verify [DEV_KIT=ref]  Mac, before pushing: check + the highest-signal sbx suites, concurrently' \
 		'make regress [DEV_KIT=ref]  Mac, before a release: every sbx suite, then make test with the full model' \
 		'                        ONLY=/SKIP= suites, families or scenario ids; REGRESS_JOBS=1 one at a time' \
+		'make services-e2e TIER=smoke|full|perf|soak|break [ONLY=ID,ID] [BREAK=mode] [DRIVER=internal|product]  Mac: services E2E (real sbx, takes the VM lock)' \
+		'make services-e2e-gc [DRY_RUN=1]  Mac: remove services E2E leftovers of finished runs (takes the VM lock)' \
 		'make acceptance        Build a fresh candidate and run the full local-v3 stock-SBX gate (release run)' \
 		'make acceptance-smoke  Build a fresh candidate and run the stock-SBX smoke gate' \
 		'make perf              Measure the assembled warm registered-command path' \
@@ -125,24 +127,36 @@ help:
 
 build: build-host build-linux
 
+# The build records what cargo reports it compiled (every unit's features) and
+# the hash of each executable (scripts/provenance.py); `make dist` verifies it.
+# HOST_CARGO_BUILD wraps one host cargo build: its first argument is the target dir.
+HOST_CARGO_BUILD = $(PYTHON) scripts/provenance.py build --manifest "$(1)/release/provenance.json" --reset -- \
+	$(CARGO) build --workspace --release --locked --target-dir "$(1)"
+
 build-host:
-	$(CARGO) build --workspace --release --locked --target-dir "$(TARGET_DIR)" $(if $(HOST_FEATURES),--features "$(HOST_FEATURES)")
+	$(call HOST_CARGO_BUILD,$(TARGET_DIR)) $(if $(HOST_FEATURES),--features "$(HOST_FEATURES)")
 
 build-linux:
 	@mkdir -p "$(GUEST_ARTIFACTS)"
 	$(DOCKER) buildx build --platform linux/arm64 \
 		--build-arg "RUST_IMAGE=$(RUST_IMAGE)" \
-		--build-arg "BUILD_CACHE_ID=$(BUILD_CACHE_ID)" \
+		--build-arg "BUILD_CACHE_ID=$(BUILD_CACHE_ID)" --build-arg "RELEASE_PACKAGING=1" \
 		--target export --output "type=local,dest=$(GUEST_ARTIFACTS)" \
 		-f packaging/linux-arm64/Dockerfile .
 	$(INSTALL) -m 644 "$(KIT_COMMANDS)" "$(GUEST_ARTIFACTS)/commands.json"
 	$(MAKE) prepare-shell-image
+	$(MAKE) prepare-svc-engine-image
 	$(PYTHON) scripts/stage-kits.py --commands "$(KIT_COMMANDS)" --output "$(GUEST_ARTIFACTS)"
 
 prepare-shell-image:
 	$(PYTHON) scripts/prepare-shell-image.py --docker "$(DOCKER)" --sbx "$(SBX_EXECUTABLE)" \
 		$(if $(SHELL_IMAGE_REPOSITORY),--repository "$(SHELL_IMAGE_REPOSITORY)",) --output "$(GUEST_ARTIFACTS)/shell-image" \
 		$(if $(filter 1,$(SHELL_IMAGE_INSECURE_REGISTRY)),--insecure-registry,)
+
+# The services engine image (packaging/svc-engine): a tar plus a digest pin in
+# the guest artifacts, loaded offline into the services VM's boot engine.
+prepare-svc-engine-image:
+	$(PYTHON) scripts/prepare-svc-engine-image.py --docker "$(DOCKER)" --output "$(GUEST_ARTIFACTS)"
 
 # `make test` is the VM-free gate, and CI runs these same targets
 # (.github/workflows/ci.yml), each piece in its own job: test-rust and
@@ -172,6 +186,8 @@ test-rust: lint test-unit test-callers
 
 lint:
 	$(CARGO) fmt --all -- --check
+	$(PYTHON) scripts/check-provenance-wiring.py
+	sh scripts/check-no-vendored-deps.sh
 	$(CARGO) clippy --workspace --all-targets --locked --target-dir "$(TARGET_DIR)" -- -D warnings
 
 # Every workspace test, one process per test (cargo-nextest; .config/nextest.toml
@@ -323,6 +339,8 @@ install: install-preflight
 	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/commands.json" "$(PREFIX)/libexec/marsh/commands.json"
 	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/shell-image" "$(PREFIX)/libexec/marsh/shell-image"
 	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/shell-image.build.json" "$(PREFIX)/libexec/marsh/shell-image.build.json"
+	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/svc-engine.tar" "$(PREFIX)/libexec/marsh/svc-engine.tar"
+	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/svc-engine-image.json" "$(PREFIX)/libexec/marsh/svc-engine-image.json"
 	rm -rf "$(PREFIX)/libexec/marsh/licenses"
 	cp -R "$(GUEST_ARTIFACTS)/licenses" "$(PREFIX)/libexec/marsh/licenses"
 	rm -rf "$(PREFIX)/libexec/marsh/kits"
@@ -359,7 +377,15 @@ site-check: site
 
 # Cut a stable release: the one way to make a tag the Release workflow accepts.
 # It runs the full regression on this Mac first (scripts/cut-release.py).
-release:
+# Release packaging refuses the test-breaks feature (docs/design/test-breaks.md).
+# This fails fast on the feature inputs this Makefile passes to cargo. The
+# compile-time refusal (MARSH_RELEASE_PACKAGING=1) and the packaged-binary check
+# in scripts/dist.sh are the backstops.
+.PHONY: check-release-features
+check-release-features:
+	@case " $(HOST_FEATURES) $(ACCEPTANCE_HOST_FEATURES) $(DEV_FEATURES) " in *test-breaks*) echo 'make: test-breaks is a test-build feature; release packaging refuses it (drop it from HOST_FEATURES, ACCEPTANCE_HOST_FEATURES and DEV_FEATURES)' >&2; exit 1;; esac
+
+release: check-release-features
 	@test "$(origin VERSION)" = "command line" || { echo 'make release: pass VERSION=X.Y.Z on the command line (the Makefile default is not a release version)'; exit 1; }
 	$(PYTHON) scripts/cut-release.py "$(VERSION)" $(if $(DRY_RUN),--dry-run) $(if $(YES),--yes) \
 		$(if $(SKIP),--skip "$(SKIP)" --skip-reason "$(SKIP_REASON)") \
@@ -367,7 +393,7 @@ release:
 
 # Release packaging. CI (.github/workflows/release.yml) builds the inputs:
 # host binaries, guest artifacts, published Kit digests, and the shell image.
-dist: man
+dist: check-release-features man
 	@test -n "$(VERSION)" || { echo 'make dist: set VERSION'; exit 1; }
 	$(PYTHON) scripts/third-party-notices.py --cargo "$(CARGO)" --output "$(TARGET_DIR)/notices"
 	TARGET_DIR="$(TARGET_DIR)" GUEST_ARTIFACTS="$(GUEST_ARTIFACTS)" KIT_COMMANDS="$(KIT_COMMANDS)" \
@@ -405,6 +431,17 @@ acceptance:
 	@test -n "$(ACCEPTANCE_KIT)" || { echo 'make acceptance: publish the fixture with make kit-publish-fixture, or set ACCEPTANCE_KIT to an immutable Kit OCI reference'; exit 1; }
 	@test -x "$(SBX_EXECUTABLE)" || { echo 'make acceptance: install stock SBX v0.45.0 or newer on PATH, or set MARSH_SBX=/absolute/sbx'; exit 1; }
 	$(call observed-acceptance,run)
+
+# A break-mode candidate for the pen test: an explicitly identified path, never a release pass. It builds the host
+# with the test-breaks feature (the receipt records HOST_FEATURES=test-breaks) and writes its evidence under a
+# `breaks-candidate` name. The acceptance harness strips MARSH_TEST_BREAK, so modes reach this candidate only
+# through the services harness, which launches its daemon explicitly (`marshd --home H --test-breaks-from-env`).
+# The guest binaries need the Dockerfile's CARGO_FEATURES (H2); until it is merged they stay normal builds.
+.PHONY: acceptance-breaks
+acceptance-breaks:
+	@echo 'make acceptance-breaks: building a TEST-BREAKS candidate (not a release pass; never ship its output)' >&2
+	@$(MAKE) --no-print-directory acceptance ACCEPTANCE_HOST_FEATURES=test-breaks \
+		ACCEPTANCE_EVIDENCE="$${TMPDIR:-/tmp}/marsh-acceptance-breaks-candidate-evidence"
 
 acceptance-smoke:
 	@test -n "$(ACCEPTANCE_KIT)" || { echo 'make acceptance-smoke: publish the fixture with make kit-publish-fixture, or set ACCEPTANCE_KIT to an immutable Kit OCI reference'; exit 1; }
@@ -468,6 +505,9 @@ perf:
 # libexec/marsh/dev-enabled marker enables `marsh --dev` (the dev broker) on its
 # daemon; no environment variables are needed.
 DEV_PREFIX ?= $(HOME)/.marsh-dev
+# Cargo features for the host and Linux builds, e.g. DEV_FEATURES=test-breaks
+# (docs/design/test-breaks.md). Empty by default.
+DEV_FEATURES ?=
 DEV_GUEST ?= target/libexec/marsh
 DEV_JOBS ?= 8
 DEV_PARALLEL ?= 5
@@ -486,16 +526,16 @@ dev:
 	@$(MAKE) --no-print-directory dev-install
 	@$(MAKE) --no-print-directory dev-kit-images
 
-dev-artifacts: dev-host dev-guest $(DEV_GUEST)/shell-image $(DEV_GUEST)/.kits.stamp
+dev-artifacts: dev-host dev-guest $(DEV_GUEST)/shell-image $(DEV_GUEST)/svc-engine-image.json $(DEV_GUEST)/.kits.stamp
 
 dev-host:
-	$(CARGO) build --workspace --release --locked --target-dir target $(if $(ACCEPTANCE_HOST_FEATURES),--features "$(ACCEPTANCE_HOST_FEATURES)")
+	$(call HOST_CARGO_BUILD,target) $(if $(ACCEPTANCE_HOST_FEATURES),--features "$(ACCEPTANCE_HOST_FEATURES)") $(if $(DEV_FEATURES),--features "$(DEV_FEATURES)")
 
 dev-guest:
 	@mkdir -p "$(DEV_GUEST)"
 	$(DOCKER) buildx build --platform linux/arm64 --progress=quiet \
 		--build-arg "RUST_IMAGE=$(RUST_IMAGE)" --build-arg "BUILD_CACHE_ID=$(DEV_CACHE_ID)" \
-		--build-arg "CARGO_JOBS=$(DEV_JOBS)" \
+		--build-arg "CARGO_JOBS=$(DEV_JOBS)" --build-arg "CARGO_FEATURES=$(DEV_FEATURES)" \
 		--target export --output "type=local,dest=$(DEV_GUEST)" \
 		-f packaging/linux-arm64/Dockerfile .
 	$(INSTALL) -m 644 "$(KIT_COMMANDS)" "$(DEV_GUEST)/commands.json"
@@ -506,6 +546,10 @@ dev-guest:
 $(DEV_GUEST)/shell-image: $(DEV_SHELL_IMAGE_INPUTS)
 	@mkdir -p "$(DEV_GUEST)"
 	$(PYTHON) scripts/prepare-shell-image.py --docker "$(DOCKER)" --sbx "$(SBX_EXECUTABLE)" --output "$@"
+
+$(DEV_GUEST)/svc-engine-image.json: packaging/svc-engine/Dockerfile packaging/shell-image packaging/shell/Dockerfile scripts/prepare-svc-engine-image.py
+	@mkdir -p "$(DEV_GUEST)"
+	$(PYTHON) scripts/prepare-svc-engine-image.py --docker "$(DOCKER)" --output "$(DEV_GUEST)"
 
 # Source Kits with the canonical inputs publication adds (scripts/stage-kits.py).
 $(DEV_GUEST)/.kits.stamp: $(DEV_KIT_INPUTS)
@@ -565,6 +609,31 @@ regress: $(VERIFY_DEPS)
 	@test -n "$(DEV_KIT)" || { echo 'make regress: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
 	$(REGRESS) --tier regress
 	$(if $(ONLY),,$(MAKE) --no-print-directory test MODEL_FLAGS= MODEL_CACHE=)
+
+# Services E2E (docs TEST-PLAN A.5): real sbx, one VM lock (~/dev/narwhal-fork-spike/harness/lock),
+# isolated scope with MARSH_VM_PREFIX=marsh-xnfx01-. TIER=smoke|full|perf|soak|break, ONLY=ID,ID,
+# BREAK=mode[,mode] verifies one break (the test-breaks install, BREAKS_PREFIX, default $(DEV_PREFIX)-breaks;
+# a defect's holds and faults are added for you); TIER=break runs the three-pass protocol,
+# DRIVER=internal|product. `make dev DEV_FEATURES=test-breaks DEV_PREFIX=...-breaks` builds the breaks install.
+TIER ?= smoke
+DRIVER ?= product
+BREAKS_PREFIX ?= $(DEV_PREFIX)-breaks
+LOCK_WAIT ?= 0
+H2_TREE ?=
+SERVICES_E2E_ARGS ?=
+comma := ,
+.PHONY: services-e2e services-e2e-gc
+services-e2e:
+	@$(TEST_CANARY) $(PYTHON) tests/acceptance/services/services_uat.py --prefix "$(DEV_PREFIX)" --breaks-prefix "$(BREAKS_PREFIX)" \
+		--sbx "$(SBX_EXECUTABLE)" --tier "$(TIER)" --driver "$(DRIVER)" --lock-wait "$(LOCK_WAIT)" \
+		$(if $(DEV_KIT),--kit "$(DEV_KIT)") $(if $(H2_TREE),--h2-tree "$(H2_TREE)") \
+		$(foreach s,$(subst $(comma), ,$(ONLY)),--only $(s)) $(if $(BREAK),--break "$(BREAK)") \
+		$(if $(EVIDENCE),--evidence "$(EVIDENCE)") $(SERVICES_E2E_ARGS)
+
+# Remove nfx-/marsh-xnfx01- resources, run records and roots of runs that are confirmed dead (takes the VM lock).
+# DRY_RUN=1 only reports. A run never removes another run's resources; this does, once their run is dead.
+services-e2e-gc:
+	@$(PYTHON) tests/acceptance/services/services_uat.py --gc --sbx "$(SBX_EXECUTABLE)" --lock-wait "$(LOCK_WAIT)" $(if $(DRY_RUN),--dry-run)
 
 .PHONY: dev-inner dev-inner-run dev-inner-stop
 

@@ -493,7 +493,10 @@ with the directory's identity) and reaches its files only by descriptor.
   Kit job whose cwd is in one is refused like any non-fork path under
   `.marsh`.
 - `marsh checkpoints [--json] [--label TEXT]` lists them newest first
-  (`{"checkpoints":[{"checkpoint","label","created_unix_ms","root","dir","bytes","lane"}]}`);
+  (`{"checkpoints":[{"checkpoint","label","created_unix_ms","root","dir","bytes","lane","services","ignored"}]}`;
+  `services` is the project's services snapshot, `docs/design/services.md`
+  "Snapshots in checkpoints"; `ignored` is the folder local data (git-ignored files) saved beside
+  `tree/` in `ignored/`, "Folder local data in checkpoints");
   `marsh checkpoints rm ID` removes one.
 - A split being made `--from` a checkpoint leases it until its `base/` is
   cloned: retention passes over a leased checkpoint (the next pass retires
@@ -539,12 +542,20 @@ repository lacks. A split `--from` it clones those into its own
 **`--from CHECKPOINT`.** A root split may start from a checkpoint of its
 project: the daemon clones the checkpoint's `tree` into `base/` and builds
 every fork's `.admin` from the checkpoint's saved Git metadata, with the
-project's `.git/objects` as alternates. The manifest records `from`.
+project's `.git/objects` as alternates. The manifest records `from`. A checkpoint
+that holds `ignored/` (`docs/design/services.md`, "Folder local data in checkpoints") has it copied into
+each lane's folder right after the fork is made and before any Docker restore;
+the lane's `base/` does not have those files, so `split apply` never carries them
+back. A split `--json` reply gains `restore` per lane with the restore (C3).
 
 **Open lanes.** `marsh split --open [--from C] LABEL...` (host or session
 shell only; not from a job or a branch) makes a split whose branches have no
 command: each is a lane (`kind` and `placement` `lane`, state `running`). It
-replies at once with `{"marsh_split":1,"id":ID,"lanes":{LABEL:FORK}}`. The
+replies at once with `{"marsh_split":1,"id":ID,"lanes":{LABEL:FORK}}` (with `"restore":{LABEL:…}`
+after the app data restore when `--from` names a checkpoint that holds some,
+`services.md` "App data in lanes"; a lane's close, cancel or removal also drops its
+services objects by workspace, and `split apply` leaves the generated lane files
+`compose.fork.yaml` and `.env` out of the patch). The
 split stays `run`, with no lease and no deadline, until it is closed or
 cancelled.
 

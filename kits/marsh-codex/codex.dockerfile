@@ -55,9 +55,18 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 COPY --chmod=0644 mcp-gateway-proxy.mjs /opt/marsh/codex-acp/mcp-gateway-proxy.mjs
 COPY --chmod=0755 acp-entrypoint.sh /opt/marsh/codex-acp/marsh-acp.sh
 
+# Docker Compose plugin, pinned with a SHA-256 (image-base/docker-compose.sh).
+# The image already has the docker CLI (docker-ce-cli from kit-vm.packages).
+FROM dhi.io/debian-base:trixie-dev@sha256:94571f3dc07fbc7166f6f1cbf1fe068a7647198ee2554e6b90d59a68cc8b053c AS compose
+ARG TARGETARCH
+COPY image-base/docker-compose.sh /tmp/docker-compose.sh
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+ && sh /tmp/docker-compose.sh /out
+
 FROM base AS image
 COPY --from=packages /rootfs/ /
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
+COPY --from=compose /out/ /usr/local/
 COPY --from=build /out/usr/local/bin/ /usr/local/bin/
 COPY --from=build /out/usr/local/share/licenses/ /usr/local/share/licenses/
 COPY --from=npm /opt/marsh/codex-acp /opt/marsh/codex-acp
@@ -80,6 +89,7 @@ FROM image AS smoke
 ARG CODEX_VERSION
 USER root
 RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python \
+ && docker --version && docker compose version \
  && pdftoppm -v 2>/dev/null && pdftotext -v 2>/dev/null \
  && test "$(command -v codex)" = /usr/local/bin/codex \
  && test "$(codex --version 2>/dev/null)" = "codex-cli ${CODEX_VERSION}"

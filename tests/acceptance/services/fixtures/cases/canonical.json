@@ -1,0 +1,150 @@
+{
+ "description": "SEC-23 (revision 3.1): the witness and control, plus two extra rows. The recording upstream must see exactly the expected canonical form (exact header set and values, exact target, compact body equal to the client fields plus the harness-computed enrichment). A row with refusal_allowed passes without an upstream request only with a verified local refusal in --results.",
+ "cases": [
+  {
+   "id": "K01-witness",
+   "description": "the approved witness: an accepted versioned create with lowercase Content-Type, an off-allowlist header, Accept-Encoding and extra whitespace",
+   "send": [
+    "POST /v1.47/containers/create?name=nfxw HTTP/1.1\r\nHost: d\r\ncontent-type: application/json\r\nX-Nfx-Extra: 1\r\nAccept-Encoding: gzip\r\nContent-Length: 45\r\n\r\n{ \"Image\" : \"busybox\" ,  \"Cmd\" : [ \"true\" ] }"
+   ],
+   "responses": 1,
+   "key": "name=nfxw",
+   "refusal_allowed": false,
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxw?force=1"
+    }
+   ],
+   "expect_upstream": {
+    "count": 1,
+    "method": "POST",
+    "target": "/v1.47/containers/create?name=nfxw",
+    "headers": {
+     "Content-Type": "application/json",
+     "Content-Length": "@body-length"
+    },
+    "header_names_exact": [
+     "Host",
+     "Content-Type",
+     "Content-Length"
+    ],
+    "body_compact": true,
+    "body": {
+     "Image": "busybox",
+     "Cmd": [
+      "true"
+     ],
+     "Labels": {
+      "dev.marsh.scope": "${scope}",
+      "dev.marsh.attempt": "${attempt}"
+     },
+     "HostConfig": {
+      "NetworkMode": "${network}",
+      "Memory": "${memory}",
+      "NanoCpus": "${nano_cpus}",
+      "PidsLimit": "${pids_limit}"
+     }
+    },
+    "not_original_bytes": true
+   }
+  },
+  {
+   "id": "K02-control-ping",
+   "description": "control: a canonical GET /_ping is forwarded unchanged",
+   "send": [
+    "GET /_ping HTTP/1.1\r\nHost: d\r\n\r\n"
+   ],
+   "responses": 1,
+   "key": "GET /_ping HTTP/1.1",
+   "refusal_allowed": false,
+   "cleanup": [],
+   "expect_upstream": {
+    "count": 1,
+    "method": "GET",
+    "target": "/_ping",
+    "raw_equal": true
+   }
+  },
+  {
+   "id": "K03-duplicate-content-type",
+   "description": "two Content-Type headers",
+   "send": [
+    "POST /containers/create?name=nfxcanon-2 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Type: text/plain\r\nContent-Length: 19\r\n\r\n{\"Image\":\"busybox\"}"
+   ],
+   "responses": 1,
+   "key": "name=nfxcanon-2",
+   "refusal_allowed": true,
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxcanon-2?force=1"
+    }
+   ],
+   "expect_upstream": {
+    "count": 1,
+    "method": "POST",
+    "target": "/containers/create?name=nfxcanon-2",
+    "header_names_exact": [
+     "Host",
+     "Content-Type",
+     "Content-Length"
+    ],
+    "body_compact": true,
+    "body": {
+     "Image": "busybox",
+     "Labels": {
+      "dev.marsh.scope": "${scope}",
+      "dev.marsh.attempt": "${attempt}"
+     },
+     "HostConfig": {
+      "NetworkMode": "${network}",
+      "Memory": "${memory}",
+      "NanoCpus": "${nano_cpus}",
+      "PidsLimit": "${pids_limit}"
+     }
+    }
+   }
+  },
+  {
+   "id": "K04-duplicate-user-agent",
+   "description": "an allowed-looking header sent twice",
+   "send": [
+    "POST /containers/create?name=nfxcanon-3 HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nUser-Agent: nfx-a\r\nUser-Agent: nfx-b\r\nContent-Length: 19\r\n\r\n{\"Image\":\"busybox\"}"
+   ],
+   "responses": 1,
+   "key": "name=nfxcanon-3",
+   "refusal_allowed": true,
+   "cleanup": [
+    {
+     "method": "DELETE",
+     "path": "/containers/nfxcanon-3?force=1"
+    }
+   ],
+   "expect_upstream": {
+    "count": 1,
+    "method": "POST",
+    "target": "/containers/create?name=nfxcanon-3",
+    "header_names_exact": [
+     "Host",
+     "Content-Type",
+     "Content-Length"
+    ],
+    "body_compact": true,
+    "body": {
+     "Image": "busybox",
+     "Labels": {
+      "dev.marsh.scope": "${scope}",
+      "dev.marsh.attempt": "${attempt}"
+     },
+     "HostConfig": {
+      "NetworkMode": "${network}",
+      "Memory": "${memory}",
+      "NanoCpus": "${nano_cpus}",
+      "PidsLimit": "${pids_limit}"
+     }
+    }
+   }
+  }
+ ]
+}

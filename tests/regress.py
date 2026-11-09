@@ -205,7 +205,8 @@ class Plan:
         ps = [s for s in all_ps if s not in LIVE_SCENARIOS]
         prefixed("processes_uat.py", "processes", ps, self.args.process_shards, ("regress",))
         self.scenarios = {"workspaces": ("workspaces_uat.py", ws), "processes": ("processes_uat.py", all_ps),
-                          "shells": ("shells_uat.py", list_scenarios("shells_uat.py"))}
+                          "shells": ("shells_uat.py", list_scenarios("shells_uat.py")),
+                          "services": ("services/services_uat.py", list_scenarios("services/services_uat.py"))}
         for shell in ("bash", "zsh"):
             suites.append(Suite(f"shells-{shell}", "shells",
                                 [python, str(ACCEPTANCE / "shells_uat.py"), "--prefix", str(self.prefix),
@@ -215,6 +216,13 @@ class Plan:
                             [python, str(ACCEPTANCE / "acp_uat.py"), "--marsh", str(self.marsh), "--guest-artifacts",
                              str(self.guest), *self.common()], 120, ("verify", "regress")))
         candidate("lanes_uat.py", "lanes", 240, ("verify", "regress"), ["--kit", self.kit])
+        # Services E2E (tests/acceptance/services): `verify` runs its smoke tier, `regress` the full tier.
+        # The suite takes the shared VM lock (waits for another services or Narwhal E2E run to finish).
+        for tier, estimate, tiers in (("smoke", 150, ("verify",)), ("full", 900, ("regress",))):
+            suites.append(Suite(f"services-{tier}", "services",
+                                [python, str(ACCEPTANCE / "services" / "services_uat.py"), "--prefix", str(self.prefix),
+                                 "--kit", self.kit, *self.common(), "--tier", tier, "--lock-wait", "3600"],
+                                estimate, tiers))
         # The task tool with the fixture as its agent (no model calls; T02-T04 are billed, `--live` by
         # hand). Stages this checkout's fixture, whose prompt verbs a published ref may lack.
         suites.append(Suite("task-tool", "task_tool",

@@ -34,6 +34,7 @@ fn launch() -> Result<std::convert::Infallible, ExecError> {
 }
 
 fn main() {
+    let _ = marsh_provenance::embed!();
     let error = match launch() {
         Ok(never) => match never {},
         Err(error) => error,

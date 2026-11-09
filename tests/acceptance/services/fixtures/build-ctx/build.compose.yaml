@@ -1,0 +1,5 @@
+services:
+  built:
+    build:
+      context: .
+    image: nfx/b3

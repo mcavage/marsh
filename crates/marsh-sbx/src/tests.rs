@@ -17,6 +17,7 @@ mod corpus;
 mod grants;
 mod kit_lifecycle;
 mod local_kit;
+mod services;
 mod shell;
 mod source_grant_regressions;
 mod stock_cli;

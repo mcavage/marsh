@@ -211,8 +211,8 @@ back for two minutes in case it still lands, then removed or retried.
 | `marsh workers reset KIT` | Remove one idle or quarantined Kit VM |
 | `marsh workers reset all` | Remove all idle or quarantined Kit VMs |
 | `marsh workers reset cloud` | Delete every [Docker Cloud](cloud.md) sandbox this daemon owns |
-| `marsh reset` | Remove the scope's VMs; keep the daemon running |
-| `marsh stop` | Remove the scope's VMs and stop its daemon |
+| `marsh reset` | Remove the scope's Kit and shell VMs; keep the daemon running. [Services VMs](design/services.md) are skipped; `marsh reset --include-services` lists the projects whose services data it would delete and asks first (`--yes` skips the question) |
+| `marsh stop` | Remove the scope's Kit and shell VMs and stop its daemon. Services VMs are stopped and kept, with their data |
 
 `reset` and `stop` refuse while shells or jobs are open. Each prints the VMs it
 removed.
@@ -372,7 +372,7 @@ were not affected.
   holds. Then stop the daemon process (`kill PID`, after checking with
   `ps -p PID -o command` that it is a `marshd`; the message says which pids it
   could not identify), run `marsh status` (it starts a daemon of this build), and `marsh reset`
-  or `marsh stop`: the VMs this home owns are removed. `marsh status --json`
+  or `marsh stop`: the Kit and shell VMs this home owns are removed (services VMs are kept). `marsh status --json`
   prints `{"error": ...}` on stdout when it cannot reach the daemon.
 - **`marsh reset` or `marsh stop` says a cloud create never reported an
   outcome.** A create that timed out or was cut off by a crash is kept as owned,

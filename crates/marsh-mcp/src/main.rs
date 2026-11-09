@@ -32,6 +32,7 @@ enum Mode {
 
 #[tokio::main]
 async fn main() {
+    let _ = marsh_provenance::embed!();
     if let Err(error) = run().await {
         eprintln!("marsh-mcp: {error}");
         std::process::exit(1);

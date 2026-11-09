@@ -136,6 +136,9 @@ fn describe_idle(ms: u64) -> String {
 
 /// `Ok(reason)`: remove it; `Err(reason)`: keep it. `idle_ms` 0 keeps idle VMs.
 pub(crate) fn decide(vm: &Candidate, now_ms: u64, idle_ms: u64) -> Result<String, String> {
+    if vm.purpose == VmPurpose::Services {
+        return Err("a Docker VM holds a project's data: only `marsh docker rm` removes it".into());
+    }
     if vm.quarantined {
         return Err(
             "quarantined: automatic recovery or `marsh workers reset KIT` removes it".into(),
@@ -154,6 +157,7 @@ pub(crate) fn decide(vm: &Candidate, now_ms: u64, idle_ms: u64) -> Result<String
         return Ok(match vm.purpose {
             VmPurpose::Kit => "superseded: no command runs this Kit any more".into(),
             VmPurpose::Shell => "superseded: an older shell VM".into(),
+            VmPurpose::Services => unreachable!("decided above"),
         });
     }
     let Some(last) = vm.last_used_ms else {
@@ -323,6 +327,7 @@ impl StockDaemonBackend {
                 current: match vm.purpose {
                     VmPurpose::Kit => current_kits.contains(&vm.name),
                     VmPurpose::Shell => current_shells.contains(&vm.name),
+                    VmPurpose::Services => true,
                 },
                 in_use,
                 quarantined: vm.quarantined || self.vm_quarantined(store, &vm.name),
@@ -332,6 +337,7 @@ impl StockDaemonBackend {
             let purpose = match vm.purpose {
                 VmPurpose::Kit => "kit",
                 VmPurpose::Shell => "shell",
+                VmPurpose::Services => "services",
             };
             let (action, reason) = match decide(&candidate, now_ms, idle_ms) {
                 Err(reason) => ("kept", reason),
@@ -414,6 +420,7 @@ impl StockDaemonBackend {
                 .sbx
                 .shell_vm_in_use(&vm.name)
                 .then(|| "an attached shell uses it".into()),
+            VmPurpose::Services => None,
         }
     }
 

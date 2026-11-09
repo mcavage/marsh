@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Deliberate E2E behavior breaks (docs/design/test-breaks.md). Off in releases.
+test-breaks = ["marsh-contracts/test-breaks"]
+
 [lints]
 workspace = true
 
@@ -28,7 +32,11 @@ tokio-util = { version = "0.7", features = ["codec"] }
 uuid = { version = "1.18", features = ["v4"] }
 marsh-daemon = { path = "../marsh-daemon" }
 marsh-contracts = { path = "../marsh-contracts" }
+marsh-provenance = { path = "../marsh-provenance" }
 marsh-runtime = { path = "../marsh-runtime" }
+
+[build-dependencies]
+marsh-provenance = { path = "../marsh-provenance", features = ["build"] }
 
 [dev-dependencies]
 # Exercise the Mac host descriptor fence on Linux test callers as well.

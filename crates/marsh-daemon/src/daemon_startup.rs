@@ -116,6 +116,10 @@ impl StartupChild {
         let (reader, writer) = marsh_runtime::unix_stream_pair()?;
         reader.set_nonblocking(true)?;
         let mut command = Command::new(daemon);
+        // Never `--test-breaks-from-env`: only a harness launching marshd
+        // directly passes it, so a daemon this CLI starts ignores
+        // MARSH_TEST_BREAK whatever either binary was built with
+        // (docs/design/test-breaks.md).
         command
             .arg("--home")
             .arg(home)

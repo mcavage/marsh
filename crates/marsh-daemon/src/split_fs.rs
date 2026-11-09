@@ -804,13 +804,43 @@ fn prune(
     Ok(())
 }
 
-/// Clone one file, re-cloning up to three times if it changed meanwhile.
-fn clone_stable(source: &Dir, base: &Dir, name: &OsStr, relative: &Path) -> Result<(), String> {
+// Test hook (unit tests only, per thread): runs between a clone's check and
+// the clone itself, so a test can change what was checked at exactly that
+// moment. `name` is the entry about to be cloned.
+#[cfg(test)]
+pub(crate) type CloneHook = Box<dyn Fn(&OsStr)>;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static BEFORE_CLONE: std::cell::RefCell<Option<CloneHook>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn before_clone(name: &OsStr) {
+    BEFORE_CLONE.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook(name);
+        }
+    });
+}
+
+/// Clone one file, re-cloning up to three times if it changed meanwhile. An
+/// entry that turned out to be another kind when it was cloned (`clonefileat`
+/// clones a whole directory tree) is removed again as a tree, never left.
+pub(crate) fn clone_stable(
+    source: &Dir,
+    base: &Dir,
+    name: &OsStr,
+    relative: &Path,
+) -> Result<(), String> {
     for _ in 0..3 {
         let before = source.stat(name).map_err(|e| e.to_string())?;
         if before.kind != FileType::RegularFile {
             return Ok(());
         }
+        #[cfg(test)]
+        before_clone(name);
         source
             .clone_to(name, base, name)
             .map_err(|e| format!("{}: {e}", relative.display()))?;
@@ -820,7 +850,7 @@ fn clone_stable(source: &Dir, base: &Dir, name: &OsStr, relative: &Path) -> Resu
         {
             return Ok(());
         }
-        let _ = base.unlink(name);
+        let _ = base.remove_tree(name);
     }
     Err(format!("file kept changing: {}", relative.display()))
 }
@@ -1203,6 +1233,10 @@ pub struct Change {
 /// In a Git project (`exclude` is the fork's `info/exclude`), a path the
 /// branch created that the ignore rules exclude is not captured.
 ///
+/// `skip` names files the daemon itself wrote into the fork (the lane files of
+/// an app data restore): they are on neither side of the comparison, so
+/// `split apply` never carries them into the project.
+///
 /// # Errors
 /// Returns I/O failures and capture limit breaches.
 pub fn capture(
@@ -1212,12 +1246,17 @@ pub fn capture(
     out: &Dir,
     store: &Dir,
     forked_ns: i128,
+    skip: &[String],
 ) -> Result<Vec<Change>, String> {
-    let before = tree(base, false)?;
-    let after = match exclude {
+    let mut before = tree(base, false)?;
+    let mut after = match exclude {
         Some(exclude) => fork_tree(fork, &before, exclude)?,
         None => tree(fork, false)?,
     };
+    for path in skip {
+        before.remove(path.as_bytes());
+        after.remove(path.as_bytes());
+    }
     let mut changes = Vec::new();
     let mut patch = Vec::new();
     let mut total = 0_u64;
@@ -1589,6 +1628,7 @@ mod tests {
             &root.open("out").unwrap(),
             &root.open("store").unwrap(),
             0,
+            &[],
         )
     }
 

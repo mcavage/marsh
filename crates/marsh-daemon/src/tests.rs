@@ -707,6 +707,42 @@ fn mcp_publication_uses_attached_session_and_rejects_replaced_project() {
 }
 
 #[test]
+fn services_commands_are_host_only() {
+    for services in [
+        ServicesRequest::Start {
+            root: "/Users/alice/project".into(),
+        },
+        ServicesRequest::Internet {
+            root: "/Users/alice/project".into(),
+            on: true,
+        },
+    ] {
+        let request = PublicRequest::Services { request: services };
+        // A shell's relay token is refused; the host's master token is not.
+        assert_eq!(
+            request
+                .authority()
+                .rejection(&AuthenticationScope::Relay("session".into())),
+            Some("relay token cannot perform host lifecycle operations")
+        );
+        assert_eq!(
+            request.authority().rejection(&AuthenticationScope::Master),
+            None
+        );
+    }
+    // Deleting services data is as host-only as starting the VM.
+    let reset = PublicRequest::ResetScopeIncludingServices {
+        confirmed: vec!["/Users/alice/project".into()],
+    };
+    assert_eq!(
+        reset
+            .authority()
+            .rejection(&AuthenticationScope::Relay("session".into())),
+        Some("relay token cannot perform host lifecycle operations")
+    );
+}
+
+#[test]
 fn mcp_publication_requires_relay_token_not_host_or_kit_master_token() {
     let home = home();
     let server = Arc::new(Server::bind(home.path()).unwrap());

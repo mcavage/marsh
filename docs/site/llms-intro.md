@@ -141,11 +141,14 @@ marsh jobs --tree         # running and recent jobs, with children
 marsh results             # exit status, wall time, cleanup
 marsh status              # daemon, VMs, effective limits
 marsh workers reset KIT   # retire an idle or quarantined Kit VM
-marsh stop                # remove owned VMs and stop the daemon
+marsh stop                # remove Kit and shell VMs and stop the daemon (services VMs are stopped and kept)
 ```
 
 `stop` refuses while shells or jobs are active and keeps the project, guest
-home, and results. Results contain command arguments and paths, so do not put
+home, and results. It also keeps the services VMs, with their data, of projects
+that use services; `marsh reset --include-services` lists them and deletes that
+data after confirmation, and should be run before an uninstall that is meant to
+delete it. Results contain command arguments and paths, so do not put
 secrets in them; they do not capture command output. For authentication errors,
 ask the user to check the relevant `sbx` credential. For `capacity` or
 `fan-out limit`, wait for jobs to finish before retrying. Other admission

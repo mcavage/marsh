@@ -30,7 +30,12 @@ Interrupting or killing it cancels every branch.
     `marsh join` waits for them; `marsh splits cancel ID` stops them.
 
 --open makes one lane per LABEL (a fork with no command), prints
-{\"marsh_split\":1,\"id\":ID,\"lanes\":{LABEL:FORK,...}} and returns at once.
+{\"marsh_split\":1,\"id\":ID,\"lanes\":{LABEL:FORK,...}} and returns at once. With --from a
+checkpoint, each lane first gets its own copy of the project's local data: git-ignored
+files in the folder (`.env`, `.wrangler/state`, SQLite files; not rebuildable folders
+such as node_modules, and `.marsh/branch` can include or exclude more) and, with Docker
+on for the project, its Docker data. The line gains \"restore\":{LABEL:{ok,line,restored,
+fresh,gaps,ports,check,folder}} (the line is also printed to stderr, one per lane).
 Registered commands started in a lane's fork (`cd FORK && marsh run NAME`) are
 confined to it; only the split's creator may start them. `close` stops
 admitting lane jobs, waits up to 30 s for running ones, captures every lane,
@@ -317,6 +322,32 @@ fn split(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
     status
 }
 
+/// The reply of `split --open`: one JSON handle line on stdout, and one line per
+/// lane on stderr for people (built by the daemon on the Mac from validated
+/// fields); the JSON carries the whole result (`docs/design/services.md`).
+fn print_opened(
+    id: &str,
+    lanes: &std::collections::BTreeMap<String, std::path::PathBuf>,
+    restore: Option<&std::collections::BTreeMap<String, marsh_daemon::lane_services::LaneRestore>>,
+    restore_note: Option<&str>,
+) {
+    let mut handle = serde_json::json!({"marsh_split": 1, "id": id, "lanes": lanes});
+    match (restore, restore_note) {
+        (Some(restore), _) => {
+            handle["restore"] = serde_json::json!(restore);
+            for (label, lane) in restore {
+                eprintln!("restore {label}: {}", lane.line);
+            }
+        }
+        (None, Some(note)) => {
+            handle["restore"] = serde_json::Value::Null;
+            eprintln!("restore: {note}");
+        }
+        (None, None) => {}
+    }
+    println!("{handle}");
+}
+
 fn create(channel: &Channel, parsed: SplitArguments, spool: &[u8]) -> i32 {
     let detach = parsed.detach;
     let Some(session) = channel.session.clone() else {
@@ -369,11 +400,13 @@ fn create(channel: &Channel, parsed: SplitArguments, spool: &[u8]) -> i32 {
             return 0;
         }
         Ok(PublicReply::SplitStarted { .. }) => {}
-        Ok(PublicReply::SplitOpened { id, lanes }) => {
-            println!(
-                "{}",
-                serde_json::json!({"marsh_split": 1, "id": id, "lanes": lanes})
-            );
+        Ok(PublicReply::SplitOpened {
+            id,
+            lanes,
+            restore,
+            restore_note,
+        }) => {
+            print_opened(&id, &lanes, restore.as_ref(), restore_note.as_deref());
             return 0;
         }
         Ok(PublicReply::Error { message, .. }) => return usage(&message),

@@ -44,7 +44,9 @@ User
 : Your Mac user name and UID. The shell user has passwordless `sudo` and a
   private Docker Engine (`docker run` works) inside the VM. Packages installed
   with `sudo apt-get` last as long as the VM. Kit jobs start as nonroot users
-  in separate containers with no Docker or SBX sockets. See the
+  in separate containers with no SBX socket and no Kit VM Docker engine (a
+  services-enabled project's jobs get a filtered Docker endpoint for that
+  project's own services only). See the
   [security model](security.md) for the shell VM's authority and explicit
   host grants.
 
@@ -52,11 +54,40 @@ System
 : Debian on arm64 from the marsh shell image, with git, make, gcc, Node.js,
   Rust, Vim, and terminal Emacs.
 
+### Docker for a project with Docker on
+
+In a project [Docker](docker.md) is on for (the default), the shell sets
+`DOCKER_HOST` to a socket that reaches that project's own services (never a Kit
+VM's Docker), and the ports its containers publish answer on `localhost` inside
+the shell:
+
+<!-- services-example id=shell-docker-host fixture=stack-a run=shell stdout="unix://" -->
+```sh
+echo "$DOCKER_HOST"
+docker compose up -d --wait db
+```
+
+The first command prints a `unix://` path. Containers you start from the shell
+stay in the project's services after the shell exits. Remove them yourself with
+Docker (`docker compose down`, `docker rm -f`), or remove the project's whole
+services VM and its data with `marsh services rm`.
+
+The shell VM's own private Docker is still there: `unset DOCKER_HOST` reaches
+it. What you start there is separate, and is not part of checkpoints.
+
+The shell VM is shared by every project of the scope, so the first shell to
+claim a port keeps it. A later claim prints `marsh: port N is already in use in
+the shell VM ...` and replaces nothing. Anyone in the shell VM can connect to a
+forwarded port, including another project's shell
+(see [Shared VM](#shared-vm)). A project with services off gets no
+`DOCKER_HOST` and no forwarded ports.
+
 ### Shared VM
 
 Persistent-home shells in one scope share one warm shell VM and one daemon.
 A second project opened in the same scope can see the first
-project's files. To keep work apart, use a separate `MARSH_HOME`.
+project's files, and the ports its [Docker](docker.md) forward into the
+shell. To keep work apart, use a separate `MARSH_HOME`.
 
 ### Ephemeral home
 

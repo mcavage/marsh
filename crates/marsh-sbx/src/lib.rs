@@ -34,6 +34,8 @@ use thiserror::Error;
 
 pub mod cloud;
 mod ephemeral_home;
+pub mod services_engine;
+pub mod services_relay;
 pub mod shell_supervisor;
 mod shell_template_reference;
 pub mod skills;
@@ -48,8 +50,19 @@ pub use vm_ownership::{DevGrantRecord, VmPurpose, valid_vm_prefix, vm_prefix};
 use vm_ownership::{VmClass, VmOwnership};
 mod capped_command;
 mod mcp_environment;
+mod services_net;
+mod services_vm;
+pub mod vm_text;
 pub use capped_command::{STOCK_COMMAND_CLEANUP_TIMEOUT, run_stock_command_capped};
 pub use mcp_environment::McpServer;
+pub use services_net::{
+    Gate, Governance, InternetGrants, assess as assess_services_governance,
+    breaks as services_engine_query_breaks,
+};
+pub use services_vm::{
+    CredentialExposure, ReadyServicesVm, ServicesGeneration, ServicesVmSpec, ServicesVmView,
+    breaks as services_breaks,
+};
 
 pub const KIT_VM_BASIS: &str = "native-stock-sbx-kit";
 pub const WORKER_PATH: &str = "/usr/local/libexec/marsh-worker";
@@ -925,6 +938,8 @@ pub struct RelayLaunch {
     pub process: Attachment,
     pub socket_path: PathBuf,
     pub token_path: PathBuf,
+    /// The shell's services endpoint socket, when one was asked for.
+    pub endpoint_path: Option<PathBuf>,
 }
 
 /// Minimal public-SBX adapter. The daemon remains responsible for admission,
@@ -971,6 +986,15 @@ pub struct StockSbx {
     deferred_pin_releases: Mutex<BTreeSet<String>>,
     worker_leases: Mutex<BTreeMap<String, Arc<RetainedWorker>>>,
     shell_leases: Mutex<BTreeMap<String, Arc<shell_supervisor::Supervisor>>>,
+    /// Services VMs: the generation each was last made ready in, and the
+    /// project mount its readiness holds (`services_vm.rs`).
+    services_generations: Mutex<BTreeMap<String, ServicesGeneration>>,
+    services_mounts: Mutex<BTreeMap<String, ShellMounts>>,
+    services_counter: AtomicU64,
+    /// The engine container id each services VM's engine generation was created
+    /// as, recorded by the daemon's own `docker create` and never read back from
+    /// the VM: the Internet gate is addressed by it.
+    services_engine_ids: Arc<Mutex<BTreeMap<String, String>>>,
     shell_generation: AtomicU64,
     /// Per-job memory now (`job-memory-bytes`): a Kit VM created while it
     /// exceeds stock SBX's default VM size gets `--memory` to fit it.
@@ -1116,6 +1140,10 @@ impl StockSbx {
             deferred_pin_releases: Mutex::new(BTreeSet::new()),
             worker_leases: Mutex::new(BTreeMap::new()),
             shell_leases: Mutex::new(BTreeMap::new()),
+            services_generations: Mutex::new(BTreeMap::new()),
+            services_mounts: Mutex::new(BTreeMap::new()),
+            services_engine_ids: Arc::new(Mutex::new(BTreeMap::new())),
+            services_counter: AtomicU64::new(1),
             shell_generation: AtomicU64::new(1),
             kit_job_memory: AtomicU64::new(0),
             kit_host_memory: AtomicU64::new(0),
@@ -2034,6 +2062,11 @@ impl StockSbx {
         let quarantined = self.quarantined_vms();
         let mut recorded = Vec::new();
         for (name, purpose, key) in self.ownership.recorded() {
+            // A services VM holds a project's data: no garbage collection
+            // (`marsh gc`) reaches it. `marsh services rm` removes it.
+            if purpose == VmPurpose::Services {
+                continue;
+            }
             let VmClass::Owned { running, .. } = self.ownership.classify(&view, &name) else {
                 continue;
             };
@@ -3226,24 +3259,47 @@ impl StockSbx {
         pull: &str,
         expected_digest: Option<&str>,
     ) -> Result<(), SbxError> {
+        self.create_shell_vm_named(&spec.name, template, pull, expected_digest, &[], &[])
+    }
+
+    /// `sbx create --name NAME ... --template TEMPLATE shell`, with no
+    /// workspace, then adopt the new UUID and verify the template digest.
+    fn create_shell_vm_named(
+        &self,
+        name: &str,
+        template: &str,
+        pull: &str,
+        expected_digest: Option<&str>,
+        environment: &[(&str, &str)],
+        extra_flags: &[&str],
+    ) -> Result<(), SbxError> {
         self.ownership.invalidate();
+        // `environment` and `extra_flags` reach this one `sbx create` only.
+        let mut invocation =
+            self.invocation(["create", "--name", name, "--pull", pull, "--skills", "off"]);
+        invocation
+            .arguments
+            .extend(extra_flags.iter().map(OsString::from));
+        invocation
+            .arguments
+            .extend(["--template", template, "shell"].map(OsString::from));
+        invocation.environment = environment
+            .iter()
+            .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+            .collect();
         let outcome = self
-            .run_bounded_os(
-                "create shell VM",
-                self.preparation_timeouts.create,
-                [
-                    "create",
-                    "--name",
-                    &spec.name,
-                    "--pull",
-                    pull,
-                    "--skills",
-                    "off",
-                    "--template",
-                    template,
-                    "shell",
-                ],
-            )
+            .runner
+            .run_bounded(&invocation, self.preparation_timeouts.create)
+            .map_err(|error| {
+                if error.kind() == io::ErrorKind::TimedOut {
+                    SbxError::PreparationTimeout {
+                        operation: "create shell VM",
+                        timeout: self.preparation_timeouts.create,
+                    }
+                } else {
+                    SbxError::Io(error)
+                }
+            })
             .and_then(|output| Self::require_success("create shell VM", output));
         if let Err(error) = outcome {
             return Err(if pull == "never" {
@@ -3262,11 +3318,11 @@ impl StockSbx {
                     self.run_bounded_os(
                         "inspect shell VM",
                         self.preparation_timeouts.sbx,
-                        ["inspect", "--json", &spec.name],
+                        ["inspect", "--json", name],
                     )
                 })
             });
-            let adopted = self.adopt_created(&spec.name);
+            let adopted = self.adopt_created(name);
             let inspected = inspect.map(|handle| {
                 handle
                     .join()
@@ -3277,7 +3333,7 @@ impl StockSbx {
         });
         adopted?;
         if let (Some(expected), Some(inspected)) = (expected_digest, inspected) {
-            self.verify_created_shell_digest(&spec.name, expected, &inspected?)?;
+            self.verify_created_shell_digest(name, expected, &inspected?)?;
         }
         Ok(())
     }
@@ -3733,6 +3789,21 @@ impl StockSbx {
         relay_binary: &Path,
         session_id: &str,
     ) -> Result<RelayLaunch, SbxError> {
+        self.launch_shell_relay_with_endpoint(vm, relay_binary, session_id, false)
+    }
+
+    /// [`Self::launch_shell_relay`], with the shell's services endpoint
+    /// socket (`d`, beside the relay's) when `endpoint` is set (E2).
+    ///
+    /// # Errors
+    /// As [`Self::launch_shell_relay`].
+    pub fn launch_shell_relay_with_endpoint(
+        &self,
+        vm: &ReadyShellVm,
+        relay_binary: &Path,
+        session_id: &str,
+        endpoint: bool,
+    ) -> Result<RelayLaunch, SbxError> {
         validate_token(session_id)?;
         let relay_artifact = self.cached_artifact_identity(relay_binary)?;
         let relay_key = (vm.name.clone(), RELAY_PATH.into());
@@ -3772,6 +3843,8 @@ impl StockSbx {
         let runtime = PathBuf::from(format!("/run/marsh/{}/{}", vm.user.uid, session_id));
         let socket_path = runtime.join("s");
         let token_path = runtime.join("t");
+        // The shell's services endpoint (E2) beside them, only when asked.
+        let endpoint_path = endpoint.then(|| runtime.join("d"));
         // The trusted relay atomically creates this UUID child beneath the
         // owner-only runtime base. An existing directory fails closed, which
         // also proves the socket and token cannot be inherited stale state.
@@ -3785,10 +3858,16 @@ impl StockSbx {
                     gid: vm.user.gid,
                 },
                 program: RELAY_PATH.as_bytes().to_vec(),
-                arguments: vec![
-                    socket_path.as_os_str().as_bytes().to_vec(),
-                    token_path.as_os_str().as_bytes().to_vec(),
-                ],
+                arguments: [
+                    Some(socket_path.as_os_str().as_bytes().to_vec()),
+                    Some(token_path.as_os_str().as_bytes().to_vec()),
+                    endpoint_path
+                        .as_ref()
+                        .map(|path| path.as_os_str().as_bytes().to_vec()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
                 environment: Vec::new(),
                 working_directory: b"/".to_vec(),
             })
@@ -3797,6 +3876,7 @@ impl StockSbx {
             process,
             socket_path,
             token_path,
+            endpoint_path,
         })
     }
 
@@ -6297,7 +6377,11 @@ impl StockSbx {
                     | WorkerResponse::Rejected { attempt, .. }
                     | WorkerResponse::CapOpen { attempt, .. }
                     | WorkerResponse::CapData { attempt, .. }
-                    | WorkerResponse::CapClose { attempt, .. } => {
+                    | WorkerResponse::CapClose { attempt, .. }
+                    | WorkerResponse::ChanOpen { attempt, .. }
+                    | WorkerResponse::ChanEof { attempt, .. }
+                    | WorkerResponse::ChanCredit { attempt, .. }
+                    | WorkerResponse::PortReport { attempt, .. } => {
                         let route_attempt = attempt.clone();
                         let mut cancel = false;
                         let route = {

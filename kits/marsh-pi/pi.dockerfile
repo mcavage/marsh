@@ -27,9 +27,18 @@ RUN test "$PI_VERSION" = "$(node -p 'require("./package.json").dependencies["@ea
 COPY --chmod=0644 mcp-gateway.mjs ./mcp-gateway.mjs
 COPY --chmod=0644 marsh-task.mjs ./marsh-task.mjs
 
+# Docker Compose plugin, pinned with a SHA-256 (image-base/docker-compose.sh).
+# The image already has the docker CLI (docker-ce-cli from kit-vm.packages).
+FROM dhi.io/debian-base:trixie-dev@sha256:94571f3dc07fbc7166f6f1cbf1fe068a7647198ee2554e6b90d59a68cc8b053c AS compose
+ARG TARGETARCH
+COPY image-base/docker-compose.sh /tmp/docker-compose.sh
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+ && sh /tmp/docker-compose.sh /out
+
 FROM base AS image
 COPY --from=packages /rootfs/ /
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
+COPY --from=compose /out/ /usr/local/
 COPY --from=npm /opt/marsh/pi-gateway /opt/marsh/pi-gateway
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-pi
 LABEL com.docker.sandboxes.start-docker=true
@@ -45,6 +54,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-pi"]
 FROM image AS smoke
 USER root
 RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python pi \
+ && docker --version && docker compose version \
  && pdftoppm -v 2>/dev/null && pdftotext -v 2>/dev/null
 
 FROM image

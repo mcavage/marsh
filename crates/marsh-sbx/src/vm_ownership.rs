@@ -55,6 +55,9 @@ pub(crate) enum VmClass {
 pub enum VmPurpose {
     Kit,
     Shell,
+    /// A project's services VM (`docs/design/services.md`), keyed by the
+    /// canonical project root.
+    Services,
 }
 
 impl VmPurpose {
@@ -62,6 +65,7 @@ impl VmPurpose {
         match self {
             Self::Kit => "kit",
             Self::Shell => "shell",
+            Self::Services => "services",
         }
     }
 
@@ -69,6 +73,7 @@ impl VmPurpose {
         match self {
             Self::Kit => "k-",
             Self::Shell => "s-",
+            Self::Services => "v-",
         }
     }
 }
@@ -443,6 +448,18 @@ impl VmOwnership {
             .is_some_and(|entry| entry.uuid.is_some() && entry.purpose == VmPurpose::Shell.label())
     }
 
+    /// Owned services VMs (recorded UUID) as `(name, project key)`.
+    pub(crate) fn owned_services(&self) -> Vec<(String, String)> {
+        self.lock()
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                entry.uuid.is_some() && entry.purpose == VmPurpose::Services.label()
+            })
+            .map(|(name, entry)| (name.clone(), entry.key.clone()))
+            .collect()
+    }
+
     /// Persisted shell generations, including older environment selectors.
     pub(crate) fn owned_shell_names(&self) -> Vec<String> {
         self.lock()
@@ -529,6 +546,8 @@ impl VmOwnership {
             .map(|(name, entry)| {
                 let purpose = if entry.purpose == VmPurpose::Shell.label() {
                     VmPurpose::Shell
+                } else if entry.purpose == VmPurpose::Services.label() {
+                    VmPurpose::Services
                 } else {
                     VmPurpose::Kit
                 };

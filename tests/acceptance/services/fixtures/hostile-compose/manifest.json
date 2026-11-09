@@ -1,0 +1,84 @@
+{
+ "fixture": "hostile-compose",
+ "comment": "SEC-13: each variants/<id>.yaml is one hostile service `hostile`, to be checkpointed together with normal.yaml's `ok`. On restore every hostile service must be named as not restored and `ok` must restore. The engine's policy would refuse most of these at create time, so the harness injects them as checkpoint records (internal driver) or compose files in the lane. Validate or run a variant with `docker compose --project-directory . -f variants/ID.yaml ...` from the staged project (the files reach ../nfx-outside relative to the project), or copy it over compose.yaml.",
+ "normal": {
+  "file": "normal.yaml",
+  "service": "ok"
+ },
+ "outside": {
+  "dir": "../nfx-outside",
+  "secret_marker": "NFX-CANARY-SECRET-7f3a91c2"
+ },
+ "variants": [
+  {
+   "id": "privileged",
+   "file": "variants/privileged.yaml",
+   "service": "hostile",
+   "property": "privileged: true",
+   "expect": "not-restored"
+  },
+  {
+   "id": "root-bind",
+   "file": "variants/root-bind.yaml",
+   "service": "hostile",
+   "property": "bind mount of /",
+   "expect": "not-restored"
+  },
+  {
+   "id": "secrets-file-outside",
+   "file": "variants/secrets-file-outside.yaml",
+   "service": "hostile",
+   "property": "secrets: file outside the lane",
+   "expect": "not-restored"
+  },
+  {
+   "id": "include-outside",
+   "file": "variants/include-outside.yaml",
+   "service": "hostile",
+   "property": "include outside the lane",
+   "expect": "not-restored"
+  },
+  {
+   "id": "extends-outside",
+   "file": "variants/extends-outside.yaml",
+   "service": "hostile",
+   "property": "extends outside the lane",
+   "expect": "not-restored"
+  },
+  {
+   "id": "env-file-outside",
+   "file": "variants/env-file-outside.yaml",
+   "service": "hostile",
+   "property": "env_file outside the lane",
+   "expect": "not-restored"
+  },
+  {
+   "id": "build-context-root",
+   "file": "variants/build-context-root.yaml",
+   "service": "hostile",
+   "property": "build.context: /",
+   "expect": "not-restored"
+  },
+  {
+   "id": "provider",
+   "file": "variants/provider.yaml",
+   "service": "hostile",
+   "property": "a provider: service",
+   "expect": "not-restored"
+  },
+  {
+   "id": "post-start-privileged",
+   "file": "variants/post-start-privileged.yaml",
+   "service": "hostile",
+   "property": "a post_start hook with privileged",
+   "expect": "not-restored"
+  },
+  {
+   "id": "forged-config-files-label",
+   "file": "variants/forged-config-files-label.yaml",
+   "service": "hostile",
+   "property": "forged com.docker.compose.config-files labels",
+   "expect": "not-restored"
+  }
+ ]
+}

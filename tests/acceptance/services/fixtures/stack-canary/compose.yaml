@@ -1,0 +1,19 @@
+# One restart: always service that records, on every start, whether its
+# volume still held the marker (OK) or came back empty (EMPTY).
+services:
+  canary:
+    image: busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    restart: always
+    volumes:
+      - cv:/d
+      - ./canary-log:/log
+    command:
+      - sh
+      - -c
+      - |
+        ts=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        if [ -f /d/marker ]; then echo "OK $$ts" >> /log/boots; else echo "EMPTY $$ts" >> /log/boots; fi
+        exec sleep 1d
+
+volumes:
+  cv:

@@ -69,6 +69,11 @@ Usage:
   marsh config cloud-delegate [on|off] Let detached cloud runs start agent sandboxes
   marsh config skills-mirror [on|off]  Keep the sbx skills store in step with ~/.agents/skills etc.
   marsh config vm-idle-days [DAYS|off] Show or set when unused VMs are removed
+  marsh config docker [on|off|ls]      Show or set this project's private Docker (on by default)
+  marsh config docker default [on|off] Docker for projects with no setting of their own (default on)
+  marsh docker status|start|stop|rm|hold|release   This project's private Docker (host only)
+  marsh docker internet on|off         Grant or revoke Internet for its containers (off by default)
+                                       (`marsh services ...` and `config services` still work)
   marsh config limits [--json]         Show every job limit, its default and where it comes from
   marsh config limit NAME VALUE|default
                                        Change a job limit (no restart)
@@ -76,9 +81,10 @@ Usage:
   marsh config peer-review [on|off|ls] Show or set peer review by another vendor's model
   marsh peer-review ls [--json]        Show the peer reviewers and where they came from
   marsh peer-review classify MODEL...  Show a model's class and vendor (no daemon)
-  marsh stop [--json]                  Remove this home's VMs and stop its daemon
+  marsh stop [--json]                  Remove this home's VMs (stop Docker VMs) and stop its daemon
   marsh restart                        Restart this home's idle daemon on the installed marsh (VMs kept)
-  marsh reset [--json]                 Remove this home's VMs; keep the daemon
+  marsh reset [--include-services [--yes]] [--json]
+                                       Remove this home's VMs; keep the daemon and Docker VMs
   marsh init                           Create this home and copy your git name and email into it
   marsh recover-home SLOT --discard
   marsh mcp serve [MCP_OPTIONS...]
@@ -292,12 +298,13 @@ fn init_home(arguments: &[OsString]) -> Result<i32, RunError> {
     }
     Ok(0)
 }
-const STOP_HELP: &str = "Usage: marsh stop [--json] [--detached]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME, then stop its daemon.\nRefuses while shells or jobs are active. Home and results are kept.\nDetached cloud runs are kept (and collected when the daemon starts again); --detached discards them.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `stop` as `marsh ./stop`.\n";
-const RESET_HELP: &str = "Usage: marsh reset [--json] [--detached]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME; the daemon keeps running.\nRefuses while shells or jobs are active. Home and results are kept.\nDetached cloud runs are kept; --detached discards them.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `reset` as `marsh ./reset`.\n";
+const STOP_HELP: &str = "Usage: marsh stop [--json] [--detached]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME, then stop its daemon.\nServices VMs (`marsh docker`) are stopped, not removed: their disks and data stay.\nRefuses while shells or jobs are active. Home and results are kept.\nDetached cloud runs are kept (and collected when the daemon starts again); --detached discards them.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `stop` as `marsh ./stop`.\n";
+const RESET_HELP: &str = "Usage: marsh reset [--include-services [--yes]] [--json] [--detached]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME; the daemon keeps running.\nServices VMs (`marsh docker`) and their data are kept: --include-services lists the projects\nwhose services data would be deleted and asks first (--yes skips the question).\nRefuses while shells or jobs are active. Home and results are kept.\nDetached cloud runs are kept; --detached discards them.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `reset` as `marsh ./reset`.\n";
 const RECOVER_HOME_HELP: &str = "Usage: marsh recover-home SLOT --discard\n\nrecover-home explicitly selects one retained private slot (0..15), after all shell/Kit owners and pending work are closed. Use the SAME SDK selection; unknown/live authority remains retained. It never removes VMs or sweeps other slots.\n";
 const ACP_HOST_HELP: &str = "Usage: marsh acp install-published codex NAME\n       marsh acp remove-published codex NAME\n\nRegister or remove a published ACP control tool for new host Codex tasks. Inside the project shell, run `acp --help` for session commands.\n";
 
 fn main() -> ExitCode {
+    let _ = marsh_provenance::embed!();
     let arguments: Vec<OsString> = env::args_os().collect();
     if sbx_shim::invoked_as_sbx(&arguments) {
         return exit_code(sbx_shim::run(&arguments));
@@ -704,6 +711,12 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             };
         }
         _ => {}
+    }
+    if arguments
+        .get(1)
+        .is_some_and(|value| value == "--internal-services")
+    {
+        return Ok(marsh_services::run(&arguments[2..]));
     }
     if arguments
         .get(1)
@@ -2105,10 +2118,18 @@ fn write_absent_scope_report(
 ) -> Result<Option<i32>, RunError> {
     let account_home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let control = env::var_os("MARSH_CONTROL_HOME").map(PathBuf::from);
+    let include_services = matches!(
+        command,
+        cli::ProductCommand::Reset {
+            include_services: true,
+            ..
+        }
+    );
     let recorded = marsh_daemon::host_state_directory::recorded_scope_vms(
         &account_home,
         control.as_deref(),
         daemon_home,
+        include_services,
     );
     if recorded.as_ref().is_ok_and(|names| !names.is_empty()) {
         return Ok(None);
@@ -2116,7 +2137,7 @@ fn write_absent_scope_report(
     let report = absent_scope_report(command, recorded)?;
     let json = matches!(
         command,
-        cli::ProductCommand::Reset { json: true } | cli::ProductCommand::Stop { json: true }
+        cli::ProductCommand::Reset { json: true, .. } | cli::ProductCommand::Stop { json: true }
     );
     if report.cleanup_complete {
         eprintln!(
@@ -5048,7 +5069,11 @@ exit 64
     #[test]
     fn absent_daemon_claims_nothing_running_only_when_no_vm_is_recorded() {
         let stop = cli::ProductCommand::Stop { json: false };
-        let reset = cli::ProductCommand::Reset { json: true };
+        let reset = cli::ProductCommand::Reset {
+            json: true,
+            include_services: false,
+            yes: false,
+        };
         let empty = absent_scope_report(&stop, Ok(Vec::new())).unwrap();
         assert!(empty.cleanup_complete && empty.components.is_empty());
 

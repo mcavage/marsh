@@ -9,3 +9,10 @@ __pycache__/
 /.pi-sessions/
 /.marsh-evidence/
 **/*_TTrace_*
+
+# Dependencies and build output are installed or built on demand, never tracked
+# (scripts/check-no-vendored-deps.sh, run by `make lint`). The services fixtures
+# `npm ci` theirs through tests/acceptance/services/fixtures/stage.py.
+node_modules/
+.venv/
+.next/

@@ -1,0 +1,39 @@
+[package]
+name = "marsh-services"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Deliberate E2E behavior breaks (SECURITY-DESIGN A10, docs/design/test-breaks.md).
+# Forwards to the one guarded feature: release packaging refuses it at compile
+# time and the packaging check finds its marker in the binary.
+test-breaks = ["marsh-contracts/test-breaks"]
+# The E3 dev harness binary (runs the filtered endpoint in an engine container).
+dev-harness = []
+
+[lints]
+workspace = true
+
+[dependencies]
+marsh-contracts = { path = "../marsh-contracts" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11"
+signal-hook = "0.4"
+rustix = { version = "1.1", features = ["fs", "net", "event"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+rustix = { version = "1.1", features = ["fs", "net", "mount", "event", "thread", "process"] }
+
+[[bin]]
+name = "e3-harness"
+path = "src/bin/e3-harness.rs"
+required-features = ["dev-harness"]
+
+[dev-dependencies]
+proptest = "1"
+base64 = "0.23"

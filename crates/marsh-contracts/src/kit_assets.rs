@@ -465,13 +465,18 @@ impl AcpAdapter {
             .iter()
             .map(|(name, value)| (name.clone(), value.as_bytes().to_vec()))
             .collect();
-        if crate::validate_exported_environment(&exported).is_err()
-            || env.keys().any(|name| {
-                crate::reserved_exported_environment_name(name)
-                    || crate::placement_bound_environment_name(name)
-            })
-        {
-            return Err("acp@1: env has an invalid, reserved, or oversized entry".into());
+        // Name the variable a Kit may not set (`DOCKER_*` among them, SEC-08).
+        if let Some(name) = env.keys().find(|name| {
+            crate::reserved_exported_environment_name(name)
+                || crate::placement_bound_environment_name(name)
+        }) {
+            let shown: String = name.chars().take(64).collect();
+            return Err(format!(
+                "marsh: acp@1: env {shown} is reserved: marsh sets it, a Kit cannot"
+            ));
+        }
+        if crate::validate_exported_environment(&exported).is_err() {
+            return Err("acp@1: env has an invalid or oversized entry".into());
         }
         Ok(Some(Self {
             agent: name.to_owned(),

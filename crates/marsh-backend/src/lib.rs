@@ -6,11 +6,18 @@ pub mod command_registry;
 
 use marsh_acp::AgentAdapterDeclaration;
 pub mod config;
+mod endpoint;
 mod ephemeral;
 mod kit_auto_update;
 mod kit_descriptors;
 mod kit_lifecycle;
 mod sbxenv;
+mod services;
+mod services_lanes;
+mod services_limits;
+mod services_reap;
+mod services_snapshots;
+mod services_view;
 mod shell_attachment;
 mod skills_mirror;
 mod vm_gc;
@@ -167,6 +174,8 @@ pub struct StockDaemonBackend {
     vm_idle_override: Option<String>,
     /// The host's agent skills folders, mirrored into stock SBX's store.
     skills_mirror: skills_mirror::Mirror,
+    /// Project services VMs, their holders and idle timers (`services.rs`).
+    services: services::Services,
 }
 
 /// How long one shell open waits for another opener's shell VM setup (or
@@ -508,6 +517,7 @@ impl StockDaemonBackend {
             vm_gc_due_ms: std::sync::atomic::AtomicU64::new(0),
             skills_mirror: skills_mirror::Mirror::default(),
             vm_idle_override: None,
+            services: services::Services::default(),
         }
     }
 
@@ -541,6 +551,60 @@ impl StockDaemonBackend {
     #[must_use]
     pub fn with_vm_idle_override(mut self, seconds: Option<String>) -> Self {
         self.vm_idle_override = seconds;
+        self
+    }
+
+    /// `MARSH_SERVICES_POOL_RESERVE_BYTES` at launch (a test setting, such as
+    /// `256m`): the free space of the services pool below which a checkpoint
+    /// skips its services capture.
+    #[must_use]
+    pub fn with_services_pool_reserve(mut self, reserve: Option<&str>) -> Self {
+        self.services.snapshots.pool_reserve =
+            reserve.and_then(|size| marsh_sbx::services_engine::parse_size(size).ok());
+        self
+    }
+
+    /// `MARSH_SERVICES_STOP_WAIT_SECONDS` at launch (a test setting): how long
+    /// a stop waits for the checkpoint captures in flight before it is refused
+    /// (`services stop`: 120 s, `marsh stop`: 20 s).
+    #[must_use]
+    pub fn with_services_stop_wait(mut self, seconds: Option<&str>) -> Self {
+        self.services.snapshots.stop_wait = seconds
+            .and_then(|seconds| seconds.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        self
+    }
+
+    /// `MARSH_SERVICES_IDLE_SECONDS` at launch: the idle limit of a services
+    /// VM, which wins over `services_idle_seconds`.
+    #[must_use]
+    pub fn with_services(mut self, idle_seconds: Option<&str>) -> Self {
+        self.services.idle_override = idle_seconds
+            .and_then(|seconds| seconds.trim().parse::<u64>().ok())
+            .filter(|seconds| *seconds > 0);
+        self
+    }
+
+    /// Gives the daemon what it needs to bring a services engine and its relay
+    /// up: the guest artifacts directory (`libexec/marsh`). Every services VM
+    /// the ownership map already holds starts unrecovered: its previous relay
+    /// and engine generation died with the previous daemon (`services.rs`).
+    #[must_use]
+    pub fn with_services_artifacts(mut self, artifacts: PathBuf) -> Self {
+        let relays = marsh_sbx::services_relay::ServicesRelays::new(
+            Arc::clone(&self.sbx),
+            Some(artifacts),
+            marsh_sbx::services_relay::DaemonBudget::new(1024),
+            Some(self.config.daemon_home.join("test-holds")),
+        );
+        relays.mark_unrecovered(
+            self.sbx
+                .owned_services_vms()
+                .into_iter()
+                .map(|(_, key)| PathBuf::from(key))
+                .filter(|key| key.is_absolute()),
+        );
+        self.services.relays = Some(Arc::new(relays));
         self
     }
 
@@ -1415,6 +1479,119 @@ impl DaemonBackend for StockDaemonBackend {
         self.stop_selected_workers(selection, store)
     }
 
+    fn services(
+        &self,
+        request: marsh_daemon::ServicesRequest,
+        _store: &DaemonStore,
+    ) -> Result<serde_json::Value, DaemonError> {
+        self.services_request(request)
+    }
+
+    fn services_pass(&self) {
+        self.services_timer_pass();
+    }
+
+    fn capture_services(
+        &self,
+        root: &Path,
+        workspace: &str,
+        checkpoint_id: &str,
+    ) -> marsh_daemon::checkpoint::ServicesCapture {
+        self.services_capture(root, workspace, checkpoint_id)
+    }
+
+    fn ignored_limits(&self, _root: &Path) -> Option<marsh_daemon::ignored::Limits> {
+        // Folder local data is saved whether or not Docker is on (DECISIONS 26).
+        Some(services_limits::ignored_limits(&self.config.daemon_home))
+    }
+
+    fn extra_features(&self) -> Vec<&'static str> {
+        self.services_feature().into_iter().collect()
+    }
+
+    fn drop_services(&self, root: &Path, snapshot_id: &str) -> Result<bool, String> {
+        self.services_drop(root, snapshot_id)
+    }
+
+    fn list_services(
+        &self,
+        root: &Path,
+    ) -> Result<Vec<marsh_daemon::checkpoint::ServicesSnapshotInfo>, String> {
+        self.services_list(root)
+    }
+
+    fn services_reuse(
+        &self,
+        root: &Path,
+        workspace: &str,
+    ) -> marsh_daemon::checkpoint::ServicesReuse {
+        self.services_reuse_decision(root, workspace)
+    }
+
+    fn services_track(&self, root: &Path, workspace: &str, tracked: bool) {
+        self.services_track_workspace(root, workspace, tracked);
+    }
+
+    fn services_reconcile(&self, live: &std::collections::BTreeSet<(PathBuf, String)>) {
+        self.services_reconcile_lanes(live);
+    }
+
+    fn services_protected(&self, root: &Path) -> std::collections::BTreeSet<String> {
+        self.services_protected_ids(root)
+    }
+
+    fn services_snapshot_roots(&self) -> Vec<PathBuf> {
+        self.services_snapshot_root_list()
+    }
+
+    fn services_restore_prepare(
+        &self,
+        call: &marsh_daemon::LaneCall<'_>,
+        snapshot: &str,
+    ) -> Result<serde_json::Value, marsh_daemon::lane_services::CallFailure> {
+        self.lane_restore_prepare(call, snapshot)
+    }
+
+    fn services_restore_up(
+        &self,
+        call: &marsh_daemon::LaneCall<'_>,
+    ) -> Result<serde_json::Value, marsh_daemon::lane_services::CallFailure> {
+        self.lane_restore_up(call)
+    }
+
+    fn services_drop_workspace(
+        &self,
+        root: &Path,
+        workspace: &str,
+    ) -> marsh_daemon::lane_services::DropOutcome {
+        self.lane_drop_workspace(root, workspace)
+    }
+
+    fn services_enabled(&self, root: &Path) -> bool {
+        self.lane_services_enabled(root)
+    }
+
+    fn test_hold(&self, point: &str) {
+        self.lane_hold(point);
+    }
+
+    fn services_lane(
+        &self,
+        root: &Path,
+        workspace: &str,
+        ports: Option<&std::collections::BTreeMap<u16, u16>>,
+    ) {
+        self.lane_register(root, workspace, ports);
+    }
+
+    fn remove_services(
+        &self,
+        confirmed: &[String],
+        deadline: Instant,
+    ) -> Vec<marsh_daemon::ScopeCleanupComponent> {
+        self.services_remove_confirmed(confirmed, deadline)
+    }
+
     fn auto_update_kits(&self, store: &DaemonStore) {
         self.remove_retired_vms();
         self.retire_drained(store);
@@ -1828,6 +2005,7 @@ impl DaemonBackend for StockDaemonBackend {
             });
         }
         components.extend(self.reset_stale_scope_components(deadline));
+        components.extend(self.services_scope_teardown(action, deadline));
         self.finish_shell_warmup();
         for shell in self.sbx.shell_recovery_specs(&self.config.shell) {
             let result = self
@@ -2375,6 +2553,14 @@ impl DaemonBackend for StockDaemonBackend {
         } else {
             String::new()
         };
+        // The filtered Docker endpoint and port forwards (E2): only for a job
+        // of a project the user turned services on for (A11), decided here from
+        // the daemon's own state. A job in an open lane gets that lane's scope,
+        // derived from the mounts recorded for the job (a child's are its
+        // parent's), never from its working directory (C3). A split branch's
+        // confined job that is not a lane gets none.
+        let services_scope = self.services_job_scope(&request.session.launch_directory, &mounts);
+        let services_root = services_scope.as_ref().map(|scope| scope.root.clone());
         // The limits in effect now (`marsh config limit`): a change applies
         // to jobs started after it.
         let limits = store.job_limits_over(self.config.resources);
@@ -2416,10 +2602,16 @@ impl DaemonBackend for StockDaemonBackend {
                 usages: verbs.usages,
                 model_choices,
                 peer_review,
+                services: services_root.as_ref().map(|_| {
+                    marsh_contracts::process::ServicesEndpoint {
+                        breaks: marsh_contracts::test_breaks::selected(marsh_worker::WORKER_MODES),
+                    }
+                }),
                 limits: Some(limits.process_limits()),
             }),
         };
         let output_budget = spec.resources.output_bytes;
+        let wall_seconds_limit = spec.resources.wall_seconds;
         let terminal_deadline = Instant::now()
             .checked_add(Duration::from_secs(spec.resources.wall_seconds))
             .and_then(|deadline| deadline.checked_add(WORKER_TERMINAL_GRACE))
@@ -2542,152 +2734,195 @@ impl DaemonBackend for StockDaemonBackend {
         let mut timeout_detail: Option<String> = None;
         let mut settle_deadline: Option<Instant> = None;
         let start_progress_deadline = Instant::now() + WORKER_START_PROGRESS_TIMEOUT;
-        let report = loop {
-            let response = receive_worker_response(
-                &launch.responses,
-                if let Some(settle) = settle_deadline {
-                    settle
-                } else if started_container.is_none() {
-                    start_progress_deadline.min(terminal_deadline)
-                } else {
-                    terminal_deadline
-                },
-            );
-            match response {
-                Ok(WorkerResponse::Started { container_id, .. }) => {
-                    let now = Instant::now();
-                    worker_progress_at.get_or_insert(now);
-                    store.mark_running(&job_id, &vm.name, &vm.name, container_id.as_str())?;
-                    started_container = Some(container_id);
-                }
-                Ok(WorkerResponse::Stdout { bytes, .. }) => {
-                    first_output_at.get_or_insert_with(Instant::now);
-                    if let Some(collector) = &mut usage_collector {
-                        collector.feed(&bytes);
+        let report = thread::scope(|scope| -> Result<WorkerReport, DaemonError> {
+            let endpoint = services_scope.clone().map(|endpoint_scope| {
+                let notice_attachment = attachment.clone();
+                endpoint::JobEndpoint::start(
+                    scope,
+                    self,
+                    endpoint_scope,
+                    attempt_id.clone(),
+                    control.clone(),
+                    Arc::new(move |message: String| {
+                        let _ = notice_attachment.send(&AttachmentFrame::Stderr {
+                            bytes: message.into_bytes(),
+                        });
+                    }),
+                    wall_seconds_limit,
+                )
+            });
+            let report = loop {
+                let response = receive_worker_response(
+                    &launch.responses,
+                    if let Some(settle) = settle_deadline {
+                        settle
+                    } else if started_container.is_none() {
+                        start_progress_deadline.min(terminal_deadline)
+                    } else {
+                        terminal_deadline
+                    },
+                );
+                match response {
+                    Ok(WorkerResponse::Started { container_id, .. }) => {
+                        let now = Instant::now();
+                        worker_progress_at.get_or_insert(now);
+                        store.mark_running(&job_id, &vm.name, &vm.name, container_id.as_str())?;
+                        started_container = Some(container_id);
                     }
-                    stdout_bytes =
-                        stdout_bytes.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
-                    if output_complete
-                        && attachment.send(&AttachmentFrame::Stdout { bytes }).is_err()
-                    {
-                        output_complete = false;
+                    Ok(WorkerResponse::Stdout { bytes, .. }) => {
+                        first_output_at.get_or_insert_with(Instant::now);
+                        if let Some(collector) = &mut usage_collector {
+                            collector.feed(&bytes);
+                        }
+                        stdout_bytes = stdout_bytes
+                            .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+                        if output_complete
+                            && attachment.send(&AttachmentFrame::Stdout { bytes }).is_err()
+                        {
+                            output_complete = false;
+                        }
                     }
-                }
-                Ok(WorkerResponse::Stderr { bytes, .. }) => {
-                    first_output_at.get_or_insert_with(Instant::now);
-                    stderr_bytes =
-                        stderr_bytes.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
-                    if output_complete
-                        && attachment.send(&AttachmentFrame::Stderr { bytes }).is_err()
-                    {
-                        output_complete = false;
+                    Ok(WorkerResponse::Stderr { bytes, .. }) => {
+                        first_output_at.get_or_insert_with(Instant::now);
+                        stderr_bytes = stderr_bytes
+                            .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+                        if output_complete
+                            && attachment.send(&AttachmentFrame::Stderr { bytes }).is_err()
+                        {
+                            output_complete = false;
+                        }
                     }
-                }
-                Ok(WorkerResponse::Terminal { report, .. }) => break report,
-                Ok(WorkerResponse::Rejected { message, .. }) => {
-                    let _ = attachment.send(&AttachmentFrame::Stderr {
-                        bytes: format!("marsh-worker: {message}\n").into_bytes(),
-                    });
-                    break WorkerReport {
-                        container_id: None,
-                        execution: ExecutionOutcome::NotStarted,
-                        delivery: marsh_worker::DeliveryOutcome::Complete,
-                        cleanup: CleanupOutcome::NotRequired,
-                        quarantine: false,
-                        control_errors: 0,
-                        retained_processes: Vec::new(),
-                    };
-                }
-                Ok(WorkerResponse::CapOpen { channel, .. }) => capability.open(channel),
-                Ok(WorkerResponse::CapData { channel, bytes, .. }) => {
-                    // Bounded per connection: a stalled daemon side closes it.
-                    if capability
-                        .channels
-                        .get(&channel)
-                        .is_some_and(|send| send.try_send(bytes).is_err())
-                    {
+                    Ok(WorkerResponse::Terminal { report, .. }) => break report,
+                    Ok(WorkerResponse::Rejected { message, .. }) => {
+                        let _ = attachment.send(&AttachmentFrame::Stderr {
+                            bytes: format!("marsh-worker: {message}\n").into_bytes(),
+                        });
+                        break WorkerReport {
+                            container_id: None,
+                            execution: ExecutionOutcome::NotStarted,
+                            delivery: marsh_worker::DeliveryOutcome::Complete,
+                            cleanup: CleanupOutcome::NotRequired,
+                            quarantine: false,
+                            control_errors: 0,
+                            retained_processes: Vec::new(),
+                        };
+                    }
+                    Ok(WorkerResponse::CapOpen { channel, .. }) => capability.open(channel),
+                    Ok(
+                        response @ (WorkerResponse::ChanOpen { .. }
+                        | WorkerResponse::ChanEof { .. }
+                        | WorkerResponse::ChanCredit { .. }
+                        | WorkerResponse::PortReport { .. }
+                        | WorkerResponse::CapData { .. }
+                        | WorkerResponse::CapClose { .. }),
+                    ) if endpoint
+                        .as_ref()
+                        .is_some_and(|endpoint| endpoint::handle_frame(endpoint, &response)) => {}
+                    Ok(WorkerResponse::ChanOpen { channel, .. }) => {
+                        // No endpoint was offered to this job: refuse, never serve.
+                        let _ = control.send(&WorkerRequest::ChanRefused {
+                            attempt: attempt_id.clone(),
+                            channel,
+                            message: "marsh: this job has no services endpoint".into(),
+                        });
+                    }
+                    Ok(
+                        WorkerResponse::ChanEof { .. }
+                        | WorkerResponse::ChanCredit { .. }
+                        | WorkerResponse::PortReport { .. },
+                    ) => {}
+                    Ok(WorkerResponse::CapData { channel, bytes, .. }) => {
+                        // Bounded per connection: a stalled daemon side closes it.
+                        if capability
+                            .channels
+                            .get(&channel)
+                            .is_some_and(|send| send.try_send(bytes).is_err())
+                        {
+                            capability.channels.remove(&channel);
+                        }
+                    }
+                    Ok(WorkerResponse::CapClose { channel, .. }) => {
                         capability.channels.remove(&channel);
                     }
-                }
-                Ok(WorkerResponse::CapClose { channel, .. }) => {
-                    capability.channels.remove(&channel);
-                }
-                Ok(response @ (WorkerResponse::Ready { .. } | WorkerResponse::Pong { .. })) => {
-                    transport_lost = true;
-                    transport_detail = Some(format!(
-                        "worker sent {} on this attempt's route",
-                        if matches!(response, WorkerResponse::Ready { .. }) {
-                            "Ready"
+                    Ok(response @ (WorkerResponse::Ready { .. } | WorkerResponse::Pong { .. })) => {
+                        transport_lost = true;
+                        transport_detail = Some(format!(
+                            "worker sent {} on this attempt's route",
+                            if matches!(response, WorkerResponse::Ready { .. }) {
+                                "Ready"
+                            } else {
+                                "Pong"
+                            }
+                        ));
+                        break WorkerReport {
+                            container_id: started_container.clone(),
+                            delivery: marsh_worker::DeliveryOutcome::Failed,
+                            execution: ExecutionOutcome::Unknown,
+                            cleanup: CleanupOutcome::Uncertain,
+                            quarantine: true,
+                            control_errors: 1,
+                            retained_processes: Vec::new(), // No observed IDs, NOT proof of absence.
+                        };
+                    }
+                    Err(true) if settle_deadline.is_none() => {
+                        // The transport is up; only progress is late. Ask the
+                        // worker to cancel and wait for its verified report
+                        // instead of declaring the attempt lost.
+                        timeout_detail = Some(if started_container.is_none() {
+                            format!(
+                                "start_timeout: no worker progress within {} s of start; cancelled",
+                                WORKER_START_PROGRESS_TIMEOUT.as_secs()
+                            )
                         } else {
-                            "Pong"
-                        }
-                    ));
-                    break WorkerReport {
-                        container_id: started_container.clone(),
-                        delivery: marsh_worker::DeliveryOutcome::Failed,
-                        execution: ExecutionOutcome::Unknown,
-                        cleanup: CleanupOutcome::Uncertain,
-                        quarantine: true,
-                        control_errors: 1,
-                        retained_processes: Vec::new(), // No observed IDs, NOT proof of absence.
-                    };
-                }
-                Err(true) if settle_deadline.is_none() => {
-                    // The transport is up; only progress is late. Ask the
-                    // worker to cancel and wait for its verified report
-                    // instead of declaring the attempt lost.
-                    timeout_detail = Some(if started_container.is_none() {
-                        format!(
-                            "start_timeout: no worker progress within {} s of start; cancelled",
-                            WORKER_START_PROGRESS_TIMEOUT.as_secs()
-                        )
-                    } else {
-                        "terminal_timeout: no terminal report by the wall limit plus grace; cancelled"
+                            "terminal_timeout: no terminal report by the wall limit plus grace; cancelled"
                             .into()
-                    });
-                    let _ = control.send_bounded(
-                        &WorkerRequest::Cancel {
-                            attempt: attempt_id.clone(),
-                        },
-                        WORKER_CANCEL_WRITE_TIMEOUT,
-                    );
-                    settle_deadline = Some(Instant::now() + WORKER_CANCEL_SETTLE);
-                }
-                Err(timed_out) => {
-                    transport_detail = Some(if timed_out {
-                        format!(
-                            "{}; no report within {} s of the cancel",
-                            timeout_detail.as_deref().unwrap_or("timed out"),
-                            WORKER_CANCEL_SETTLE.as_secs()
-                        )
-                    } else {
-                        launch
-                            .responses
-                            .loss_reason()
-                            .unwrap_or_else(|| "worker route closed".into())
-                    });
-                    if timed_out {
+                        });
                         let _ = control.send_bounded(
                             &WorkerRequest::Cancel {
                                 attempt: attempt_id.clone(),
                             },
                             WORKER_CANCEL_WRITE_TIMEOUT,
                         );
+                        settle_deadline = Some(Instant::now() + WORKER_CANCEL_SETTLE);
                     }
-                    transport_lost = true;
-                    output_complete = false;
-                    break WorkerReport {
-                        container_id: started_container.clone(),
-                        delivery: marsh_worker::DeliveryOutcome::Failed,
-                        execution: ExecutionOutcome::Unknown,
-                        cleanup: CleanupOutcome::Uncertain,
-                        quarantine: true,
-                        control_errors: 1,
-                        retained_processes: Vec::new(), // Transport loss keeps cleanup uncertain.
-                    };
+                    Err(timed_out) => {
+                        transport_detail = Some(if timed_out {
+                            format!(
+                                "{}; no report within {} s of the cancel",
+                                timeout_detail.as_deref().unwrap_or("timed out"),
+                                WORKER_CANCEL_SETTLE.as_secs()
+                            )
+                        } else {
+                            launch
+                                .responses
+                                .loss_reason()
+                                .unwrap_or_else(|| "worker route closed".into())
+                        });
+                        if timed_out {
+                            let _ = control.send_bounded(
+                                &WorkerRequest::Cancel {
+                                    attempt: attempt_id.clone(),
+                                },
+                                WORKER_CANCEL_WRITE_TIMEOUT,
+                            );
+                        }
+                        transport_lost = true;
+                        output_complete = false;
+                        break WorkerReport {
+                            container_id: started_container.clone(),
+                            delivery: marsh_worker::DeliveryOutcome::Failed,
+                            execution: ExecutionOutcome::Unknown,
+                            cleanup: CleanupOutcome::Uncertain,
+                            quarantine: true,
+                            control_errors: 1,
+                            retained_processes: Vec::new(), // Transport loss keeps cleanup uncertain.
+                        };
+                    }
                 }
-            }
-        };
+            };
+            drop(endpoint);
+            Ok(report)
+        })?;
         store.unregister_job_control(&job_id);
         output_complete &= report.delivery == marsh_worker::DeliveryOutcome::Complete;
         if launch.responses.overflowed() {
@@ -2864,207 +3099,270 @@ impl DaemonBackend for StockDaemonBackend {
         } else {
             None
         };
-        let outcome = (|| {
-            if let Some(directory) = &request.working_directory
-                && marsh_daemon::split_confinement::fork_project(directory).as_deref()
-                    != Some(request.session.launch_directory.as_path())
-            {
-                return Err(DaemonError::InvalidState(format!(
-                    "{} is not in a split fork of {}",
-                    directory.display(),
-                    request.session.launch_directory.display()
-                )));
-            }
-            store.bind_shell_cleanup_vm(&session_id, &shell.name)?;
-            let mut busy = ShellBusyWait::new();
-            let _shell_session = loop {
-                let result = self
-                    .sbx
-                    .admit_shell_session_with(&shell.name, &mut |progress| {
+        let outcome = thread::scope(|scope| {
+            (|| {
+                if let Some(directory) = &request.working_directory
+                    && marsh_daemon::split_confinement::fork_project(directory).as_deref()
+                        != Some(request.session.launch_directory.as_path())
+                {
+                    return Err(DaemonError::InvalidState(format!(
+                        "{} is not in a split fork of {}",
+                        directory.display(),
+                        request.session.launch_directory.display()
+                    )));
+                }
+                store.bind_shell_cleanup_vm(&session_id, &shell.name)?;
+                let mut busy = ShellBusyWait::new();
+                let _shell_session = loop {
+                    let result = self
+                        .sbx
+                        .admit_shell_session_with(&shell.name, &mut |progress| {
+                            shell_vm_progress(&attachment, &mut busy, progress)
+                        });
+                    match result {
+                        Err(marsh_sbx::SbxError::ShellMountAdmissionBusy) => {
+                            shell_attachment::require_controller(&attachment)?;
+                            if !busy.keep_waiting() {
+                                return Err(backend_error(
+                                    marsh_sbx::SbxError::ShellMountAdmissionBusy,
+                                ));
+                            }
+                        }
+                        other => break other.map_err(backend_error)?,
+                    }
+                };
+                let mut admitted_mounts = self.admitted_session_grants_with_home(
+                    &request.session,
+                    &shell.user.home,
+                    store.session_project_identity(&request.session.session_id),
+                    store
+                        .ephemeral_home_token(&request.session.session_id)
+                        .as_ref(),
+                )?;
+                let shell_environment = if request.session.ephemeral_home {
+                    sbxenv::Environment::default()
+                } else {
+                    self.environment("shell")
+                };
+                self.send_inside_project_notes(&request.session, &shell_environment, &attachment);
+                admitted_mounts
+                    .extend(self.additional_grants(&request.session, &shell_environment)?);
+                if let Some((_, grant)) = &dev_grant {
+                    // Only the scratch leaves are mounted, at their host paths.
+                    for leaf in marsh_daemon::dev_broker::SCRATCH_LEAVES {
+                        let path = grant.scratch.join(leaf);
+                        admitted_mounts.push(
+                            AdmittedHostGrant::open(path.clone(), path, MountAccess::ReadWrite)
+                                .map_err(backend_error)?,
+                        );
+                    }
+                }
+                shell_attachment::require_controller(&attachment)?;
+                if request.session.terminal {
+                    self.send_update_notices(None, &attachment);
+                    self.send_sbxenv_notice(&request.session.session_id, &attachment);
+                }
+                self.finish_shell_warmup();
+                let vm = loop {
+                    let result = self.sbx.ensure_shell_vm_with(&shell, &mut |progress| {
                         shell_vm_progress(&attachment, &mut busy, progress)
                     });
-                match result {
-                    Err(marsh_sbx::SbxError::ShellMountAdmissionBusy) => {
-                        shell_attachment::require_controller(&attachment)?;
-                        if !busy.keep_waiting() {
-                            return Err(backend_error(
-                                marsh_sbx::SbxError::ShellMountAdmissionBusy,
-                            ));
+                    match result {
+                        Err(marsh_sbx::SbxError::ShellMountAdmissionBusy) => {
+                            shell_attachment::require_controller(&attachment)?;
+                            if !busy.keep_waiting() {
+                                return Err(backend_error(
+                                    marsh_sbx::SbxError::ShellMountAdmissionBusy,
+                                ));
+                            }
                         }
+                        other => break other.map_err(backend_error)?,
                     }
-                    other => break other.map_err(backend_error)?,
-                }
-            };
-            let mut admitted_mounts = self.admitted_session_grants_with_home(
-                &request.session,
-                &shell.user.home,
-                store.session_project_identity(&request.session.session_id),
-                store
-                    .ephemeral_home_token(&request.session.session_id)
-                    .as_ref(),
-            )?;
-            let shell_environment = if request.session.ephemeral_home {
-                sbxenv::Environment::default()
-            } else {
-                self.environment("shell")
-            };
-            self.send_inside_project_notes(&request.session, &shell_environment, &attachment);
-            admitted_mounts.extend(self.additional_grants(&request.session, &shell_environment)?);
-            if let Some((_, grant)) = &dev_grant {
-                // Only the scratch leaves are mounted, at their host paths.
-                for leaf in marsh_daemon::dev_broker::SCRATCH_LEAVES {
-                    let path = grant.scratch.join(leaf);
-                    admitted_mounts.push(
-                        AdmittedHostGrant::open(path.clone(), path, MountAccess::ReadWrite)
-                            .map_err(backend_error)?,
-                    );
-                }
-            }
-            shell_attachment::require_controller(&attachment)?;
-            if request.session.terminal {
-                self.send_update_notices(None, &attachment);
-                self.send_sbxenv_notice(&request.session.session_id, &attachment);
-            }
-            self.finish_shell_warmup();
-            let vm = loop {
-                let result = self.sbx.ensure_shell_vm_with(&shell, &mut |progress| {
-                    shell_vm_progress(&attachment, &mut busy, progress)
+                };
+                shell_attachment::require_controller(&attachment)?;
+                self.note_vm_used(&shell.name);
+                // Observe and pin stock's actual UUID BEFORE any grant submission.
+                self.sbx.shell_vm_identity(&vm).map_err(backend_error)?;
+                let others_attached = store.status(None).shells.iter().any(|other| {
+                    other.session_id != session_id
+                        && other.state == marsh_daemon::ShellState::Attached
                 });
-                match result {
-                    Err(marsh_sbx::SbxError::ShellMountAdmissionBusy) => {
-                        shell_attachment::require_controller(&attachment)?;
-                        if !busy.keep_waiting() {
-                            return Err(backend_error(
-                                marsh_sbx::SbxError::ShellMountAdmissionBusy,
-                            ));
+                self.configure_shell_mcp(&vm, &shell_environment, others_attached)?;
+                let quarantine = |detail: String| {
+                    self.sbx.quarantine_shell(&vm, admitted_mounts.clone());
+                    store.mark_shell_cleanup_uncertain(&session_id);
+                    DaemonError::ShellCleanupUncertain(format!(
+                        "shell VM {}: {detail}; exit other shells and run host `marsh reset` or `marsh stop` for this selected home",
+                        vm.name
+                    ))
+                };
+                let mounts = loop {
+                    match self.sbx.prepare_shell_mounts(&vm, &admitted_mounts) {
+                        Err(marsh_sbx::SbxError::ShellMountAdmissionBusy)
+                            if shell_attachment::require_controller(&attachment).is_ok()
+                                && busy.keep_waiting() =>
+                        {
+                            busy.announce(&attachment);
                         }
+                        other => break other,
                     }
-                    other => break other.map_err(backend_error)?,
                 }
-            };
-            shell_attachment::require_controller(&attachment)?;
-            self.note_vm_used(&shell.name);
-            // Observe and pin stock's actual UUID BEFORE any grant submission.
-            self.sbx.shell_vm_identity(&vm).map_err(backend_error)?;
-            let others_attached = store.status(None).shells.iter().any(|other| {
-                other.session_id != session_id && other.state == marsh_daemon::ShellState::Attached
-            });
-            self.configure_shell_mcp(&vm, &shell_environment, others_attached)?;
-            let quarantine = |detail: String| {
-                self.sbx.quarantine_shell(&vm, admitted_mounts.clone());
-                store.mark_shell_cleanup_uncertain(&session_id);
-                DaemonError::ShellCleanupUncertain(format!(
-                    "shell VM {}: {detail}; exit other shells and run host `marsh reset` or `marsh stop` for this selected home",
-                    vm.name
-                ))
-            };
-            let mounts = loop {
-                match self.sbx.prepare_shell_mounts(&vm, &admitted_mounts) {
-                    Err(marsh_sbx::SbxError::ShellMountAdmissionBusy)
-                        if shell_attachment::require_controller(&attachment).is_ok()
-                            && busy.keep_waiting() =>
-                    {
-                        busy.announce(&attachment);
+                .map_err(|error| {
+                    if matches!(
+                        error,
+                        marsh_sbx::SbxError::ShellMountCleanupUncertain(_)
+                            | marsh_sbx::SbxError::QuarantinedShellVm(_)
+                    ) {
+                        quarantine(error.to_string())
+                    } else {
+                        backend_error(error)
                     }
-                    other => break other,
-                }
-            }
-            .map_err(|error| {
-                if matches!(
-                    error,
-                    marsh_sbx::SbxError::ShellMountCleanupUncertain(_)
-                        | marsh_sbx::SbxError::QuarantinedShellVm(_)
+                })?;
+                let daemon_socket = match shell_attachment::require_controller(&attachment)
+                    .and_then(|()| EndpointPaths::for_home(&self.config.daemon_home))
+                {
+                    Ok(paths) => paths.socket,
+                    Err(error) => {
+                        if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
+                            return Err(quarantine(cleanup.to_string()));
+                        }
+                        return Err(error);
+                    }
+                };
+                let token = match store.issue_relay_token(&request.session.session_id) {
+                    Ok(token) => token,
+                    Err(error) => {
+                        if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
+                            return Err(quarantine(cleanup.to_string()));
+                        }
+                        return Err(error);
+                    }
+                };
+                // The project's services endpoint for this shell (E2, DECISIONS 10): only
+                // when the user turned services on for the project (A11), and never
+                // under test break `shell-no-endpoint`.
+                let services_root =
+                    if marsh_contracts::break_mode(endpoint::breaks::SHELL_NO_ENDPOINT) {
+                        None
+                    } else {
+                        self.services_job_root(&request.session.launch_directory)
+                    };
+                let relay = match shell_attachment::require_controller(&attachment).and_then(|()| {
+                    self.sbx
+                        .launch_shell_relay_with_endpoint(
+                            &vm,
+                            &self.config.relay_binary,
+                            &request.session.session_id,
+                            services_root.is_some(),
+                        )
+                        .map_err(backend_error)
+                }) {
+                    Ok(relay) => relay,
+                    Err(error) => {
+                        store.revoke_relay_token(&token);
+                        if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
+                            return Err(quarantine(cleanup.to_string()));
+                        }
+                        return Err(backend_error(error));
+                    }
+                };
+                let socket_path = relay.socket_path.clone();
+                let token_path = relay.token_path.clone();
+                let docker_socket = relay.endpoint_path.clone();
+                // A forward's report reaches the shell as a notice while it is still
+                // being prepared (the only frame the client takes then), and as a line
+                // of its stderr once it runs (raw mode needs the carriage return).
+                let shell_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let shell_endpoint = services_root.clone().map(|root| {
+                    let notice_attachment = attachment.clone();
+                    let started = Arc::clone(&shell_started);
+                    let terminal = request.session.terminal;
+                    endpoint::ShellEndpoint::start(
+                        scope,
+                        self,
+                        root,
+                        session_id.clone(),
+                        Arc::new(move |message: String| {
+                            let frame = if started.load(std::sync::atomic::Ordering::Acquire) {
+                                let ending = if terminal { "\r\n" } else { "\n" };
+                                AttachmentFrame::Stderr {
+                                    bytes: format!("{message}{ending}").into_bytes(),
+                                }
+                            } else {
+                                AttachmentFrame::Notice { message }
+                            };
+                            let _ = notice_attachment.send(&frame);
+                        }),
+                    )
+                });
+                let relay = match shell_attachment::Relay::start_with_services(
+                    relay.process,
+                    daemon_socket,
+                    token.clone(),
+                    shell_endpoint.as_ref().map(|(_, provider, _)| {
+                        Arc::clone(provider) as Arc<dyn marsh_daemon::relay::ShellServices>
+                    }),
                 ) {
-                    quarantine(error.to_string())
-                } else {
-                    backend_error(error)
-                }
-            })?;
-            let daemon_socket = match shell_attachment::require_controller(&attachment)
-                .and_then(|()| EndpointPaths::for_home(&self.config.daemon_home))
-            {
-                Ok(paths) => paths.socket,
-                Err(error) => {
-                    if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
-                        return Err(quarantine(cleanup.to_string()));
-                    }
-                    return Err(error);
-                }
-            };
-            let token = match store.issue_relay_token(&request.session.session_id) {
-                Ok(token) => token,
-                Err(error) => {
-                    if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
-                        return Err(quarantine(cleanup.to_string()));
-                    }
-                    return Err(error);
-                }
-            };
-            let relay = match shell_attachment::require_controller(&attachment).and_then(|()| {
-                self.sbx
-                    .launch_shell_relay(&vm, &self.config.relay_binary, &request.session.session_id)
-                    .map_err(backend_error)
-            }) {
-                Ok(relay) => relay,
-                Err(error) => {
-                    store.revoke_relay_token(&token);
-                    if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
-                        return Err(quarantine(cleanup.to_string()));
-                    }
-                    return Err(backend_error(error));
-                }
-            };
-            let socket_path = relay.socket_path.clone();
-            let token_path = relay.token_path.clone();
-            let relay =
-                match shell_attachment::Relay::start(relay.process, daemon_socket, token.clone()) {
                     Ok(relay) => relay,
                     Err(error) => {
                         store.revoke_relay_token(&token);
                         return Err(quarantine(error.to_string()));
                     }
                 };
-            // The relay is a supervisor child: its in-band `Cleaned` frame
-            // plus its supervisor-reported exit 0 is the only cleanup proof.
-            let stop_relay = |relay: shell_attachment::Relay| {
-                if relay.stop()?.cleaned_in_band {
-                    Ok(())
-                } else {
-                    Err(DaemonError::ShellCleanupUncertain(
-                        "guest relay did not report in-band cleanup".into(),
-                    ))
-                }
-            };
-            let rollback = |relay: shell_attachment::Relay, error: DaemonError| {
-                store.revoke_relay_token(&token);
-                if let Err(cleanup) = stop_relay(relay) {
-                    return quarantine(cleanup.to_string());
-                }
-                if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
-                    return quarantine(cleanup.to_string());
-                }
-                error
-            };
-            if let Err(error) = relay.ready(&attachment) {
-                return Err(rollback(relay, error));
-            }
-            // Programs that open a link find marsh's `xdg-open`
-            // (`docs/agents.md`); an interactive session also names the
-            // user's terminal, so programs enable what it supports.
-            let mut extra_environment = vec!["BROWSER=xdg-open".to_owned()];
-            if request.session.terminal {
-                extra_environment.extend(
-                    marsh_contracts::terminal::identity(&request.terminal_environment)
-                        .into_iter()
-                        .map(|(name, value)| format!("{name}={value}")),
-                );
-            }
-            if let Some((broker, grant)) = &dev_grant {
-                if let Err(error) = broker.write_relay(grant, &socket_path, &token_path) {
+                // The relay is a supervisor child: its in-band `Cleaned` frame
+                // plus its supervisor-reported exit 0 is the only cleanup proof.
+                let stop_relay = |relay: shell_attachment::Relay| {
+                    if relay.stop()?.cleaned_in_band {
+                        Ok(())
+                    } else {
+                        Err(DaemonError::ShellCleanupUncertain(
+                            "guest relay did not report in-band cleanup".into(),
+                        ))
+                    }
+                };
+                let rollback = |relay: shell_attachment::Relay, error: DaemonError| {
+                    store.revoke_relay_token(&token);
+                    if let Err(cleanup) = stop_relay(relay) {
+                        // Say why the start failed, not only that cleanup could not be proved.
+                        return quarantine(format!(
+                            "{cleanup}; the shell's start had failed: {error}"
+                        ));
+                    }
+                    if let Err(cleanup) = self.sbx.revoke_shell_mounts(&mounts) {
+                        return quarantine(cleanup.to_string());
+                    }
+                    error
+                };
+                if let Err(error) = relay.ready(&attachment) {
                     return Err(rollback(relay, error));
                 }
-                let scratch = grant.scratch.display();
-                extra_environment.extend([
+                // Only now: the guest reads `Initialize` first, so no other frame may
+                // reach it before the relay is ready.
+                if let Some((endpoint, _, _)) = &shell_endpoint {
+                    endpoint.follow_ports(relay.tunnel());
+                }
+                // Programs that open a link find marsh's `xdg-open`
+                // (`docs/agents.md`); an interactive session also names the
+                // user's terminal, so programs enable what it supports.
+                let mut extra_environment = vec!["BROWSER=xdg-open".to_owned()];
+                // The shell's endpoint: its `DOCKER_HOST`; the shell's private engine
+                // stays at its default socket for anyone who unsets it (DECISIONS 10).
+                if let Some(path) = &docker_socket {
+                    extra_environment.push(format!("DOCKER_HOST=unix://{}", path.display()));
+                }
+                if request.session.terminal {
+                    extra_environment.extend(
+                        marsh_contracts::terminal::identity(&request.terminal_environment)
+                            .into_iter()
+                            .map(|(name, value)| format!("{name}={value}")),
+                    );
+                }
+                if let Some((broker, grant)) = &dev_grant {
+                    if let Err(error) = broker.write_relay(grant, &socket_path, &token_path) {
+                        return Err(rollback(relay, error));
+                    }
+                    let scratch = grant.scratch.display();
+                    extra_environment.extend([
                     format!("MARSH_DEV_SCRATCH={scratch}"),
                     format!("MARSH_DEV_DEPTH={}", grant.depth),
                     format!("MARSH_VM_PREFIX={}", grant.prefix),
@@ -3074,82 +3372,84 @@ impl DaemonBackend for StockDaemonBackend {
                         "PATH={scratch}/tmp/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ),
                 ]);
-            }
-            let arguments = request
-                .arguments
-                .into_iter()
-                .map(OsString::from_vec)
-                .collect::<Vec<_>>();
-            if let Err(error) = shell_attachment::require_controller(&attachment) {
-                return Err(rollback(relay, error));
-            }
-            let shell_directory = request
-                .working_directory
-                .as_deref()
-                .unwrap_or(&request.session.launch_directory);
-            let process = match self.sbx.attach_shell_with_relay(
-                &vm,
-                shell_directory,
-                request.session.terminal,
-                request.session.terminal_size,
-                &arguments,
-                Some((&socket_path, &token_path)),
-                &extra_environment,
-            ) {
-                Ok(process) => process,
-                Err(error @ marsh_sbx::SbxError::ShellStartUncertain(_)) => {
-                    // The start may have taken effect. Retain the
-                    // exact VM/session grants, not the ordinary rollback path.
-                    store.revoke_relay_token(&token);
-                    let relay_cleanup = stop_relay(relay);
-                    return Err(quarantine(format!("{error}; relay: {relay_cleanup:?}")));
                 }
-                Err(error) => return Err(rollback(relay, backend_error(error))),
-            };
-            // Readiness is in-band: the supervisor acknowledges the start only
-            // after root-owned containment publication, before any user code.
-            let ready = shell_attachment::require_controller(&attachment);
-            if let Err(error) = ready {
-                // We already own a spawned attachment. It must be cleaned and
-                // joined, not dropped or reported ready because sbx spawned.
-                let _ = attachment.shutdown();
+                let arguments = request
+                    .arguments
+                    .into_iter()
+                    .map(OsString::from_vec)
+                    .collect::<Vec<_>>();
+                if let Err(error) = shell_attachment::require_controller(&attachment) {
+                    return Err(rollback(relay, error));
+                }
+                let shell_directory = request
+                    .working_directory
+                    .as_deref()
+                    .unwrap_or(&request.session.launch_directory);
+                let process = match self.sbx.attach_shell_with_relay(
+                    &vm,
+                    shell_directory,
+                    request.session.terminal,
+                    request.session.terminal_size,
+                    &arguments,
+                    Some((&socket_path, &token_path)),
+                    &extra_environment,
+                ) {
+                    Ok(process) => process,
+                    Err(error @ marsh_sbx::SbxError::ShellStartUncertain(_)) => {
+                        // The start may have taken effect. Retain the
+                        // exact VM/session grants, not the ordinary rollback path.
+                        store.revoke_relay_token(&token);
+                        let relay_cleanup = stop_relay(relay);
+                        return Err(quarantine(format!("{error}; relay: {relay_cleanup:?}")));
+                    }
+                    Err(error) => return Err(rollback(relay, backend_error(error))),
+                };
+                // Readiness is in-band: the supervisor acknowledges the start only
+                // after root-owned containment publication, before any user code.
+                let ready = shell_attachment::require_controller(&attachment);
+                if let Err(error) = ready {
+                    // We already own a spawned attachment. It must be cleaned and
+                    // joined, not dropped or reported ready because sbx spawned.
+                    let _ = attachment.shutdown();
+                    let result = shell_attachment::run(process, &attachment);
+                    let uncertain = match &result.cleanup {
+                        shell_attachment::Cleanup::Verified => None,
+                        shell_attachment::Cleanup::Uncertain(detail) => Some(detail.clone()),
+                    };
+                    if let Some(detail) = uncertain {
+                        store.revoke_relay_token(&token);
+                        let relay_cleanup = stop_relay(relay);
+                        return Err(quarantine(format!(
+                            "{error}; {detail}; relay: {relay_cleanup:?}"
+                        )));
+                    }
+                    return Err(rollback(relay, error));
+                }
+                // Containment enrollment, not local sbx spawn, gates raw mode.
+                shell_started.store(true, std::sync::atomic::Ordering::Release);
+                let _ = attachment.send(&AttachmentFrame::ShellReady);
                 let result = shell_attachment::run(process, &attachment);
+                let code = result.status();
                 let uncertain = match &result.cleanup {
                     shell_attachment::Cleanup::Verified => None,
                     shell_attachment::Cleanup::Uncertain(detail) => Some(detail.clone()),
                 };
+                store.revoke_relay_token(&token);
+                // The supervisor's verified in-band cleanup removed the root-owned
+                // containment record with the cgroup.
+                let relay_cleanup = stop_relay(relay);
                 if let Some(detail) = uncertain {
-                    store.revoke_relay_token(&token);
-                    let relay_cleanup = stop_relay(relay);
-                    return Err(quarantine(format!(
-                        "{error}; {detail}; relay: {relay_cleanup:?}"
-                    )));
+                    return Err(quarantine(detail));
                 }
-                return Err(rollback(relay, error));
-            }
-            // Containment enrollment, not local sbx spawn, gates raw mode.
-            let _ = attachment.send(&AttachmentFrame::ShellReady);
-            let result = shell_attachment::run(process, &attachment);
-            let code = result.status();
-            let uncertain = match &result.cleanup {
-                shell_attachment::Cleanup::Verified => None,
-                shell_attachment::Cleanup::Uncertain(detail) => Some(detail.clone()),
-            };
-            store.revoke_relay_token(&token);
-            // The supervisor's verified in-band cleanup removed the root-owned
-            // containment record with the cgroup.
-            let relay_cleanup = stop_relay(relay);
-            if let Some(detail) = uncertain {
-                return Err(quarantine(detail));
-            }
-            if let Err(error) = relay_cleanup {
-                return Err(quarantine(error.to_string()));
-            }
-            if let Err(error) = self.sbx.revoke_shell_mounts(&mounts) {
-                return Err(quarantine(error.to_string()));
-            }
-            Ok(code)
-        })();
+                if let Err(error) = relay_cleanup {
+                    return Err(quarantine(error.to_string()));
+                }
+                if let Err(error) = self.sbx.revoke_shell_mounts(&mounts) {
+                    return Err(quarantine(error.to_string()));
+                }
+                Ok(code)
+            })()
+        });
         let outcome = if request.session.ephemeral_home
             && !matches!(outcome, Err(DaemonError::ShellCleanupUncertain(_)))
         {

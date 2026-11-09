@@ -1,0 +1,15 @@
+[package]
+name = "marsh-provenance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Enabled only by build scripts (`[build-dependencies]`): the code that
+# records a build's feature provenance. Never compiled into a shipped binary.
+build = []

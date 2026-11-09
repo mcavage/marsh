@@ -172,6 +172,12 @@ captures each lane's patch. `marsh checkpoint` snapshots the project the same
 way, with retention (20 per label, 200 per project, 7 days) and a refusal
 below 5 GiB or 5% free (`marsh checkpoint --lane SPLIT_ID/LABEL` snapshots an
 open or kept lane's copy, for its creator only); kept splits are removed 7 days after they were kept.
+A checkpoint saves the project's local data, within bounds: the git-ignored files in the folder
+(not rebuildable junk such as `node_modules`; `.marsh/branch` can include or exclude more) and, with
+Docker on for the project (feature `services-v1`), its Docker data. `split --open --from` restores
+both into each lane
+([Docker design](../design/services.md#folder-local-data-in-checkpoints-c5-decisions-6-26-27));
+`marsh services status --json` gives each project a plain `summary` line.
 `marsh storage` reports what they use, and `marsh events --json` streams job,
 split, and checkpoint changes to a host client
 ([workspace design](../design/workspaces.md#14-open-lanes-checkpoints-and-storage)).

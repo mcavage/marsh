@@ -1,0 +1,22 @@
+{
+ "fixture": "stack-canary",
+ "comment": "The canary writes OK/EMPTY lines to ./canary-log/boots at every start; the harness writes /d/marker into volume cv (`docker compose exec canary sh -c 'echo m > /d/marker'`) before the checkpoint.",
+ "services": {
+  "canary": {
+   "class": "restorable",
+   "volumes": [
+    "cv"
+   ],
+   "sentinel": {
+    "type": "container-file",
+    "file": "/d/marker",
+    "at_rest": null,
+    "pre_capture_write": "echo m > /d/marker"
+   }
+  }
+ },
+ "bind": {
+  "path": "canary-log/boots",
+  "lines": "OK <ts> after a restart when /d/marker survived, EMPTY <ts> when the volume came back empty"
+ }
+}

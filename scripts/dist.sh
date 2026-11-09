@@ -4,8 +4,10 @@
 #   scripts/dist.sh VERSION OUTDIR
 #
 # Inputs (environment, with the Makefile's defaults):
-#   TARGET_DIR       host build dir with release/{marsh,marshd,marsh-mcp}
-#   GUEST_ARTIFACTS  linux/arm64 guest binaries and licenses/ (make build-linux)
+#   TARGET_DIR       host build dir with release/{marsh,marshd,marsh-mcp} and
+#                    release/provenance.json (make build-host)
+#   GUEST_ARTIFACTS  linux/arm64 guest binaries, provenance.json and licenses/
+#                    (make build-linux)
 #   KIT_COMMANDS     command registry; every value must be repository@sha256:...
 #   SHELL_IMAGE      file holding the published shell image reference
 #   MAN_DIR          rendered man pages (make man)
@@ -57,6 +59,30 @@ grep -Eq '^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$' "$SHELL_IMAGE" ||
   die "$SHELL_IMAGE must hold one repository@sha256:DIGEST line (the published shell image). For a local tarball, run: make dist-local"
 fi
 
+# A release tarball never carries break modes (docs/design/test-breaks.md).
+# Local builds (make dist-local) are dev builds and are not checked. Two
+# independent checks, both always run so every offending file is named:
+#   1. build provenance: each build's manifest (scripts/provenance.py) must show
+#      no test-breaks in its resolved cargo features and must match the hash of
+#      every artifact packaged here, so no binary is packaged that its recorded
+#      build did not produce;
+#   2. the binaries themselves must not carry the test-breaks marker or the
+#      MARSH_TEST_BREAK name.
+if test "$LOCAL" != 1; then
+  refused=0
+  python3 "$(dirname "$0")/provenance.py" verify --manifest "$TARGET_DIR/release/provenance.json" \
+    "$TARGET_DIR/release/marsh" "$TARGET_DIR/release/marshd" "$TARGET_DIR/release/marsh-mcp" || refused=1
+  # The guest paths go in the positional parameters, so no path is word-split.
+  set --
+  for guest in marsh marsh-local marsh-byte-exec marsh-worker marsh-relay marshd; do
+    set -- "$@" "$GUEST_ARTIFACTS/$guest-linux-arm64"
+  done
+  python3 "$(dirname "$0")/provenance.py" verify --manifest "$GUEST_ARTIFACTS/provenance.json" "$@" || refused=1
+  sh "$(dirname "$0")/check-no-test-breaks.sh" "$TARGET_DIR/release/marsh" \
+    "$TARGET_DIR/release/marshd" "$TARGET_DIR/release/marsh-mcp" "$@" || refused=1
+  test "$refused" = 0 || die "refusing to package a binary built with test-breaks, or one its recorded build did not produce"
+fi
+
 if test "$LOCAL" = 1; then
   name="marsh-$version-local-darwin-arm64"
 else
@@ -82,6 +108,10 @@ install -m 644 "$SHELL_IMAGE" "$root/libexec/marsh/shell-image"
 if test -f "$SHELL_IMAGE.build.json"; then
   install -m 644 "$SHELL_IMAGE.build.json" "$root/libexec/marsh/shell-image.build.json"
 fi
+for engine in svc-engine.tar svc-engine-image.json; do
+  test -f "$GUEST_ARTIFACTS/$engine" || die "missing $GUEST_ARTIFACTS/$engine (make prepare-svc-engine-image)"
+  install -m 644 "$GUEST_ARTIFACTS/$engine" "$root/libexec/marsh/$engine"
+done
 test -d "$GUEST_ARTIFACTS/licenses" || die "missing $GUEST_ARTIFACTS/licenses"
 cp -R "$GUEST_ARTIFACTS/licenses" "$root/libexec/marsh/licenses"
 if test "$LOCAL" = 1; then
@@ -116,10 +146,8 @@ for page in "$MAN_DIR"/*.1; do
 done
 
 install -m 644 LICENSE NOTICE THIRD_PARTY.md "$root/share/licenses/marsh/"
-for notice in THIRD-PARTY-NOTICES.txt; do
-  test -f "$NOTICES_DIR/$notice" || die "missing $NOTICES_DIR/$notice (scripts/third-party-notices.py)"
-  install -m 644 "$NOTICES_DIR/$notice" "$root/share/licenses/marsh/$notice"
-done
+test -f "$NOTICES_DIR/THIRD-PARTY-NOTICES.txt" || die "missing $NOTICES_DIR/THIRD-PARTY-NOTICES.txt (scripts/third-party-notices.py)"
+install -m 644 "$NOTICES_DIR/THIRD-PARTY-NOTICES.txt" "$root/share/licenses/marsh/THIRD-PARTY-NOTICES.txt"
 install -m 644 README.md LICENSE NOTICE "$root/"
 test ! -e "$root/libexec/marsh/dev-enabled" || die "refusing to package the dev-enabled marker"
 

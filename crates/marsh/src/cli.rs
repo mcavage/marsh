@@ -48,9 +48,12 @@ pub enum ProductCommand {
         name: String,
     },
     WorkersHelp,
-    /// `marsh reset`: remove the selected home's VMs; keep the daemon.
+    /// `marsh reset`: remove the selected home's VMs; keep the daemon. Services
+    /// VMs are kept unless `include_services` (which asks first, or takes `yes`).
     Reset {
         json: bool,
+        include_services: bool,
+        yes: bool,
     },
     /// `marsh stop`: remove the selected home's VMs and stop its daemon.
     Stop {
@@ -79,7 +82,45 @@ pub enum ProductCommand {
     PeerReviewConfig {
         set: Option<bool>,
     },
+    /// `marsh services ...`: this project's services VM (host only).
+    Services(ServicesCommand),
 }
+
+/// `marsh services` subcommands (`docs/design/services.md`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ServicesCommand {
+    Status {
+        json: bool,
+    },
+    Start {
+        json: bool,
+    },
+    Stop {
+        json: bool,
+    },
+    /// Remove the VM and its disk; `yes` skips the confirmation.
+    Remove {
+        yes: bool,
+        json: bool,
+    },
+    /// Hold the lease for `seconds`, then let it expire on its own.
+    Hold {
+        seconds: u64,
+        json: bool,
+    },
+    Release {
+        holder: String,
+        json: bool,
+    },
+    /// Grant (`on`) or revoke Internet for this project's services containers.
+    Internet {
+        on: bool,
+        json: bool,
+    },
+    Help,
+}
+
+pub const SERVICES_USAGE: &str = "usage: marsh docker status [--json] | start [--json] | stop [--json] | rm [--yes] [--json] | hold SECONDS [--json] | release HOLDER [--json] | internet on|off [--json]";
 
 /// `marsh --dev`: attach this shell with a development grant.
 pub static DEV_SESSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -293,6 +334,8 @@ fn parse_product_os_command(
                     | "peer-review"
                     | "config"
                     | "gc"
+                    | "services"
+                    | "docker"
             )
         })
     {
@@ -423,10 +466,23 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         [name, help] if name == "gc" && matches!(help.as_str(), "-h" | "--help") => {
             ProductCommand::GcHelp
         }
-        [name] if name == "reset" => ProductCommand::Reset { json: false },
+        [name, flags @ ..]
+            if name == "reset"
+                && flags.iter().all(|flag| {
+                    matches!(flag.as_str(), "--json" | "--include-services" | "--yes")
+                })
+                && (flags.iter().all(|flag| flag != "--yes")
+                    || flags.iter().any(|flag| flag == "--include-services"))
+                && flags.len() <= 3 =>
+        {
+            ProductCommand::Reset {
+                json: flags.iter().any(|flag| flag == "--json"),
+                include_services: flags.iter().any(|flag| flag == "--include-services"),
+                yes: flags.iter().any(|flag| flag == "--yes"),
+            }
+        }
         [name] if name == "stop" => ProductCommand::Stop { json: false },
         [name] if name == "restart" => ProductCommand::Restart,
-        [name, json] if name == "reset" && json == "--json" => ProductCommand::Reset { json: true },
         [name, json] if name == "stop" && json == "--json" => ProductCommand::Stop { json: true },
         [name, help] if name == "workers" && matches!(help.as_str(), "-h" | "--help") => {
             ProductCommand::WorkersHelp
@@ -560,6 +616,9 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
                 json: true,
             }
         }
+        [name, rest @ ..] if name == "services" || name == "docker" => {
+            ProductCommand::Services(parse_services(rest)?)
+        }
         [name, ..] if name == "status" => {
             return Err(CliError("usage: marsh status [--json]".into()));
         }
@@ -571,11 +630,16 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
                 "usage: marsh results [--json] | marsh results show RESULT [--json]".into(),
             ));
         }
+        [name, ..] if name == "reset" => {
+            return Err(CliError(
+                "usage: marsh reset [--include-services [--yes]] [--json]".into(),
+            ));
+        }
         [name, ..] if name == "restart" => {
             return Err(CliError("usage: marsh restart".into()));
         }
-        [name, ..] if name == "stop" || name == "reset" => {
-            return Err(CliError(format!("usage: marsh {name} [--json]")));
+        [name, ..] if name == "stop" => {
+            return Err(CliError("usage: marsh stop [--json]".into()));
         }
         [name, ..] if name == "gc" => {
             return Err(CliError("usage: marsh gc [--dry-run] [--json]".into()));
@@ -603,6 +667,46 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         guest: false,
         shell: None,
     }))
+}
+
+pub(crate) fn parse_services(arguments: &[String]) -> Result<ServicesCommand, CliError> {
+    let usage = || CliError(SERVICES_USAGE.into());
+    let mut words = arguments.iter().map(String::as_str).collect::<Vec<_>>();
+    let json = take_flag(&mut words, "--json");
+    let yes = take_flag(&mut words, "--yes");
+    let command = match words.as_slice() {
+        ["-h" | "--help"] if !json && !yes => ServicesCommand::Help,
+        ["status"] if !yes => ServicesCommand::Status { json },
+        ["start"] if !yes => ServicesCommand::Start { json },
+        ["stop"] if !yes => ServicesCommand::Stop { json },
+        ["rm"] => ServicesCommand::Remove { yes, json },
+        ["hold", seconds] if !yes => ServicesCommand::Hold {
+            seconds: seconds
+                .parse()
+                .ok()
+                .filter(|seconds| *seconds > 0)
+                .ok_or_else(|| {
+                    CliError("marsh docker hold: SECONDS must be a positive number".into())
+                })?,
+            json,
+        },
+        ["release", holder] if !yes && !holder.starts_with('-') => ServicesCommand::Release {
+            holder: (*holder).to_owned(),
+            json,
+        },
+        ["internet", word @ ("on" | "off")] if !yes => ServicesCommand::Internet {
+            on: *word == "on",
+            json,
+        },
+        _ => return Err(usage()),
+    };
+    Ok(command)
+}
+
+fn take_flag(words: &mut Vec<&str>, flag: &str) -> bool {
+    let before = words.len();
+    words.retain(|word| *word != flag);
+    words.len() != before
 }
 
 fn validate_session_id(value: &str) -> Result<(), CliError> {
@@ -924,6 +1028,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // One table of every public query.
     fn public_queries_are_unambiguous() {
         assert_eq!(
             parse(strings(&["marsh", "jobs", "show", "abc", "--json"]))
@@ -987,7 +1092,11 @@ mod tests {
             }
             let command = parse(strings(&argv)).unwrap().command;
             let expected = if word == "reset" {
-                ProductCommand::Reset { json }
+                ProductCommand::Reset {
+                    json,
+                    include_services: false,
+                    yes: false,
+                }
             } else {
                 ProductCommand::Stop { json }
             };
@@ -1065,5 +1174,112 @@ mod tests {
             }
         );
         assert!(parse(strings(&["marsh", "kit", "uninstall"])).is_err());
+    }
+
+    #[test]
+    fn reset_takes_include_services_and_yes_together() {
+        assert_eq!(
+            parse(strings(&[
+                "marsh",
+                "reset",
+                "--yes",
+                "--include-services",
+                "--json"
+            ]))
+            .unwrap()
+            .command,
+            ProductCommand::Reset {
+                json: true,
+                include_services: true,
+                yes: true
+            }
+        );
+        // `--yes` confirms only what `--include-services` asks about.
+        assert!(parse(strings(&["marsh", "reset", "--yes"])).is_err());
+        assert!(parse(strings(&["marsh", "stop", "--include-services"])).is_err());
+    }
+
+    #[test]
+    fn services_commands_parse() {
+        use ServicesCommand as C;
+        // `docker` is the name; `services` is kept as an alias.
+        let named = |name: &'static str| {
+            move |words: &[&str]| {
+                let mut args = vec!["marsh", name];
+                args.extend_from_slice(words);
+                parse_os(args.into_iter().map(OsString::from).collect())
+                    .map(|parsed| parsed.command)
+            }
+        };
+        let (services, docker) = (named("services"), named("docker"));
+        for (words, expected) in [
+            (vec!["status"], C::Status { json: false }),
+            (vec!["status", "--json"], C::Status { json: true }),
+            (vec!["start", "--json"], C::Start { json: true }),
+            (vec!["stop"], C::Stop { json: false }),
+            (
+                vec!["rm"],
+                C::Remove {
+                    yes: false,
+                    json: false,
+                },
+            ),
+            (
+                vec!["rm", "--yes"],
+                C::Remove {
+                    yes: true,
+                    json: false,
+                },
+            ),
+            (
+                vec!["hold", "150"],
+                C::Hold {
+                    seconds: 150,
+                    json: false,
+                },
+            ),
+            (
+                vec!["release", "hold-1", "--json"],
+                C::Release {
+                    holder: "hold-1".into(),
+                    json: true,
+                },
+            ),
+            (
+                vec!["internet", "on"],
+                C::Internet {
+                    on: true,
+                    json: false,
+                },
+            ),
+            (
+                vec!["internet", "off", "--json"],
+                C::Internet {
+                    on: false,
+                    json: true,
+                },
+            ),
+        ] {
+            assert_eq!(
+                services(&words).unwrap(),
+                ProductCommand::Services(expected.clone())
+            );
+            assert_eq!(docker(&words).unwrap(), ProductCommand::Services(expected));
+        }
+        for bad in [
+            vec![],
+            vec!["start", "--yes"],
+            vec!["hold"],
+            vec!["hold", "0"],
+            vec!["hold", "soon"],
+            vec!["release"],
+            vec!["internet"],
+            vec!["internet", "maybe"],
+            vec!["internet", "on", "--yes"],
+            vec!["destroy"],
+        ] {
+            assert!(services(&bad).is_err(), "{bad:?}");
+            assert!(docker(&bad).is_err(), "{bad:?}");
+        }
     }
 }

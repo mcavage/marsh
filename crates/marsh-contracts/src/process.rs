@@ -17,6 +17,79 @@ pub const OPEN_LINKS: [&str; 2] = ["xdg-open", "open"];
 pub const ARTIFACT: &str = "/run/marsh/marsh";
 pub const SOCKET: &str = "/run/marsh/cap.sock";
 pub const JOB_JSON: &str = "/run/marsh/job.json";
+/// The filtered Docker endpoint of a job of a services-enabled project
+/// (`docs/design/services.md`, SECURITY-DESIGN A2, A11). It is a path in the
+/// per-attempt capability directory; Testcontainers' Ryuk mounts it (DECISIONS 20).
+pub const DOCKER_SOCKET: &str = "/run/marsh/docker.sock";
+/// The two variables a job of a services-enabled project gets from marsh, and
+/// nothing else: they come from [`ServicesEndpoint`], never from the exported
+/// environment (which still refuses `DOCKER_*`, SEC-08). DECISIONS 15: Ryuk
+/// stays on, so no `TESTCONTAINERS_RYUK_DISABLED`.
+pub const ENDPOINT_ENVIRONMENT: [(&str, &str); 2] = [
+    ("DOCKER_HOST", "unix:///run/marsh/docker.sock"),
+    ("TESTCONTAINERS_HOST_OVERRIDE", "localhost"),
+];
+/// Open channels per attempt on the endpoint and the forwarded ports
+/// together (SECURITY-DESIGN A7); the daemon's relay enforces the same bound.
+pub const ENDPOINT_CHANNEL_LIMIT: usize = 64;
+/// Chunk and credit window of an endpoint channel over the worker transport:
+/// one credit is one chunk of at most [`ENDPOINT_CHUNK`] bytes.
+pub const ENDPOINT_CHUNK: usize = 16 * 1024;
+pub const ENDPOINT_WINDOW: u32 = 64;
+/// Credits are returned in batches of this many chunks.
+pub const ENDPOINT_CREDIT_BATCH: u32 = 8;
+
+/// What a channel opened over the worker transport is for.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChannelKind {
+    /// A connection to the job's `docker.sock`.
+    Docker,
+    /// A connection to a forwarded port of the job's own network namespace.
+    Tcp { port: u16 },
+}
+
+/// The outcome of one forward, from whoever tried to make it (the worker for a
+/// job, the guest relay for a shell).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PortState {
+    /// Listening on `127.0.0.1` and `[::1]` (or only on `127.0.0.1` when the
+    /// job's namespace has no IPv6) in the job's namespace.
+    Forwarding { ipv6: bool },
+    /// Something in the job already listens there; nothing was replaced.
+    Collision { message: String },
+    /// No listener was made anywhere; the reason is plain text.
+    Failed { message: String },
+    /// The port is no longer published; its listener is closed.
+    Revoked,
+}
+
+/// What a Docker client reads when the endpoint cannot serve it: a plain HTTP
+/// error whose `message` the CLI prints, then EOF.
+#[must_use]
+pub fn docker_error_response(status: &str, message: &str) -> Vec<u8> {
+    let body = serde_json::json!({ "message": message }).to_string();
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+/// The job's filtered Docker endpoint and port forwards. Present only for a
+/// job of a project the user turned services on for (A11); the daemon decides
+/// that from its own state, never from the job. The endpoint's environment is
+/// [`ENDPOINT_ENVIRONMENT`], added by the runtime beside, not through, the
+/// exported environment.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServicesEndpoint {
+    /// The daemon's test break modes that concern the worker (an attested
+    /// field, DECISIONS 22): always empty in a release daemon.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<String>,
+}
 
 /// Jobs at once per daemon, all depths, by default (`daemon-jobs`,
 /// `MARSH_DAEMON_JOBS`, 1 to [`POOL_MAX`]). Each Kit VM also takes at most
@@ -112,6 +185,10 @@ pub struct JobCapability {
     /// empty unless peer review is on and a ready reviewer is in `spawn`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub peer_review: String,
+    /// The filtered Docker endpoint and port forwards (E2), only for a job of
+    /// a project with services enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<ServicesEndpoint>,
     /// The limits in effect when the job started, for `job.json` (the task
     /// tool reads `tasks_live`); `None` writes the built-in defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -278,6 +355,19 @@ pub fn job_context(name: &str, spawn: &[String]) -> String {
         .replacen("an marsh job", &who, 1)
         .replacen(SPAWN_PLACEHOLDER, &names, 1)
 }
+
+/// The `context.md` section of a job whose project has Docker on (DECISIONS 28):
+/// what the agent may rely on, and what is refused. Added by the worker only
+/// when the job has the Docker endpoint.
+pub const DOCKER_CONTEXT: &str = "## Docker
+
+This project has its own private Docker, and it is on for this job: `docker` and `docker compose` work here (`DOCKER_HOST` is already set). Containers, images and volumes you create belong to this project, not to the user's Mac.
+
+- Ports a container publishes are reachable on `localhost` from this job.
+- Local data is saved with each turn: Docker volumes and git-ignored files (such as `.env`, `.wrangler/state` and SQLite files). It comes along when the user chooses Branch from here, so a branch starts with the data as it was at that turn.
+- Containers have no Internet unless the user turns it on (only the user can). Pulling images from Docker Hub and ghcr.io still works.
+- Some operations are refused, such as anything that would reach outside this project. A refusal is an error that starts with `marsh:`; read it rather than working around it.
+";
 
 /// The spawn-set sentence in `context.md` that `job_context` fills in.
 const SPAWN_PLACEHOLDER: &str = "every registered command (`ls /run/marsh/bin` in a job)";

@@ -29,6 +29,7 @@ Usage:
   marsh context                                            Print this job's context
   marsh task-mcp                                           The task tool (MCP on stdio) for this job's agent
   marsh open URL                                           Open a web link on the Mac (also xdg-open, open)
+  marsh docker ...                                         Host only: the daemon refuses a job
 
 Registered names in /run/marsh/bin are links: calling one starts a child job.
 See /run/marsh/context.md.
@@ -420,10 +421,64 @@ fn cli(arguments: &[OsString]) -> i32 {
         "fanout" => crate::fanout_cli::fanout(rest, crate::fanout_cli::Place::Job),
         "collect" => crate::fanout_cli::collect(rest),
         "open" => open(rest),
+        "services" | "docker" => services(rest),
         "task-mcp" => crate::task_mcp::main(rest),
         other => {
             eprintln!("marsh: `{other}` is not available inside a job; see `marsh --help`");
             2
+        }
+    }
+}
+
+/// `marsh services ...` in a job. Services are the host's to run (SECURITY-DESIGN
+/// A5, A11): the request goes to the daemon on this job's `cap.sock`, where the
+/// capability does not admit it, so the daemon (not this CLI) is what refuses.
+fn services(arguments: &[OsString]) -> i32 {
+    use crate::cli::ServicesCommand as Command;
+    use marsh_daemon::ServicesRequest as Request;
+    let words = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let command = match crate::cli::parse_services(&words) {
+        Ok(command) => command,
+        Err(error) => {
+            eprintln!("marsh: {}", error.0);
+            return 2;
+        }
+    };
+    let root = match std::env::current_dir().and_then(std::fs::canonicalize) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("marsh: cannot resolve the project directory: {error}");
+            return 1;
+        }
+    };
+    let request = match command {
+        Command::Help => {
+            println!("{}", crate::cli::SERVICES_USAGE);
+            return 0;
+        }
+        Command::Status { .. } => Request::Status { root },
+        Command::Start { .. } => Request::Start { root },
+        Command::Stop { .. } => Request::Stop { root },
+        Command::Remove { .. } => Request::Remove { root },
+        Command::Hold { seconds, .. } => Request::Hold { root, seconds },
+        Command::Release { holder, .. } => Request::Release { root, holder },
+        Command::Internet { on, .. } => Request::Internet { root, on },
+    };
+    if !Path::new(SOCKET).exists() {
+        eprintln!("marsh: this job has no marsh capability");
+        return 1;
+    }
+    match marsh_daemon::Client::capability(Path::new(SOCKET)).services(&request) {
+        Ok(document) => {
+            println!("{document}");
+            0
+        }
+        Err(error) => {
+            eprintln!("marsh: {error}");
+            1
         }
     }
 }

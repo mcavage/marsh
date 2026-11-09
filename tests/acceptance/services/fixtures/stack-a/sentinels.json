@@ -1,0 +1,76 @@
+{
+ "fixture": "stack-a",
+ "comment": "Declared services, their classes and sentinels. Restorable services (data in named volumes) form M's immutable expected set; fresh services keep no saved data and carry a sentinel the harness writes before the checkpoint (`pre_capture_write`) and reads with sentinels.py; `at_rest` is the value without that write.",
+ "db": {
+  "database": "app",
+  "user": "postgres",
+  "expected": {
+   "items": 1000,
+   "note_column": true,
+   "markers": [
+    "m-seed-1",
+    "m-seed-2",
+    "m-seed-3"
+   ],
+   "tokens": 0,
+   "row1": "item-1"
+  }
+ },
+ "app": {
+  "seed_bin_bytes": 1048576,
+  "seed_bin_sha256": "3714b445cbcd86638566b0b43c7ed6d8d9fe0f7fa4131bf6cdc6866297863af3",
+  "token_files": []
+ },
+ "ignored": {
+  "files": [
+   ".env",
+   "data/app.sqlite",
+   "public/uploads/a.bin",
+   "public/uploads/big.bin"
+  ],
+  "static_sha256": {
+   ".env": "72a2126f3356d7f805b3ed7693c38094bc3372bdde01864f8087c03f28c57297",
+   "public/uploads/a.bin": "e6d1b9d256b300be0b20af708462f806098dbc3cfc71104410427c58977fdacd"
+  },
+  "sqlite": {
+   "path": "data/app.sqlite",
+   "query": "select v from t",
+   "expected": [
+    "seed"
+   ]
+  },
+  "comment": "big.bin (200 MiB, random, stack-a only) has no static hash: the harness hashes it before each checkpoint."
+ },
+ "services": {
+  "db": {
+   "class": "restorable",
+   "volumes": [
+    "pgdata"
+   ]
+  },
+  "app": {
+   "class": "restorable",
+   "volumes": [
+    "uploads"
+   ]
+  },
+  "redis": {
+   "class": "fresh",
+   "sentinel": {
+    "type": "redis-key",
+    "key": "k",
+    "at_rest": "seed",
+    "pre_capture_write": "redis-cli set k v1"
+   }
+  },
+  "mail": {
+   "class": "fresh",
+   "sentinel": {
+    "type": "mail-count",
+    "at_rest": 0,
+    "pre_capture_write": "send one message to :1025"
+   }
+  }
+ },
+ "nonce": "UPDATE items SET name='nonce-...' WHERE id=1 (row 1 is 'item-1' at rest; the count stays 1000)"
+}

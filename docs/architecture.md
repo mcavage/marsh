@@ -84,7 +84,8 @@ Kit VM on its own once it verifies that no container can still run there
 (`marsh-backend/src/worker_recovery.rs`: the VM is stopped or gone, or its
 Docker lists none); otherwise `marsh workers reset KIT` does. `marsh status`
 shows each quarantine's reason. `marsh reset` and `marsh stop` clean up the
-whole scope once nothing is active.
+scope's Kit and shell VMs once nothing is active; services VMs are kept unless
+`marsh reset --include-services` is confirmed.
 
 ## VM ownership
 
@@ -153,8 +154,10 @@ are protected host inputs, not guest-home content.
   a split job: its fork, Git state, and home). A Kit declaring
   `org.marsh/home@1` `mount: none` gets no home, at any depth (a project under the home stays mounted
   on its own), and its VM never mounts it (`marsh-backend` `kit_wants_no_home`). It
-  receives no Docker, containerd, or SBX socket and no proxy-held raw credentials;
-  its only daemon channel is the scoped job capability socket. Stock SBX applies the Kit's network
+  receives no containerd or SBX socket, no Kit VM engine and no proxy-held raw
+  credentials; its daemon channel is the scoped job capability socket. A job of a
+  services-enabled project also gets a filtered endpoint for that project's own
+  services VM (`/run/marsh/docker.sock`), never a Kit VM's engine. Stock SBX applies the Kit's network
   policy and credential proxy at the VM boundary. Containers in one Kit VM
   share a kernel.
 - **Guest home**: agent settings, history, and any explicit login state persist

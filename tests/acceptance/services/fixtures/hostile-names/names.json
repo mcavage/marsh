@@ -1,0 +1,45 @@
+{
+ "comment": "Hostile display text: markup, ANSI, newlines, quotes, YAML syntax. Service IDs and volume names are VALID (web, worker, data, cache); the hostile text is in `labels:` (service and volume), which a restore line or a generated lane config may echo. Every UI string and the lane's `docker compose config --format json` must show the text as literal data: no link, no style, no extra line, no extra key. compose.yaml is generated from this file by generate.py; `names` is the oracle.",
+ "names": [
+  {
+   "id": "markdown-link",
+   "name": "[click me](https://evil.example/x)"
+  },
+  {
+   "id": "markdown-emphasis",
+   "name": "**bold** _it_ `code`"
+  },
+  {
+   "id": "ansi",
+   "name": "\u001b[31mred\u001b[0m\u001b[2J"
+  },
+  {
+   "id": "yaml-newline-injection",
+   "name": "web\n    privileged: true\n  evil"
+  },
+  {
+   "id": "quotes",
+   "name": "a\"b'c\\d"
+  },
+  {
+   "id": "interpolation",
+   "name": "${HOME}-$(id)"
+  },
+  {
+   "id": "html",
+   "name": "<img src=x onerror=alert(1)>"
+  },
+  {
+   "id": "bidi",
+   "name": "\u202eevil\u202c"
+  },
+  {
+   "id": "yaml-syntax",
+   "name": "a: b\n- c: [d, {e: f}]"
+  },
+  {
+   "id": "long",
+   "name": "L-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+  }
+ ]
+}

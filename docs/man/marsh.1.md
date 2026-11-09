@@ -47,6 +47,15 @@ home can read one another's settings, history, and saved logins. Keep the
 project in Git, and use **split** for agent changes you want to review first. See
 https://runmar.sh/docs/security.html.
 
+Docker is on by default for every project (turn it off with **marsh config
+docker off**): jobs and the shell get a filtered Docker endpoint to that
+project's own private Docker, where **docker run**, **docker compose** and
+Testcontainers work. Its VM is created only when it is first used. It has no
+Internet unless you grant it, and its data is kept by
+**stop**, **reset** and idle stop. **marsh services** and **marsh config
+services** are aliases of **marsh docker** and **marsh config docker**. See
+https://runmar.sh/docs/docker.html.
+
 **msh** is a symbolic link to **marsh** and behaves identically.
 
 With no *COMMAND*, **marsh** starts the shell. Arguments it does not recognize
@@ -222,6 +231,33 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   uploads it into a root-only file in its sandbox; the token can use every
   cloud sandbox on the account. See https://runmar.sh/docs/cloud.html.
 
+**config docker** [**on**|**off**|**ls**]
+: Set, or with no value print, whether Docker is on for the **current
+  project** (this folder, canonical path). The default is **on**. The setting is
+  per project, and a project's own setting beats the default. **ls** shows the
+  default and each project with a setting of its own. A project with Docker on gets its own Docker VM and, for its jobs
+  and shell, a filtered Docker endpoint (see **docker**). Turning it **off**
+  stops the project's containers and Docker VM at once and keeps the data;
+  **docker stop**, **docker rm** and **docker status** still work.
+  **config services** is the same setting. Stored in **config.json**. See
+  https://runmar.sh/docs/docker.html.
+
+**config docker default** [**on**|**off**]
+: Set, or with no value print, whether Docker is on for projects with no setting
+  of their own (default **on**). **off** makes Docker opt-in per project
+  (**config docker on**). Stored as **docker_default_on**; the per-project
+  settings are **services_projects** (on) and **docker_projects_off** (off).
+
+**config services-disk-size** [*SIZE*]
+: Set, or with no value print, the Docker disk of a newly created Docker VM
+  (**1g** to **4096g**, default **40g**). Existing Docker VMs keep theirs.
+
+**config services-idle-seconds** [*SECONDS*]
+: Set, or with no value print, how long a Docker VM with no job or shell using
+  it keeps running before it is stopped (1 to 604800, default 900). Idle stop
+  keeps the VM's disk and data. **MARSH_SERVICES_IDLE_SECONDS** at daemon start
+  overrides it.
+
 **config peer-review** [**on**|**off**|**ls** [**--json**]]
 : Set, or with no value print, peer review by another vendor's model. **ls**
   is **peer-review ls**. **on**
@@ -280,20 +316,63 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   owns and verifies they are gone, except detached runs' sandboxes; with
   **--detached** those runs are discarded too.
 
-**reset** [**--json**] [**--detached**]
-: Remove every VM this scope owns (detached cloud runs are kept unless
-  **--detached** is given). The daemon keeps running. Refuses while
-  shells or jobs are active. The guest home and results are kept. Exits
-  nonzero if any cleanup could not be verified.
+**docker status** [**--json**]
+: Print which projects have Docker on, and for each project that has a
+  Docker VM, and for the current project, its folder, state (**off**,
+  **stopped**, **starting**, **ready**, or **unavailable** with a reason) and VM
+  name. **--json** prints the **marsh.services/v1** document, which adds per
+  project the **containers**, the published **ports**, and **internet** (**on**,
+  **governed**, **effective**). Host only: a job or the shell cannot run any
+  **docker** command (or its alias **services**).
+
+**docker start** [**--json**]
+: Create the current project's Docker VM if needed and wait until it is ready.
+  Needs Docker on for the project. The VM is otherwise created the first time
+  a job or shell of the project uses Docker.
+
+**docker stop** [**--json**]
+: Stop the current project's Docker VM. Its disk and data are kept.
+
+**docker rm** [**--yes**] [**--json**]
+: Remove the current project's Docker VM and its Docker disk: every
+  container, volume and image in it, every lane's containers, and the saved Docker
+  data of the project's checkpoints. Asks first on a terminal; with no terminal
+  it needs **--yes**. This is the only way, besides **reset --include-services**,
+  that Docker data is deleted.
+
+**docker internet** **on**|**off** [**--json**]
+: Grant or revoke Internet for the current project's Docker containers. The
+  default is off: containers cannot open connections out and name lookups fail;
+  image pulls from Docker Hub and ghcr.io still work (Docker makes them itself).
+  Turning it on opens every registry for pulls. A network policy that marsh did
+  not create (organization, global, or for that VM) governs: the command is
+  refused, names the rule, and **docker status --json** shows
+  **internet.governed**. Builds through BuildKit are not covered by the off
+  gate. See https://runmar.sh/docs/docker.html#internet.
+
+**docker hold** *SECONDS* [**--json**], **docker release** *HOLDER* [**--json**]
+: Keep the current project's Docker VM awake for *SECONDS*, and release that
+  hold. They exercise the idle timer and are not needed in normal use.
+
+**reset** [**--include-services** [**--yes**]] [**--json**] [**--detached**]
+: Remove the Kit and shell VMs this scope owns (detached cloud runs are kept
+  unless **--detached** is given). The daemon keeps running. Docker VMs, and
+  their data, are **skipped**. With **--include-services**, first list the
+  projects whose Docker VM, Docker disk and data would be deleted and ask for
+  confirmation; with no terminal, **--yes** is required, otherwise it prints the
+  list, deletes nothing, and exits 1. Refuses while shells or jobs are active.
+  The guest home and results are kept. Exits nonzero if any cleanup could not
+  be verified.
 
 **stop** [**--json**] [**--detached**]
-: Remove every VM this scope owns (detached cloud runs are kept, and collected
-  when the daemon starts again, unless **--detached** is given) and stop its
-  daemon. Refuses while shells or
-  jobs are active. The guest home and results are kept. Exits nonzero if any
-  cleanup could not be verified. With no daemon running, **reset** and
-  **stop** start it when this scope has VMs recorded, then remove them; with
-  none they print **nothing to stop** (**nothing to reset**) and exit 0.
+: Remove the Kit and shell VMs this scope owns (detached cloud runs are kept,
+  and collected when the daemon starts again, unless **--detached** is given)
+  and stop its daemon. Docker VMs are **stopped, not removed**: their disks
+  and data stay. Refuses while shells or jobs are active. The guest home and
+  results are kept. Exits nonzero if any cleanup could not be verified. With no
+  daemon running, **reset** and **stop** start it when this scope has VMs
+  recorded, then remove them; with none they print **nothing to stop**
+  (**nothing to reset**) and exit 0.
 
 **restart**
 : Restart this scope's daemon on the installed marsh, keeping the VMs it
@@ -489,6 +568,11 @@ See https://runmar.sh/docs/acp.html.
   **config cloud-delegate** on (1 to 64, default 8), read when the daemon
   starts.
 
+**MARSH_SERVICES_IDLE_SECONDS**
+: Seconds a Docker VM with no job or shell using it keeps running before it
+  is stopped, read when the daemon starts. It overrides
+  **marsh config services-idle-seconds** (default 900).
+
 **MARSH_OPEN_COMMAND**
 : The program the daemon runs as *PROGRAM* *URL* to open a link, read when
   the daemon starts. Default */usr/bin/open*.
@@ -501,8 +585,10 @@ See https://runmar.sh/docs/acp.html.
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
 : The default shell set by **marsh config shell**, and the
   **marsh config auto-update**, **marsh config open-urls** and
-  **marsh config cloud-delegate** settings, and the job limits set by
-  **marsh config limit**.
+  **marsh config cloud-delegate** settings, the job limits set by
+  **marsh config limit**, and the services settings:
+  **services_projects** (the projects services are on for),
+  **services_disk_size** and **services_idle_seconds**.
 
 *$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenv.d/\*.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
 : Optional shared and per-command MCP servers and extra directories. Reloaded

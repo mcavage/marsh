@@ -109,12 +109,12 @@ pub fn resolve(
     Ok(configured(scope_root)?.unwrap_or_default())
 }
 
-pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n       marsh config skills-mirror [on|off]\n       marsh config peer-review [on|off|ls]\n       marsh config vm-idle-days [DAYS|off]\n       marsh config limits [--json]\n       marsh config limit NAME VALUE|default\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\nskills-mirror
+pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n       marsh config skills-mirror [on|off]\n       marsh config peer-review [on|off|ls]\n       marsh config vm-idle-days [DAYS|off]\n       marsh config docker [on|off|ls]\n       marsh config docker default [on|off]\n       marsh config services-disk-size [SIZE]\n       marsh config services-idle-seconds [SECONDS]\n       marsh config limits [--json]\n       marsh config limit NAME VALUE|default\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\nskills-mirror
              Show or set whether marsh keeps the Docker Sandboxes skills store
              in step with ~/.agents/skills, ~/.claude/skills and the other
              folders `sbx skills import` reads (default on). Every job reads
              skills from that store.
-peer-review  Show or set peer review by another vendor's model; kept in\n             $MARSH_HOME/peer-review.d/marsh.yaml, not config.json. See\n             `marsh peer-review --help` and docs/peer-review.md. `ls [--json]` is\n             `marsh peer-review ls`.\nvm-idle-days Show or set after how many days without use marsh removes one\n             of its Kit or shell VMs (default 3, 1 to 365; `off` keeps them). The\n             next use creates it again. See `marsh gc`.\nlimits       List every job limit: its value, default, where the value comes\n             from (default, config, or a MARSH_* variable at marsh start, which\n             wins), its range, and whether a change applies now or to new jobs.\nlimit        Set one limit (`marsh config limit job-children 32`), or put it\n             back to its default (`default`). Admission limits apply to the next\n             launch; per-job resources to jobs started after the change. See\n             docs/configuration.md.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
+peer-review  Show or set peer review by another vendor's model; kept in\n             $MARSH_HOME/peer-review.d/marsh.yaml, not config.json. See\n             `marsh peer-review --help` and docs/peer-review.md. `ls [--json]` is\n             `marsh peer-review ls`.\nvm-idle-days Show or set after how many days without use marsh removes one\n             of its Kit or shell VMs (default 3, 1 to 365; `off` keeps them). The\n             next use creates it again. See `marsh gc`.\ndocker       Show or set whether the CURRENT project (this folder, canonical) has\n             its own private Docker (default on; see `marsh docker --help`;\n             `services` is the same word). Docker is on for every project unless\n             you turn it off here; the VM is only created when an agent or you\n             first use it. Off, `marsh docker start` and `hold` refuse for it,\n             and its running Docker VM is stopped at once with its holders\n             revoked (its data is kept; `stop` and `rm` still work). `ls` shows\n             the default and every project with a setting of its own. A job\n             cannot change it.\ndocker default\n             Show or set whether Docker is on for projects with no setting of\n             their own (default on). `marsh config docker default off` makes it\n             opt-in: then `marsh config docker on` turns it on per project.\nservices-disk-size\n             Show or set the Docker disk of a new Docker VM (default 40g, such\n             as 20g to 4096g). Existing VMs keep theirs.\nservices-idle-seconds\n             Show or set how long a Docker VM with no lease holder keeps\n             running before it is stopped (default 900; 1 to 604800).\n             MARSH_SERVICES_IDLE_SECONDS at daemon start overrides it.\nlimits       List every job limit: its value, default, where the value comes\n             from (default, config, or a MARSH_* variable at marsh start, which\n             wins), its range, and whether a change applies now or to new jobs.\nlimit        Set one limit (`marsh config limit job-children 32`), or put it\n             back to its default (`default`). Admission limits apply to the next\n             launch; per-job resources to jobs started after the change. See\n             docs/configuration.md.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
 
 /// `auto_update` in `config.json`; read by the daemon (`docs/kits.md`).
 pub const AUTO_UPDATE_KEY: &str = "auto_update";
@@ -220,6 +220,7 @@ fn config_switch_default(scope_root: &Path, key: &str, default: bool) -> Result<
 ///
 /// # Errors
 /// Returns a message and exit status for usage or filesystem failures.
+#[allow(clippy::too_many_lines)] // One match is the grammar of `marsh config`.
 pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, (String, i32)> {
     let words = arguments
         .iter()
@@ -249,6 +250,73 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
         ["cloud-delegate"] => {
             let on = cloud_delegate(scope_root).map_err(|message| (message, 1))?;
             println!("{}", if on { "on" } else { "off" });
+            Ok(0)
+        }
+        ["docker" | "services", "default", rest @ ..]
+            if rest.len() <= 1
+                && rest
+                    .first()
+                    .is_none_or(|word| matches!(*word, "on" | "off")) =>
+        {
+            docker_default_config(rest.first().copied(), scope_root)
+        }
+        ["docker" | "services", rest @ ..]
+            if rest.len() <= 1
+                && rest
+                    .first()
+                    .is_none_or(|word| matches!(*word, "on" | "off" | "ls")) =>
+        {
+            let project = std::env::current_dir()
+                .and_then(std::fs::canonicalize)
+                .map_err(|error| (format!("cannot resolve this folder: {error}"), 1))?;
+            services_config(rest.first().copied(), scope_root, &project)
+        }
+        ["services-disk-size"] => {
+            println!(
+                "{}",
+                services_setting(scope_root, SERVICES_DISK_SIZE_KEY, "40g")?
+            );
+            Ok(0)
+        }
+        ["services-disk-size", size] => {
+            let valid = size
+                .strip_suffix(['g', 'G'])
+                .and_then(|digits| digits.parse::<u32>().ok())
+                .is_some_and(|gib| (1..=4096).contains(&gib));
+            if !valid {
+                return Err((
+                    format!(
+                        "marsh config services-disk-size: {size:?} is not a size such as 40g (1g to 4096g)"
+                    ),
+                    2,
+                ));
+            }
+            write_config(scope_root, SERVICES_DISK_SIZE_KEY, (*size).into())
+                .map_err(|error| config_write_error(scope_root, &error))?;
+            println!("{size}");
+            Ok(0)
+        }
+        ["services-idle-seconds"] => {
+            println!(
+                "{}",
+                services_setting(scope_root, SERVICES_IDLE_KEY, "900")?
+            );
+            Ok(0)
+        }
+        ["services-idle-seconds", seconds] => {
+            let seconds = seconds
+                .parse::<u64>()
+                .ok()
+                .filter(|seconds| (1..=604_800).contains(seconds))
+                .ok_or_else(|| {
+                    (
+                        "marsh config services-idle-seconds: not a number of seconds from 1 to 604800".to_owned(),
+                        2,
+                    )
+                })?;
+            write_config(scope_root, SERVICES_IDLE_KEY, seconds.into())
+                .map_err(|error| config_write_error(scope_root, &error))?;
+            println!("{seconds}");
             Ok(0)
         }
         ["skills-mirror"] => {
@@ -306,7 +374,7 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
         }
         _ => Err((
             format!(
-                "unknown setting{}; marsh config settings are: shell [marsh|bash|zsh], auto-update [on|off], open-urls [on|off], cloud-delegate [on|off], skills-mirror [on|off], vm-idle-days [DAYS|off], peer-review [on|off|ls], limits [--json], limit NAME VALUE|default",
+                "unknown setting{}; marsh config settings are: shell [marsh|bash|zsh], auto-update [on|off], open-urls [on|off], cloud-delegate [on|off], skills-mirror [on|off], vm-idle-days [DAYS|off], docker [on|off|ls], docker default [on|off], services-disk-size [SIZE], services-idle-seconds [SECONDS], peer-review [on|off|ls], limits [--json], limit NAME VALUE|default",
                 words
                     .first()
                     .map_or_else(String::new, |word| format!(" `{word}`"))
@@ -314,6 +382,187 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             2,
         )),
     }
+}
+
+/// `services_projects`, `docker_projects_off`, `docker_default_on`,
+/// `services_disk_size` and `services_idle_seconds` in `config.json`; read by
+/// the daemon on each `marsh docker` request (`docs/design/services.md`).
+/// Docker is on for every project by default (DECISIONS 31): `docker_default_on`
+/// (default true) sets that for the home, and a project's own setting wins:
+/// `services_projects` lists the canonical roots turned on, `docker_projects_off`
+/// those turned off (off wins).
+pub const SERVICES_PROJECTS_KEY: &str = "services_projects";
+pub const DOCKER_OFF_KEY: &str = "docker_projects_off";
+pub const DOCKER_DEFAULT_KEY: &str = "docker_default_on";
+pub const SERVICES_DISK_SIZE_KEY: &str = "services_disk_size";
+pub const SERVICES_IDLE_KEY: &str = "services_idle_seconds";
+
+fn config_value(scope_root: &Path) -> Result<serde_json::Value, String> {
+    let path = scope_root.join(CONFIG_FILE);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(serde_json::Value::Null);
+        }
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
+}
+
+/// A list of canonical project roots in `config.json`.
+fn project_list(scope_root: &Path, key: &str) -> Result<Vec<String>, String> {
+    match config_value(scope_root)?.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(roots)) => roots
+            .iter()
+            .map(|root| {
+                root.as_str().map(str::to_owned).ok_or_else(|| {
+                    format!(
+                        "invalid {}: {key} must list project paths",
+                        scope_root.join(CONFIG_FILE).display()
+                    )
+                })
+            })
+            .collect(),
+        Some(_) => Err(format!(
+            "invalid {}: {key} must be a list of project paths",
+            scope_root.join(CONFIG_FILE).display()
+        )),
+    }
+}
+
+/// The canonical project roots Docker was turned on for (`config.json`).
+fn services_projects(scope_root: &Path) -> Result<Vec<String>, String> {
+    project_list(scope_root, SERVICES_PROJECTS_KEY)
+}
+
+/// Whether Docker is on for projects with no setting of their own (default on).
+fn docker_default_on(scope_root: &Path) -> Result<bool, String> {
+    match config_value(scope_root)?.get(DOCKER_DEFAULT_KEY) {
+        None | Some(serde_json::Value::Null) => Ok(true),
+        Some(serde_json::Value::Bool(on)) => Ok(*on),
+        Some(_) => Err(format!(
+            "invalid {}: {DOCKER_DEFAULT_KEY} must be true or false",
+            scope_root.join(CONFIG_FILE).display()
+        )),
+    }
+}
+
+/// The value in effect for `project`: its own setting (off wins), else the default.
+fn docker_enabled(scope_root: &Path, project: &str) -> Result<bool, String> {
+    if project_list(scope_root, DOCKER_OFF_KEY)?
+        .iter()
+        .any(|root| root == project)
+    {
+        return Ok(false);
+    }
+    Ok(docker_default_on(scope_root)?
+        || services_projects(scope_root)?.iter().any(|r| r == project))
+}
+
+/// `marsh config docker [on|off|ls]` (also `services`): the current project's
+/// setting, in effect (on by default; `ls` shows the default and every project
+/// with a setting of its own).
+fn services_config(
+    word: Option<&str>,
+    scope_root: &Path,
+    project: &Path,
+) -> Result<i32, (String, i32)> {
+    let key = project.to_string_lossy().into_owned();
+    let fail = |message: String| (message, 1);
+    match word {
+        None => println!(
+            "{}",
+            if docker_enabled(scope_root, &key).map_err(fail)? {
+                "on"
+            } else {
+                "off"
+            }
+        ),
+        Some("ls") => {
+            let on = project_list(scope_root, SERVICES_PROJECTS_KEY).map_err(fail)?;
+            let off = project_list(scope_root, DOCKER_OFF_KEY).map_err(fail)?;
+            let default = docker_default_on(scope_root).map_err(fail)?;
+            println!("default: {}", if default { "on" } else { "off" });
+            let mut all: Vec<(String, &str)> = on
+                .iter()
+                .filter(|root| !off.contains(root))
+                .map(|root| (root.clone(), "on"))
+                .chain(off.iter().map(|root| (root.clone(), "off")))
+                .collect();
+            all.sort();
+            all.dedup();
+            for (project, value) in all {
+                println!("{project}: {value}");
+            }
+        }
+        Some(value) => {
+            let mut on = project_list(scope_root, SERVICES_PROJECTS_KEY).map_err(fail)?;
+            let mut off = project_list(scope_root, DOCKER_OFF_KEY).map_err(fail)?;
+            on.retain(|root| root != &key);
+            off.retain(|root| root != &key);
+            if value == "on" {
+                on.push(key);
+            } else {
+                off.push(key);
+            }
+            on.sort();
+            off.sort();
+            write_config(scope_root, SERVICES_PROJECTS_KEY, on.into())
+                .and_then(|()| write_config(scope_root, DOCKER_OFF_KEY, off.into()))
+                .map_err(|error| config_write_error(scope_root, &error))?;
+            println!("{value}");
+        }
+    }
+    Ok(0)
+}
+
+/// `marsh config docker default [on|off]`: Docker for projects with no setting
+/// of their own (default on).
+fn docker_default_config(word: Option<&str>, scope_root: &Path) -> Result<i32, (String, i32)> {
+    match word {
+        None => println!(
+            "{}",
+            if docker_default_on(scope_root).map_err(|m| (m, 1))? {
+                "on"
+            } else {
+                "off"
+            }
+        ),
+        Some(value) => {
+            write_config(scope_root, DOCKER_DEFAULT_KEY, (value == "on").into())
+                .map_err(|error| config_write_error(scope_root, &error))?;
+            println!("{value}");
+        }
+    }
+    Ok(0)
+}
+
+fn config_write_error(scope_root: &Path, error: &io::Error) -> (String, i32) {
+    (
+        format!(
+            "cannot write {}: {error}",
+            scope_root.join(CONFIG_FILE).display()
+        ),
+        1,
+    )
+}
+
+/// A `config.json` value as text, or `default` when unset.
+fn services_setting(scope_root: &Path, key: &str, default: &str) -> Result<String, (String, i32)> {
+    let path = scope_root.join(CONFIG_FILE);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(default.to_owned()),
+        Err(error) => return Err((format!("cannot read {}: {error}", path.display()), 1)),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| (format!("invalid {}: {error}", path.display()), 1))?;
+    Ok(match value.get(key) {
+        None | Some(serde_json::Value::Null) => default.to_owned(),
+        Some(serde_json::Value::String(text)) => text.clone(),
+        Some(other) => other.to_string(),
+    })
 }
 
 /// `marsh config vm-idle-days [DAYS|off]`.
@@ -680,6 +929,78 @@ mod tests {
             Ok(0)
         );
         assert!(!marsh_daemon::cloud_delegate::configured(&config));
+    }
+
+    #[test]
+    fn docker_is_on_by_default_and_the_settings_validate() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("home");
+        let run = |words: &[&str]| {
+            config_command(&words.iter().map(OsString::from).collect::<Vec<_>>(), &root)
+        };
+        // Per project: `services_config` acts on the folder it is given, and a
+        // project's own setting beats the default (DECISIONS 31).
+        let (one, two) = (Path::new("/Users/a/one"), Path::new("/Users/a/two"));
+        let effective = |project: &str| docker_enabled(&root, project).unwrap();
+        assert!(docker_default_on(&root).unwrap());
+        assert!(effective("/Users/a/one") && effective("/Users/a/two"));
+        assert_eq!(services_config(Some("off"), &root, one), Ok(0));
+        assert!(!effective("/Users/a/one") && effective("/Users/a/two"));
+        assert_eq!(
+            project_list(&root, DOCKER_OFF_KEY),
+            Ok(vec!["/Users/a/one".to_owned()])
+        );
+        assert_eq!(services_config(Some("on"), &root, one), Ok(0));
+        assert!(effective("/Users/a/one"));
+        assert_eq!(project_list(&root, DOCKER_OFF_KEY), Ok(Vec::new()));
+        // The default off makes it opt-in: only projects turned on are on.
+        assert_eq!(run(&["docker", "default", "off"]), Ok(0));
+        assert!(!docker_default_on(&root).unwrap());
+        assert!(
+            effective("/Users/a/one"),
+            "its own setting beats the default"
+        );
+        assert!(!effective("/Users/a/two"));
+        assert_eq!(services_config(Some("on"), &root, two), Ok(0));
+        assert_eq!(
+            services_projects(&root),
+            Ok(vec!["/Users/a/one".to_owned(), "/Users/a/two".to_owned()])
+        );
+        assert_eq!(services_config(Some("off"), &root, one), Ok(0));
+        assert!(!effective("/Users/a/one") && effective("/Users/a/two"));
+        assert_eq!(run(&["docker", "default", "on"]), Ok(0));
+        assert!(effective("/Users/a/two") && !effective("/Users/a/one"));
+        // `docker` is the name of the setting, `services` its alias.
+        assert_eq!(run(&["docker", "ls"]), Ok(0));
+        assert_eq!(run(&["docker"]), Ok(0));
+        assert_eq!(run(&["services", "default"]), Ok(0));
+        assert_eq!(
+            services_projects(&root),
+            Ok(vec!["/Users/a/two".to_owned()])
+        );
+        assert_eq!(run(&["services-disk-size", "20g"]), Ok(0));
+        assert_eq!(
+            services_setting(&root, SERVICES_DISK_SIZE_KEY, "40g"),
+            Ok("20g".into())
+        );
+        assert_eq!(run(&["services-idle-seconds", "30"]), Ok(0));
+        assert_eq!(
+            services_setting(&root, SERVICES_IDLE_KEY, "900"),
+            Ok("30".into())
+        );
+        for bad in [
+            &["services", "maybe"][..],
+            &["docker", "maybe"],
+            &["docker", "default", "maybe"],
+            &["docker", "default", "on", "off"],
+            &["services", "on", "off"],
+            &["services-disk-size", "40"],
+            &["services-disk-size", "0g"],
+            &["services-idle-seconds", "0"],
+            &["services-idle-seconds", "soon"],
+        ] {
+            assert!(run(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

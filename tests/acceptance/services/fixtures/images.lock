@@ -1,0 +1,19 @@
+# The pinned image set of the services E2E (H-11): one name@digest per line.
+# image_cache.py saves exactly these to target/nfx/images/*.tar and loads them
+# into a services engine. Supabase CLI images are chosen by the CLI itself and
+# are not listed; add them with `image_cache.py save --extra FILE` after a first
+# `supabase start`. The egress probe's alternate image (egress.env) must NOT
+# appear here: it is the image a pull has to fetch. docker:29.9.2-cli is the
+# pinned `docker:cli` of SEC-15 (substituted sockets); ryuk is Testcontainers'
+# reaper (the Ryuk-on path, tc/tc-ryuk.test.js); nginx is EP-02's server.
+# node:22 runs tc/*.js where the host has no Node (the plain-sandbox self-test).
+postgres:17@sha256:748a18a54d3842d43bc156f0840d78029b8d349e0feca98c12b9c4ce3404a6b3
+redis:7@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90
+axllent/mailpit:latest@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231
+busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+alpine:3.22@sha256:bfe7ceb9f09ec0566c48fb93356e45a47a00be5a1dd14fa5b909e7709c66b034
+curlimages/curl:8.11.1@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb
+nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+testcontainers/ryuk:0.5.1@sha256:533abc56c07b52a26c955d1e7ae428d810582ab01c156384ae79960eb5fa0775
+node:22-trixie-slim@sha256:be1e2a3dc2c4fd68cdfadad2a696a280e0d2749098bee509230174d72fb768c6

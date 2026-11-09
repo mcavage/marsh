@@ -418,6 +418,9 @@ pub(super) struct Relay {
     process: Box<dyn AttachedProcess>,
     host: thread::JoinHandle<Result<(), DaemonError>>,
     stderr: thread::JoinHandle<io::Result<u64>>,
+    /// The first words the guest relay wrote to its stderr (bounded), so a
+    /// relay that dies before it is ready says why.
+    stderr_head: Arc<Mutex<Vec<u8>>>,
     ready: mpsc::Receiver<Result<Option<marsh_daemon::relay_cleanup::RelayIdentity>, String>>,
     identity: Arc<Mutex<Option<marsh_daemon::relay_cleanup::RelayIdentity>>>,
     tunnel: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -431,10 +434,13 @@ pub(super) struct RelayStop {
 }
 
 impl Relay {
-    pub fn start(
+    /// Starts the host half of a shell's relay, serving the project's services
+    /// endpoint to the shell when `services` is given (E2).
+    pub fn start_with_services(
         mut attachment: Attachment,
         socket: PathBuf,
         token: String,
+        services: Option<Arc<dyn relay::ShellServices>>,
     ) -> Result<Self, DaemonError> {
         if !attachment.process.supports_io_cancellation() {
             let _ = attachment.process.terminate();
@@ -451,7 +457,7 @@ impl Relay {
         let cleaned = Arc::new(AtomicBool::new(false));
         let host_cleaned = Arc::clone(&cleaned);
         let host = thread::spawn(move || {
-            relay::run_host_shared(
+            relay::run_host_shared_with_services(
                 attachment.stdout,
                 &host_tunnel,
                 &socket,
@@ -466,18 +472,60 @@ impl Relay {
                     let _ = send.send(result);
                 },
                 &host_cleaned,
+                services.as_ref(),
             )
         });
-        let stderr = thread::spawn(move || io::copy(&mut attachment.stderr, &mut io::sink()));
+        let stderr_head = Arc::new(Mutex::new(Vec::new()));
+        let head = Arc::clone(&stderr_head);
+        let stderr = thread::spawn(move || {
+            let mut total = 0_u64;
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let count = attachment.stderr.read(&mut buffer)?;
+                if count == 0 {
+                    return Ok(total);
+                }
+                total += count as u64;
+                let mut head = head
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let room = 2048_usize.saturating_sub(head.len());
+                head.extend_from_slice(&buffer[..count.min(room)]);
+            }
+        });
         Ok(Self {
             process: attachment.process,
             host,
             stderr,
+            stderr_head,
             ready,
             identity,
             tunnel,
             cleaned,
         })
+    }
+
+    /// The tunnel to the guest relay, for frames the daemon originates.
+    pub fn tunnel(&self) -> Arc<Mutex<Box<dyn Write + Send>>> {
+        Arc::clone(&self.tunnel)
+    }
+
+    /// `error`, with what the guest relay said on stderr, as plain text.
+    fn with_guest_stderr(&self, error: String) -> String {
+        thread::sleep(Duration::from_millis(300));
+        let head = self
+            .stderr_head
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let said: String = String::from_utf8_lossy(&head)
+            .chars()
+            .filter(|c| !c.is_control() || *c == ' ')
+            .collect();
+        if said.trim().is_empty() {
+            error
+        } else {
+            format!("{error} (guest relay: {})", said.trim())
+        }
     }
 
     pub fn ready(&self, controller: &ServerAttachment) -> Result<(), DaemonError> {
@@ -486,11 +534,13 @@ impl Relay {
             require_controller(controller)?;
             match self.ready.recv_timeout(POLL) {
                 Ok(result) => {
-                    let identity = result.map_err(DaemonError::InvalidState)?.ok_or_else(|| {
-                        DaemonError::ShellCleanupUncertain(
-                            "guest relay did not provide its process identity".into(),
-                        )
-                    })?;
+                    let identity = result
+                        .map_err(|error| DaemonError::InvalidState(self.with_guest_stderr(error)))?
+                        .ok_or_else(|| {
+                            DaemonError::ShellCleanupUncertain(
+                                "guest relay did not provide its process identity".into(),
+                            )
+                        })?;
                     *self
                         .identity
                         .lock()
@@ -1022,10 +1072,11 @@ mod tests {
                 environment: Vec::new(),
             })
             .unwrap();
-        let relay = Relay::start(
+        let relay = Relay::start_with_services(
             process,
             PathBuf::from("/nonexistent-daemon"),
             "a".repeat(64),
+            None,
         )
         .unwrap();
         let start = Instant::now();

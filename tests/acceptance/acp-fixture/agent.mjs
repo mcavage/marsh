@@ -1,4 +1,6 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import readline from "node:readline";
 
 const sessionId = "synthetic-acp-session";
@@ -6,6 +8,72 @@ let pendingPrompt = null;
 let pendingPermission = null;
 let cancelBurst = false;
 let nextPermissionId = 100;
+let execChild = null;
+const EXEC_LIMIT_MS = 300000;
+// base64 grows output by a third: one `fixture:out:` update carries at most
+// this many raw bytes (a multiple of 3, so the chunks' base64 concatenates),
+// which stays under the 300000-byte update bound. Larger output is sent as
+// several updates; output beyond EXEC_MAX_BYTES fails loudly, never truncates.
+const EXEC_CHUNK_BYTES = 196608;
+const EXEC_MAX_BYTES = 32 * 1024 * 1024;
+
+// The self-test's break (HARNESS-03): NFX_FAKE_EXEC=off in the agent's
+// environment, or a `.nfx-fake-exec-off` file in its cwd, turns the verb off.
+function execDisabled() {
+  return process.env.NFX_FAKE_EXEC === "off" || fs.existsSync(".nfx-fake-exec-off");
+}
+
+// `exec SH`: what an agent's shell tool does. Runs `sh -c SH` in this
+// process's cwd for at most 300 s, then replies `fixture:exit:N` (the shell's
+// status: 128+signal when it was killed, 124 on the time limit) and
+// `fixture:out:BASE64` with ALL of stdout, split over several `fixture:out:`
+// updates when it exceeds EXEC_CHUNK_BYTES (concatenate the decoded chunks;
+// stderr goes to this process's stderr). Output over EXEC_MAX_BYTES kills the
+// command and replies `fixture:exit:125` and `fixture:error:output-limit`.
+function runExec(id, script) {
+  const child = spawn("sh", ["-c", script], { cwd: process.cwd(), detached: true,
+    stdio: ["ignore", "pipe", "inherit"] });
+  execChild = child;
+  const chunks = [];
+  let total = 0;
+  let timedOut = false;
+  let overLimit = false;
+  child.stdout.on("data", (chunk) => {
+    total += chunk.length;
+    if (total > EXEC_MAX_BYTES) {
+      overLimit = true;
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      return;
+    }
+    chunks.push(chunk);
+  });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+  }, EXEC_LIMIT_MS);
+  const finish = (status) => {
+    clearTimeout(timer);
+    if (execChild !== child) return;
+    execChild = null;
+    if (pendingPrompt !== id) return;
+    if (overLimit) {
+      update("fixture:exit:125");
+      update("fixture:error:output-limit");
+      endPrompt(id, "refusal");
+    } else {
+      update(`fixture:exit:${timedOut ? 124 : status}`);
+      const output = Buffer.concat(chunks);
+      for (let at = 0; at === 0 || at < output.length; at += EXEC_CHUNK_BYTES) {
+        update(`fixture:out:${output.subarray(at, at + EXEC_CHUNK_BYTES).toString("base64")}`);
+      }
+      endPrompt(id, "end_turn");
+    }
+    pendingPrompt = null;
+  };
+  child.on("error", () => finish(127));
+  child.on("close", (code, signal) =>
+    finish(code ?? (signal ? 128 + (os.constants.signals[signal] ?? 0) : 1)));
+}
 
 function send(value) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...value })}\n`);
@@ -123,6 +191,9 @@ for await (const line of inputLines) {
           update(`fixture:refused:${error.code}`);
         }
         endPrompt(id, "end_turn");
+      } else if (text?.startsWith("exec ") && !execDisabled()) {
+        pendingPrompt = id;
+        runExec(id, text.slice(5));
       } else if (text === "late") {
         endPrompt(id, "end_turn");
         update("late-after-end");
@@ -164,6 +235,10 @@ for await (const line of inputLines) {
       break;
     }
     case "session/cancel":
+      if (execChild) {
+        try { process.kill(-execChild.pid, "SIGKILL"); } catch {}
+        execChild = null;
+      }
       if (pendingPrompt !== null) {
         if (cancelBurst) {
           for (let n = 0; n < 200; n++) update(`c${n};`);

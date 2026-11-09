@@ -92,9 +92,17 @@ journey. Do not grow mock suites or a parallel test framework to claim progress.
   no container can still run there; otherwise `marsh workers reset KIT` does.
   Failures before any job ran (timeouts, slow pulls, busy bookkeeping) fail
   the start cleanly instead of quarantining.
-- Jobs get no Docker, containerd, or SBX socket and no raw credentials; their only
-  daemon channel is the scoped job capability socket (`/run/marsh/cap.sock`,
-  `docs/design/processes.md`).
+- Jobs get no containerd or SBX socket and no raw credentials, and never a Kit
+  VM's Docker engine. Their daemon channel is the scoped job capability socket
+  (`/run/marsh/cap.sock`, `docs/design/processes.md`). **Jobs of a services-enabled
+  project get a filtered endpoint for that project's own services VM, never a Kit
+  VM's engine** (`/run/marsh/docker.sock`, `DOCKER_HOST` and
+  `TESTCONTAINERS_HOST_OVERRIDE` from a dedicated contract field, never from the
+  exported environment; `docs/design/services.md`). Every other mount and
+  `DOCKER_*`/`CONTAINERD_*` environment refusal stays. When a job's attempt ends,
+  marsh removes that attempt's containers in the services VM, except Compose and
+  restart-policy containers, which persist with the workspace (DECISIONS 11;
+  `docs/design/services.md`, "Reaping at attempt end").
 - Prefer real-caller end-to-end tests that check output, authority, data
   preservation, receipts, and cleanup. Do not add unit tests that mirror the
   implementation.
