@@ -18,7 +18,7 @@ FROM ${SVC_ENGINE_BASE}
 USER root
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.9.2-1 docker-ce-cli=5:29.9.2-2 containerd.io=2.4.2-3 \
+      docker-ce=5:29.9.3-0 docker-ce-cli=5:29.9.3-0 containerd.io=2.4.2-4 \
       docker-compose-plugin=5.7.0-0 \
       xfsprogs util-linux mount iproute2 procps iptables \
  && apt-get clean \
@@ -28,6 +28,6 @@ RUN apt-get update \
  && command -v iptables && command -v ip6tables \
  && test -x /usr/libexec/docker/cli-plugins/docker-compose \
  && docker compose version | grep -q 5.7.0 \
- && dockerd --version | grep -q 29.9.2
+ && dockerd --version
 LABEL dev.marsh.image="svc-engine"
 ENTRYPOINT ["/marsh/marsh", "--internal-services", "engine-up"]
