@@ -598,15 +598,14 @@ mod linux {
                     .stale_free
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                match *cached {
-                    Some(free) => Ok(free),
-                    None => {
-                        let reading = read();
-                        if let Ok(free) = &reading {
-                            *cached = Some(*free);
-                        }
-                        reading
+                if let Some(free) = *cached {
+                    Ok(free)
+                } else {
+                    let reading = read();
+                    if let Ok(free) = &reading {
+                        *cached = Some(*free);
                     }
+                    reading
                 }
             } else {
                 read()

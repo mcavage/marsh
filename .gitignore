@@ -10,6 +10,9 @@ __pycache__/
 /.marsh-evidence/
 **/*_TTrace_*
 
-# Installed on demand by tests/acceptance/services/fixtures/stage.py
-tests/acceptance/services/fixtures/tc/node_modules/
-tests/acceptance/services/fixtures/devserver/node_modules/
+# Dependencies and build output are installed or built on demand, never tracked
+# (scripts/check-no-vendored-deps.sh, run by `make lint`). The services fixtures
+# `npm ci` theirs through tests/acceptance/services/fixtures/stage.py.
+node_modules/
+.venv/
+.next/
