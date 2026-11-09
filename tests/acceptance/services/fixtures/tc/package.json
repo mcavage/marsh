@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Testcontainers fixture for the services E2E (Node 22, testcontainers 10, pg). node_modules is installed on demand by stage.py (npm ci).",
-  "engines": { "node": ">=22 <23" },
+  "engines": { "node": ">=22 <27" },
   "dependencies": {
     "pg": "8.13.1",
     "testcontainers": "12.2.1"
