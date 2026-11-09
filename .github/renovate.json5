@@ -58,7 +58,7 @@
       // so their versions are pinned explicitly.
       description: "DHI-built apt packages pinned by version (Kit VM floor, shell template)",
       customType: "regex",
-      managerFilePatterns: ["/^packaging/image-base/[^/]+\\.packages$/", "/^packaging/shell/Dockerfile$/"],
+      managerFilePatterns: ["/^packaging/image-base/[^/]+\\.packages$/", "/^packaging/shell/Dockerfile$/", "/^packaging/svc-engine/Dockerfile$/"],
       // The name must start the line or follow whitespace or a line
       // continuation, so flags such as `--fuzz=0` and `--chmod=0644` are not
       // taken for packages. (RE2: no lookbehind.)
