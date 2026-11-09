@@ -49,6 +49,9 @@ WORKER_BOUNDARY = r'''
 import json, os, pathlib, stat, subprocess, sys, uuid
 candidate, tool, target, control, relay_socket, relay_token = sys.argv[1:]
 CAP = '/run/marsh/cap.sock'
+# Docker is on by default: the job's filtered endpoint for the project's own Docker
+# (docs/docker.md) is its second channel, beside cap.sock; it is not daemon authority.
+DOCKER = '/run/marsh/docker.sock'
 assert relay_socket and relay_token
 assert not os.path.lexists(relay_socket), 'live shell relay socket is visible in Kit'
 assert not os.path.lexists(relay_token), 'live shell relay token file is visible in Kit'
@@ -68,7 +71,7 @@ for root in roots:
    seen.add((info.st_dev, info.st_ino))
    # The job's own scoped capability socket is its one daemon channel
    # (docs/design/processes.md); anything else is a leak.
-   if str(p) == CAP:
+   if str(p) in (CAP, DOCKER):
     continue
    if stat.S_ISSOCK(info.st_mode) or name.endswith('.token') or name in ('token', 's', 't'):
     violations.append(str(p))
@@ -77,11 +80,11 @@ assert not pathlib.Path(control).exists(), 'host control directory is visible in
 # /run/marsh is the job's own capability directory: its tmpfs, cap.sock, and
 # the in-job CLI (`/run/marsh/marsh`). Nothing else may be mounted there.
 mounts = pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
-allowed = {'/run/marsh', '/run/marsh/marsh', CAP}
+allowed = {'/run/marsh', '/run/marsh/marsh', CAP, DOCKER}
 leaks = [line for line in mounts if control in line or (
     line.split()[4].startswith('/run/marsh/') and line.split()[4] not in allowed)]
 assert not leaks, leaks
-unix = [line for line in pathlib.Path('/proc/net/unix').read_text().splitlines() if not line.endswith(CAP)]
+unix = [line for line in pathlib.Path('/proc/net/unix').read_text().splitlines() if not line.endswith((CAP, DOCKER))]
 assert not any('marsh' in line or 'docker.sock' in line or 'containerd.sock' in line for line in unix), unix
 # Guessing the *live* parent's route is not authority: neither its socket nor
 # credential file is mounted. No token contents are read or copied by the test.

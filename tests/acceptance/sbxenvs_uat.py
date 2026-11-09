@@ -30,6 +30,7 @@ SCENARIOS = {
     "E07-invalid-change-keeps-working": "invalid_change",
     "E08-removed-server-unloaded": "removed",
     "E09-invalid-config-no-vm-effects": "invalid",
+    "E10-folder-inside-project-noted": "inside_project",
 }
 
 
@@ -286,20 +287,36 @@ class Environments(ScenarioSuite):
             require(not errors, f"{message}: {'; '.join(errors)}")
 
         try:
-            for fields in ({"agent": "shell"}, {"additionalWorkspaces": [{"path": str(self.project)}]},
+            # A folder inside the project is not unsafe (E10: skipped with a note); one that
+            # contains the project is refused.
+            for fields in ({"agent": "shell"}, {"additionalWorkspaces": [{"path": str(self.project.parent)}]},
                            {"additionalWorkspaces": [{"path": str(self.guest_home)}]}):
                 self.write(self.home / "sbxenv.yaml", fields)
                 result = self.brush("true", self.project)
                 require(result.returncode != 0, f"unsafe declaration admitted: {fields}")
                 unchanged("refusal created or changed a VM")
             (self.home / "sbxenv.yaml").write_text(original)
-            self.write(self.layers / "fixture.yaml", {"additionalWorkspaces": [{"path": str(self.project)}]})
+            self.write(self.layers / "fixture.yaml", {"additionalWorkspaces": [{"path": str(self.guest_home)}]})
             result = self.cli(["--load", "fixture", "-c", "true"], self.project)
             require(result.returncode != 0, "unsafe Kit-only mount admitted during prewarm")
             unchanged("bad prewarm mount created a shell or Kit VM")
         finally:
             (self.home / "sbxenv.yaml").write_text(original)
             (self.layers / "fixture.yaml").write_text(original_kit)
+
+    def inside_project(self):
+        """An extra folder inside the project is already visible: the shell starts, with a note."""
+        inside = self.project / "pack"
+        inside.mkdir(exist_ok=True)
+        original = (self.home / "sbxenv.yaml").read_text()
+        try:
+            self.write(self.home / "sbxenv.yaml", {"additionalWorkspaces": [{"path": str(inside)}]})
+            result = self.brush("true", self.project, timeout=900)
+            require(result.returncode == 0, f"shell refused an extra folder inside the project: {result.stderr[-600:]!r}")
+            require(b"is inside the project; already visible" in result.stderr,
+                    f"no inside-project note: {result.stderr[-600:]!r}")
+        finally:
+            (self.home / "sbxenv.yaml").write_text(original)
 
     def run_all(self):
         self.stock_before = stock_baseline(self.sbx)

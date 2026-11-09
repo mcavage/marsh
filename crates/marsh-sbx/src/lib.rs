@@ -324,10 +324,29 @@ impl NativeKitRef {
     /// # Errors
     /// Returns an error when a local source cannot be read safely.
     pub fn capture_generation(&self) -> Result<Self, SbxError> {
+        self.capture_with(local_source_fingerprint)
+    }
+
+    /// [`Self::capture_generation`] for read-only views (`marsh status`, the
+    /// catalog of agents a job reads): a local source whose files are
+    /// unchanged by a stat-only walk (names, modes, sizes, times, inodes) keeps
+    /// its last fingerprint instead of being read in full again. Preparation
+    /// and VM ownership never use this; they hash the bytes.
+    ///
+    /// # Errors
+    /// Returns an error when a local source cannot be read safely.
+    pub fn capture_generation_memoized(&self) -> Result<Self, SbxError> {
+        self.capture_with(memoized_local_source_fingerprint)
+    }
+
+    fn capture_with(
+        &self,
+        fingerprint: impl FnOnce(&Path) -> Result<String, SbxError>,
+    ) -> Result<Self, SbxError> {
         let NativeKitLocation::LocalV3Source(source) = &self.location else {
             return Ok(self.clone());
         };
-        let fingerprint = local_source_fingerprint(source)?;
+        let fingerprint = fingerprint(source)?;
         let mut captured = self.clone();
         captured.identity = format!("{}@{fingerprint}", self.registry_identity);
         captured.local_fingerprint = Some(fingerprint);
@@ -8149,6 +8168,74 @@ fn local_source_fingerprint(source: &Path) -> Result<String, SbxError> {
         "sha256:{}",
         marsh_contracts::process::hex(&digest.finalize())
     ))
+}
+
+/// What a stat-only walk of a local Kit source sees: every entry's relative
+/// path, mode, size, change and modification times and inode. The change time
+/// moves with any write, and unlike the modification time a writer cannot set it.
+fn local_source_signature(source: &Path) -> Result<[u8; 32], SbxError> {
+    fn walk(root: &Path, path: &Path, digest: &mut Sha256) -> Result<(), SbxError> {
+        let metadata_error = |path: &Path, error| SbxError::Metadata {
+            path: path.to_owned(),
+            source: error,
+        };
+        let mut entries = fs::read_dir(path)
+            .and_then(Iterator::collect::<Result<Vec<_>, _>>)
+            .map_err(|error| metadata_error(path, error))?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries {
+            if entry.file_name() == ".git" {
+                continue;
+            }
+            let entry_path = entry.path();
+            let metadata = fs::symlink_metadata(&entry_path)
+                .map_err(|error| metadata_error(&entry_path, error))?;
+            let relative = entry_path
+                .strip_prefix(root)
+                .map_err(|_| SbxError::InvalidLocalKitSource(root.to_owned()))?;
+            digest.update(relative.as_os_str().as_encoded_bytes());
+            for number in [
+                u64::from(metadata.mode()),
+                metadata.len(),
+                metadata.ino(),
+                metadata.mtime().cast_unsigned(),
+                metadata.mtime_nsec().cast_unsigned(),
+                metadata.ctime().cast_unsigned(),
+                metadata.ctime_nsec().cast_unsigned(),
+            ] {
+                digest.update(number.to_be_bytes());
+            }
+            if metadata.is_dir() {
+                walk(root, &entry_path, digest)?;
+            }
+        }
+        Ok(())
+    }
+
+    let mut digest = Sha256::new();
+    walk(source, source, &mut digest)?;
+    Ok(digest.finalize().into())
+}
+
+fn memoized_local_source_fingerprint(source: &Path) -> Result<String, SbxError> {
+    static KNOWN: Mutex<BTreeMap<PathBuf, ([u8; 32], String)>> = Mutex::new(BTreeMap::new());
+    let signature = local_source_signature(source)?;
+    if let Some((known, fingerprint)) = KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(source)
+        && *known == signature
+    {
+        return Ok(fingerprint.clone());
+    }
+    // The signature is taken before the bytes are read: a write in between
+    // changes it, so the next call reads again.
+    let fingerprint = local_source_fingerprint(source)?;
+    KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(source.to_owned(), (signature, fingerprint.clone()));
+    Ok(fingerprint)
 }
 
 fn sweep_stale_local_scratch(directory: &Path, now: SystemTime) -> Result<(), SbxError> {

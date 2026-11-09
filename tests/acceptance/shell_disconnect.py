@@ -524,7 +524,7 @@ class Journey:
                     result = self.command([self.marsh, "stop", "--json"], timeout=180,
                                           check=False)
                     if result.returncode == 0 or time.monotonic() >= deadline \
-                            or b"active shell sessions" not in result.stderr:
+                            or b"daemon is busy" not in result.stderr:
                         break
                     time.sleep(0.5)
                 if result.returncode != 0:

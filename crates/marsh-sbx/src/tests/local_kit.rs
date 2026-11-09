@@ -290,6 +290,39 @@ fn local_source_requires_a_canonical_directory_and_hashes_symlink_text_not_targe
 }
 
 #[test]
+fn memoized_generation_follows_the_files_without_trusting_a_stale_memo() {
+    let kit = KitFixture::local(KIT);
+    let source = kit.source();
+    let local = NativeKitRef::local_v3_source(source.clone()).unwrap();
+    let first = local.capture_generation_memoized().unwrap();
+    assert_eq!(
+        first.identity(),
+        local.capture_generation().unwrap().identity()
+    );
+    assert_eq!(
+        local.capture_generation_memoized().unwrap().identity(),
+        first.identity()
+    );
+    fs::write(source.join("added-later"), "new bytes").unwrap();
+    let changed = local.capture_generation_memoized().unwrap();
+    assert_ne!(changed.identity(), first.identity());
+    assert_eq!(
+        changed.identity(),
+        local.capture_generation().unwrap().identity()
+    );
+    // A rewrite that keeps the length is still seen: its change time moves.
+    fs::write(source.join("added-later"), "NEW BYTES").unwrap();
+    assert_eq!(
+        local.capture_generation_memoized().unwrap().identity(),
+        local.capture_generation().unwrap().identity()
+    );
+    assert_ne!(
+        local.capture_generation_memoized().unwrap().identity(),
+        changed.identity()
+    );
+}
+
+#[test]
 fn local_source_rejects_special_files() {
     let kit = KitFixture::local(KIT);
     let socket = kit.source().join("local.socket");
