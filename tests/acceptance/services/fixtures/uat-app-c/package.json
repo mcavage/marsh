@@ -5,5 +5,5 @@
   "description": "UAT J3: a Node service with a Compose dev Postgres and Testcontainers integration tests. Scaffold: `npm install` runs in the project before the journey.",
   "scripts": { "test": "node --test test/*.test.js" },
   "dependencies": { "pg": "8.13.1" },
-  "devDependencies": { "testcontainers": "10.16.0" }
+  "devDependencies": { "testcontainers": "12.2.1" }
 }
