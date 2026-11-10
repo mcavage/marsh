@@ -2812,9 +2812,18 @@ mod relay_tests {
 
     #[test]
     fn an_unrequested_or_mismatched_restore_answer_ends_the_relay() {
-        let relay = start_with(Quirk::UnrequestedRestored, Limits::default()).unwrap();
-        assert!(wait_closed(&relay).contains("protocol violation"));
-        assert!(relay.violated());
+        // The unrequested answer follows `ready` at once, so the relay may meet
+        // it during the handshake (start refuses) or just after (it ends).
+        match start_with(Quirk::UnrequestedRestored, Limits::default()) {
+            Ok(relay) => {
+                assert!(wait_closed(&relay).contains("protocol violation"));
+                assert!(relay.violated());
+            }
+            Err(error) => assert!(
+                matches!(&error, RelayError::Hostile(why) if why.contains("protocol violation")),
+                "{error:?}"
+            ),
+        }
         let relay = start_with(Quirk::WrongKindAnswer, Limits::default()).unwrap();
         let answer = relay.restore_prepare("snap_1", "lane-1", "/p", None, "/p/lane", "f1");
         assert!(answer.is_err());
