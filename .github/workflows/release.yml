@@ -273,6 +273,8 @@ jobs:
           mkdir -m 700 -p "$RUNNER_TEMP/out"
           python3 scripts/prepare-shell-image.py --repository "$SHELL_IMAGE_REPOSITORY" \
             ${IMAGE_TAG:+--tag "$IMAGE_TAG"} --output "$RUNNER_TEMP/out/shell-image"
+      - name: Services engine image
+        run: python3 scripts/prepare-svc-engine-image.py --docker docker --output "$RUNNER_TEMP/out"
       - name: Kits
         run: |
           make kit-publish KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_TAG="$IMAGE_TAG" \
@@ -326,6 +328,8 @@ jobs:
           path: |
             ${{ runner.temp }}/out/shell-image
             ${{ runner.temp }}/out/shell-image.build.json
+            ${{ runner.temp }}/out/svc-engine.tar
+            ${{ runner.temp }}/out/svc-engine-image.json
             ${{ runner.temp }}/out/commands.json
             ${{ runner.temp }}/out/fixture-ref.txt
           if-no-files-found: error
@@ -362,6 +366,7 @@ jobs:
         run: |
           chmod 755 target/libexec/marsh/*-linux-arm64
           cp target/images/shell-image target/images/shell-image.build.json target/libexec/marsh/
+          cp target/images/svc-engine.tar target/images/svc-engine-image.json target/libexec/marsh/
           make dist VERSION="$VERSION" KIT_COMMANDS=target/images/commands.json
           make formula VERSION="$VERSION" FORMULA_CHANNEL="$FORMULA_CHANNEL"
           cp target/images/fixture-ref.txt target/dist/
