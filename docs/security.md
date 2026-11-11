@@ -81,7 +81,10 @@ VM for its Kit. A job sees:
 
 - the project and the guest home (no guest home if its Kit declares
   [`mount: none`](kits.md#mounts))
-- its Kit's network policy
+- its Kit's network policy, through the `sbx` proxy. Only the container's own
+  loopback (`localhost`, `127.0.0.1`, `::1`) skips the proxy (`NO_PROXY`), so a
+  test can reach a server it started; the container has its own network
+  namespace, so that reaches nothing else
 - placeholders for proxy-managed credentials; the provider keys stay with the
   `sbx` proxy. Saved agent logins live in the shared guest home.
 

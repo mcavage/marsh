@@ -78,6 +78,10 @@ pub use guest_home::{
 const STOCK_SBX_PROXY_ENDPOINT: &[u8] = b"http://gateway.docker.internal:3128";
 const CLOUD_V2_PROXY_ENDPOINT: &[u8] = b"http://192.0.2.1:8889";
 const STOCK_SBX_MCP_URL: &[u8] = b"http://mcp-gateway.docker.internal/mcp";
+/// Loopback only. A job container has its own network namespace (the default
+/// bridge), so these names reach nothing but the container itself; the Kit's
+/// network policy still applies to everything else at the VM boundary.
+const LOOPBACK_NO_PROXY: &str = "localhost,127.0.0.1,::1";
 const PROXY_VARIABLES: &[&str] = &[
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -2551,6 +2555,14 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
                     started.insert(name.to_owned(), trusted_ca_bundle.as_bytes().to_vec());
                     arguments
                         .extend(["--env".into(), format!("{name}={trusted_ca_bundle}").into()]);
+                }
+                // marsh's own constant, never the worker's NO_PROXY (refused above): without
+                // it, `NODE_USE_ENV_PROXY=1` sends a job's requests to its own loopback through
+                // the proxy, so a test talking to a server it started fails.
+                for name in ["NO_PROXY", "no_proxy"] {
+                    started.insert(name.to_owned(), LOOPBACK_NO_PROXY.as_bytes().to_vec());
+                    arguments
+                        .extend(["--env".into(), format!("{name}={LOOPBACK_NO_PROXY}").into()]);
                 }
                 arguments.extend([
                     "--mount".into(),
