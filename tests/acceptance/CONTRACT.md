@@ -257,7 +257,9 @@ make it; observations 19-21 are the scenario suites indexed at the end.
     replacement is out of scope.
 13. (`no-runtime-authority`) The job reports no Docker/containerd/SBX/daemon socket and receives no
     runtime authority environment variable. Beyond the validated session
-    identity variables, only the exact stock-SBX proxy endpoint, bounded
+    identity variables, only the exact stock-SBX proxy endpoint, marsh's own
+    loopback-only `NO_PROXY`/`no_proxy` (`localhost,127.0.0.1,::1`, never the
+    worker's), bounded
     non-secret credential-mode sentinels, validated read-only CA bundle, and
     the sandbox-local MCP Gateway URL plus sentinel name (only as a validated
     pair when enabled by stock SBX) may be added for a native workload using

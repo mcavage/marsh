@@ -584,6 +584,18 @@ fn nested_job_receives_only_exact_stock_sbx_proxy_plumbing() {
             let expected = format!("{name}={}", ca.path().display());
             assert!(environment.contains(&expected.as_str()), "{expected}");
         }
+        // Loopback bypasses the proxy, and nothing else: exactly one value per name.
+        for name in ["NO_PROXY", "no_proxy"] {
+            let set: Vec<_> = environment
+                .iter()
+                .filter(|assignment| assignment.starts_with(&format!("{name}=")))
+                .collect();
+            assert_eq!(
+                set,
+                [&format!("{name}=localhost,127.0.0.1,::1").as_str()],
+                "{name}"
+            );
+        }
         assert!(
             values(call, "--mount").contains(
                 &format!(
@@ -597,7 +609,6 @@ fn nested_job_receives_only_exact_stock_sbx_proxy_plumbing() {
         assert!(!call.iter().any(|argument| {
             argument.starts_with("ANTHROPIC_API_KEY=")
                 || argument.starts_with("OPENAI_API_KEY=")
-                || argument.starts_with("NO_PROXY=")
                 || argument.starts_with("PROXY_CA_CERT_B64=")
                 || argument.contains("docker.sock")
         }));
