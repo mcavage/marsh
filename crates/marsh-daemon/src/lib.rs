@@ -177,6 +177,28 @@ fn busy_lifecycle_refusal(message: &str) -> bool {
         || message.starts_with(BUSY_BLOCKED)
         || message.starts_with(STOCK_SBX_REMOVED)
 }
+/// The most descriptors one connection holds in marshd. An internal
+/// `Execute` (a split branch, a child job's start) holds six: three in its
+/// `ClientExecution` and three in its `ServerAttachment`; a job's
+/// `cap.sock` connection holds three (its end and the bridge's two).
+const DESCRIPTORS_PER_CONNECTION: u64 = 6;
+/// Descriptors kept outside the connection budget: the listener, journals,
+/// snapshots, worker transports.
+const DESCRIPTOR_HEADROOM: u64 = 512;
+/// The most connections a soft descriptor limit of `descriptors` affords:
+/// every connection at [`DESCRIPTORS_PER_CONNECTION`] still leaves
+/// [`DESCRIPTOR_HEADROOM`]. The daemon's connection cap is the smaller of
+/// this and what its job pool needs (`connection_budget::connection_cap_for`).
+/// Below a limit of 608 that cannot hold, and this stays at 16: there, and
+/// whenever other descriptors (spools, worker transports) run out first, it
+/// is the accept loop's retry that keeps the daemon serving.
+fn descriptor_cap(descriptors: Option<u64>) -> usize {
+    descriptors.map_or(usize::MAX, |limit| {
+        usize::try_from(limit.saturating_sub(DESCRIPTOR_HEADROOM) / DESCRIPTORS_PER_CONNECTION)
+            .unwrap_or(usize::MAX)
+            .max(16)
+    })
+}
 const DAEMON_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // Publication replies may legitimately wait behind one cold Kit preparation
 // (stock sbx 5 + build 20 + load 10 + docker 2 minutes) and the five-minute
@@ -212,24 +234,44 @@ impl Drop for DaemonConnectionPermit {
 }
 
 /// Raise the soft descriptor limit toward the hard limit (macOS defaults to
-/// 256), capped at 4096: connections, relays, and splits all hold descriptors.
-fn raise_descriptor_limit() {
+/// 256), capped at 16384: connections, relays, and splits all hold
+/// descriptors. Returns the soft limit now in effect (`None`: unlimited).
+fn raise_descriptor_limit() -> Option<u64> {
     let limit = rustix::process::getrlimit(rustix::process::Resource::Nofile);
-    // macOS refuses more than `kern.maxfilesperproc`: fall back to 4096.
-    for want in [16_384, 4096] {
+    // macOS refuses more than `kern.maxfilesperproc`: try lower steps.
+    for want in [16_384, 10_240, 8192, 4096] {
         let wanted = limit.maximum.map_or(want, |maximum| maximum.min(want));
-        if limit.current.is_none_or(|current| current >= wanted)
-            || rustix::process::setrlimit(
-                rustix::process::Resource::Nofile,
-                rustix::process::Rlimit {
-                    current: Some(wanted),
-                    maximum: limit.maximum,
-                },
-            )
-            .is_ok()
-        {
-            return;
+        if limit.current.is_none_or(|current| current >= wanted) {
+            return limit.current;
         }
+        if rustix::process::setrlimit(
+            rustix::process::Resource::Nofile,
+            rustix::process::Rlimit {
+                current: Some(wanted),
+                maximum: limit.maximum,
+            },
+        )
+        .is_ok()
+        {
+            return Some(wanted);
+        }
+    }
+    limit.current
+}
+
+/// Past the cap: tell the caller why rather than drop it silently. Best
+/// effort, and never blocking the accept loop.
+fn refuse_connection(mut stream: UnixStream, cap: usize) {
+    if stream.set_nonblocking(true).is_ok() {
+        let _ = write_frame(
+            &mut stream,
+            &PublicReply::Error {
+                code: ErrorCode::InvalidRequest,
+                message: format!(
+                    "marsh: the daemon is serving {cap} connections, its most; try again"
+                ),
+            },
+        );
     }
 }
 
@@ -3089,7 +3131,6 @@ impl DaemonStore {
         state.connections.cap(state.limits().daemon_jobs)
     }
 
-    #[cfg(test)]
     fn set_connection_cap(&self, cap: usize) {
         self.lock().connections.set_limit(cap);
     }
@@ -5147,7 +5188,7 @@ impl Server {
         build_identity: String,
     ) -> Result<Self, DaemonError> {
         let lifecycle = Lifecycle::bind(home)?;
-        raise_descriptor_limit();
+        let descriptor_cap = descriptor_cap(raise_descriptor_limit());
         let token = read_secret(&lifecycle.paths.token)?;
         let events = Arc::new(events::Bus::default());
         let splits = split::SplitEngine::open(
@@ -5160,6 +5201,7 @@ impl Server {
         );
         let store = DaemonStore::with_master_token(home, journal_home, Some(token))?;
         store.lock().journal.set_events(Arc::clone(&events));
+        store.set_connection_cap(descriptor_cap);
         for id in splits.cancelled_ids() {
             store.cancel_split(&id);
         }
@@ -5427,6 +5469,7 @@ impl Server {
     {
         self.lifecycle.listener.set_nonblocking(true)?;
         let active_connections = Arc::new(AtomicUsize::new(0));
+        let mut accept_failures = 0_u32;
         let (mut workers, mut stop_updater) = self.spawn_workers();
         self.spawn_agent_reader();
         let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
@@ -5457,10 +5500,15 @@ impl Server {
             }
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
                 Ok(stream) => {
-                    let Some(permit) =
-                        acquire_daemon_connection(&active_connections, self.store.connection_cap())
-                    else {
-                        drop(stream);
+                    if accept_failures > 0 {
+                        eprintln!(
+                            "marshd: accepting connections again after {accept_failures} failures"
+                        );
+                        accept_failures = 0;
+                    }
+                    let cap = self.store.connection_cap();
+                    let Some(permit) = acquire_daemon_connection(&active_connections, cap) else {
+                        refuse_connection(stream, cap);
                         continue;
                     };
                     let handler = self.handler();
@@ -5474,7 +5522,16 @@ impl Server {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => return Err(error.into()),
+                // Out of descriptors (EMFILE, ENFILE) or another transient
+                // failure: the pending connection waits in the backlog while
+                // descriptors are freed; serving stops for none of them.
+                Err(error) => {
+                    if accept_failures == 0 {
+                        eprintln!("marshd: cannot accept a connection: {error}; retrying");
+                    }
+                    accept_failures = accept_failures.saturating_add(1);
+                    thread::sleep(Duration::from_millis(10_u64 << accept_failures.min(5)));
+                }
             }
         }
         Ok(())

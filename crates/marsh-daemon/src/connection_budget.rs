@@ -65,12 +65,19 @@ impl Budget {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn set_limit(&self, limit: usize) {
         *self
             .limit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = limit;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn limit(&self) -> usize {
+        *self
+            .limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The connection cap now, for a job pool of `daemon_jobs`.

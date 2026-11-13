@@ -647,3 +647,132 @@ fn a_large_job_pool_runs_its_children_and_the_host_is_served() {
         daemon.server.store.lock().connections.held_total() == 0
     });
 }
+
+/// A-03: past the connection cap a new connection gets a reply saying so,
+/// and once the holders go the host is served again.
+#[test]
+fn a_connection_past_the_cap_is_told_why_and_the_daemon_serves_on() {
+    let daemon = Daemon::start(|server| server.with_connection_cap(16));
+    // Connections that never send a request hold a slot until the
+    // handshake deadline.
+    let idle = (0..16)
+        .map(|_| UnixStream::connect(&daemon.client().paths.socket).unwrap())
+        .collect::<Vec<_>>();
+    wait_until("the daemon holds every idle connection", || {
+        idle.iter().all(held)
+    });
+    let mut over = UnixStream::connect(&daemon.client().paths.socket).unwrap();
+    over.set_read_timeout(Some(PATIENCE)).unwrap();
+    let reply = read_frame::<PublicReply>(&mut over).unwrap();
+    assert!(
+        matches!(&reply, PublicReply::Error { message, .. } if message.contains("serving 16 connections")),
+        "{reply:?}"
+    );
+    drop(idle);
+    wait_until("the host is served again", || {
+        daemon.client().status(None).is_ok()
+    });
+}
+
+/// A-03: the connection cap leaves descriptors for every connection at its
+/// most, at each soft limit `raise_descriptor_limit` may settle on.
+#[test]
+fn the_connection_cap_fits_the_descriptor_limit() {
+    assert_eq!(descriptor_cap(None), usize::MAX);
+    for limit in [1024, 4096, 8192, 10_240, 16_384, 1 << 20] {
+        let cap = descriptor_cap(Some(limit));
+        assert!(
+            cap as u64 * DESCRIPTORS_PER_CONNECTION + DESCRIPTOR_HEADROOM <= limit,
+            "{limit}: {cap}"
+        );
+    }
+    // At 16384 descriptors the largest job pool gets its whole cap.
+    assert!(descriptor_cap(Some(16_384)) >= connection_budget::connection_cap_for(512));
+}
+
+/// A-03: binding sizes the job budget from the descriptor limit it settled
+/// on, so the jobs' share is three quarters of the cap the accept loop
+/// actually keeps.
+#[test]
+fn bind_sizes_the_job_budget_to_the_real_cap() {
+    let daemon = Daemon::start(|server| server);
+    let soft = rustix::process::getrlimit(rustix::process::Resource::Nofile).current;
+    let afforded = descriptor_cap(soft);
+    let store = &daemon.server.store;
+    assert_eq!(store.lock().connections.limit(), afforded);
+    assert_eq!(
+        store.connection_cap(),
+        connection_budget::connection_cap_for(64).min(afforded)
+    );
+}
+
+/// A-02/A-03: with no descriptor free, `accept` fails (EMFILE). The daemon
+/// waits and serves on once descriptors are free again.
+#[test]
+fn the_daemon_serves_on_after_running_out_of_descriptors() {
+    use std::{fmt::Write as _, io::Write as _};
+    let daemon = Daemon::start(|server| server);
+    let client = daemon.client();
+    let mut request = Vec::new();
+    write_frame(
+        &mut request,
+        &Envelope {
+            protocol: PROTOCOL.into(),
+            token: client.token.clone(),
+            body: PublicRequest::Ping,
+        },
+    )
+    .unwrap();
+    // A caller in another process (this one will have no descriptor to
+    // connect with): it connects when told, then prints the reply's length.
+    let script = "import socket, sys\n\
+        sys.stdin.readline()\n\
+        s = socket.socket(socket.AF_UNIX)\n\
+        s.settimeout(60)\n\
+        s.connect(sys.argv[1])\n\
+        s.sendall(bytes.fromhex(sys.argv[2]))\n\
+        try:\n    print(len(s.recv(4)))\n\
+        except OSError:\n    print(0)\n";
+    let mut caller = fenced(|| {
+        Command::new("python3")
+            .args(["-c", script])
+            .arg(&client.paths.socket)
+            .arg(request.iter().fold(String::new(), |mut hex, byte| {
+                let _ = write!(hex, "{byte:02x}");
+                hex
+            }))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    });
+    let mut go = caller.stdin.take().unwrap();
+    let nofile = rustix::process::Resource::Nofile;
+    let limit = rustix::process::getrlimit(nofile);
+    let lowest_free = {
+        let probe = fs::File::open("/dev/null").unwrap();
+        u64::try_from(std::os::fd::AsRawFd::as_raw_fd(&probe)).unwrap()
+    };
+    rustix::process::setrlimit(
+        nofile,
+        rustix::process::Rlimit {
+            current: Some(lowest_free),
+            maximum: limit.maximum,
+        },
+    )
+    .unwrap();
+    go.write_all(b"go\n").unwrap();
+    // The connection waits in the backlog while every accept fails.
+    thread::sleep(Duration::from_millis(500));
+    let starved = daemon.task.as_ref().unwrap().is_finished();
+    rustix::process::setrlimit(nofile, limit).unwrap();
+    assert!(!starved, "the daemon stopped serving at EMFILE");
+    // Linux leaves the connection queued, so it is answered now; macOS
+    // drops a connection whose accept failed, and the caller sees it close.
+    let output = fenced(|| caller.wait_with_output()).unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let replied = String::from_utf8_lossy(&output.stdout);
+    assert!(matches!(replied.trim(), "4" | "0"), "{replied}");
+    daemon.answers();
+    assert!(!daemon.task.as_ref().unwrap().is_finished());
+}
