@@ -349,6 +349,19 @@ impl Daemon {
     }
 }
 
+/// `bytes` zero bytes of split input, in frames the daemon accepts, until
+/// it stops reading (a refusal).
+fn input(stream: &mut UnixStream, bytes: usize) {
+    for chunk in vec![0_u8; bytes].chunks(SHELL_STDIN_CHUNK) {
+        let frame = AttachmentFrame::Stdin {
+            bytes: chunk.to_vec(),
+        };
+        if write_frame(stream, &frame).is_err() {
+            return;
+        }
+    }
+}
+
 /// No reply yet: the daemon is still holding `stream` open.
 fn held(stream: &UnixStream) -> bool {
     let mut stream = stream;
@@ -672,6 +685,33 @@ fn a_connection_past_the_cap_is_told_why_and_the_daemon_serves_on() {
     wait_until("the host is served again", || {
         daemon.client().status(None).is_ok()
     });
+}
+
+/// A-03: the input all splits hold together is bounded; a create past it
+/// is refused, and the daemon still answers.
+#[test]
+fn split_input_held_by_all_splits_is_bounded() {
+    let daemon = Daemon::start(|server| server);
+    daemon.server.splits.set_spool_total(1 << 20);
+    let (job, token) = daemon.job();
+    let (_slot, mut first) = daemon.held_split(&job, &token).unwrap();
+    input(&mut first, 900 << 10);
+    assert!(held(&first));
+    let (_slot, mut second) = daemon.held_split(&job, &token).unwrap();
+    input(&mut second, 200 << 10);
+    // macOS refuses the option (EINVAL) once the peer closed.
+    let _ = second.set_read_timeout(Some(PATIENCE));
+    let reply = read_frame::<PublicReply>(&mut second).unwrap();
+    assert!(
+        matches!(&reply, PublicReply::Error { message, .. } if message.contains("hold 1 MiB of input")),
+        "{reply:?}"
+    );
+    daemon.answers();
+    // The first split's input is released when its create ends.
+    drop(first);
+    let (_slot, mut third) = daemon.held_split(&job, &token).unwrap();
+    input(&mut third, 900 << 10);
+    wait_until("the first split's input is released", || held(&third));
 }
 
 /// A-03: the connection cap leaves descriptors for every connection at its

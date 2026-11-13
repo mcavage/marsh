@@ -28,6 +28,8 @@ const MAX_BRANCHES: usize = 16;
 const MAX_DEPTH: u32 = 3;
 const POOL: usize = 16;
 const SPOOL_LIMIT: usize = 64 << 20;
+/// Split input all running and spooling splits may hold together.
+const SPOOL_TOTAL: usize = 256 << 20;
 const OUTPUT_LIMIT: usize = 16 << 20;
 const LEASE: Duration = Duration::from_mins(1);
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
@@ -524,6 +526,19 @@ pub struct SplitEngine {
     saving: Mutex<()>,
     /// Lanes whose services are still to be dropped (C3).
     pub lane_drops: crate::lane_services::LaneDrops,
+    /// Bytes of split input held now, at most `spool_total`.
+    spooled: AtomicUsize,
+    /// [`SPOOL_TOTAL`]; tests lower it.
+    spool_total: AtomicUsize,
+}
+
+/// Split input counted in the engine's `spooled`, released when dropped.
+struct Spooled<'a>(&'a AtomicUsize, usize);
+
+impl Drop for Spooled<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(self.1, Ordering::AcqRel);
+    }
 }
 
 /// Kept splits are removed this long after they were kept.
@@ -661,6 +676,8 @@ impl SplitEngine {
             kept_retention_ms: AtomicU64::new(KEPT_RETENTION_MS),
             roots: Mutex::new(roots),
             saving: Mutex::new(()),
+            spooled: AtomicUsize::new(0),
+            spool_total: AtomicUsize::new(SPOOL_TOTAL),
             lane_drops: crate::lane_services::LaneDrops::open(journal_home),
         });
         engine.save();
@@ -1087,6 +1104,12 @@ impl SplitEngine {
         for record in old {
             Self::remove_files(&record);
         }
+    }
+
+    /// Lower the input all splits may hold together (tests).
+    #[cfg(test)]
+    pub(crate) fn set_spool_total(&self, bytes: usize) {
+        self.spool_total.store(bytes, Ordering::Release);
     }
 
     /// Splits whose runtime is still held (tests).
@@ -1928,16 +1951,30 @@ impl SplitEngine {
         // anything is: a failure here leaves no fork files or record behind.
         let mut reader = stream.try_clone()?;
         let facts = plan.checkpoint.take();
-        // Spool stdin to EOF before the snapshot.
+        // Spool stdin to EOF before the snapshot. What it holds counts
+        // toward every split's input until this create returns.
         stream.set_read_timeout(None)?;
         let mut spool = Vec::new();
+        let mut spooled = Spooled(&self.spooled, 0);
         loop {
             match read_frame::<AttachmentFrame>(&mut stream) {
                 Ok(AttachmentFrame::Stdin { bytes }) => {
-                    spool.extend_from_slice(&bytes);
-                    if spool.len() > SPOOL_LIMIT {
+                    if spool.len() + bytes.len() > SPOOL_LIMIT {
                         return error(&mut stream, "split: input exceeds the 64 MiB spool");
                     }
+                    let total = self.spool_total.load(Ordering::Acquire);
+                    if self.spooled.fetch_add(bytes.len(), Ordering::AcqRel) + bytes.len() > total {
+                        self.spooled.fetch_sub(bytes.len(), Ordering::AcqRel);
+                        return error(
+                            &mut stream,
+                            format!(
+                                "split: running splits hold {} MiB of input, the most; try again when one ends",
+                                total >> 20
+                            ),
+                        );
+                    }
+                    spooled.1 += bytes.len();
+                    spool.extend_from_slice(&bytes);
                 }
                 Ok(AttachmentFrame::StdinEof) => break,
                 Ok(_) => return error(&mut stream, "split: unexpected input frame"),
