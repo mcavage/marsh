@@ -310,7 +310,13 @@ jobs:
         with:
           python-version: '3.14'
           update-environment: false
+      # tests/release/test_install.py lints scripts/install.sh with it, and
+      # skips that check only where shellcheck is missing and not required.
+      - name: shellcheck
+        run: command -v shellcheck || { sudo apt-get update -q && sudo apt-get install -y -q shellcheck; }
       - name: make test-tools (publisher, tool self-tests)
+        env:
+          MARSH_REQUIRE_SHELLCHECK: '1'
         run: make test-tools HARNESS_JOBS="$(nproc)" PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
 
   macos-unit:

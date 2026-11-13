@@ -56,7 +56,7 @@ VERSION=${VERSION#v}
 
 # version_ge A B: true when dotted version A >= B (numeric fields).
 version_ge() {
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2046 # split the dotted versions into fields
   set -- $(printf '%s %s' "$1" "$2" | tr '.' ' ')
   [ "$1" -gt "$4" ] && return 0; [ "$1" -lt "$4" ] && return 1
   [ "$2" -gt "$5" ] && return 0; [ "$2" -lt "$5" ] && return 1
