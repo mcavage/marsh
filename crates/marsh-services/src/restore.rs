@@ -487,7 +487,7 @@ mod linux {
     const MAX_REPLY_BYTES: usize = 900 * 1024;
     /// The engine's compose version, for labels, when `compose version` fails:
     /// the upstream version of `packaging/svc-engine/Dockerfile`'s
-    /// `docker-compose-plugin` pin (tests/release/test_compose_pins.py).
+    /// `docker-compose-plugin` pin (`tests/release/test_compose_pins.py`).
     const COMPOSE_FALLBACK_VERSION: &str = "5.7.1";
     /// Unprivileged fallback when the lane folder is owned by root.
     const NOBODY: u32 = 65534;
