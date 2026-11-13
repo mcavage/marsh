@@ -119,8 +119,7 @@ pub(super) fn detach_locked(state: &mut State, session: &str) -> Result<(), Daem
     Ok(())
 }
 
-/// Detached sessions whose records are kept, newest first out: `status` can
-/// still name a session that just detached.
+/// Detached sessions whose records are kept; the oldest go first.
 const DETACHED_KEPT: usize = 256;
 
 /// Record that `session` detached (once: call it only when it became
