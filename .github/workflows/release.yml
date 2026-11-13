@@ -177,7 +177,7 @@ jobs:
             push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
             workflow_dispatch)
               # A manual run publishes images (a nightly, or a rehearsal's
-              # :draft): main only.
+              # :draft) and gets the release environment: main only.
               [ "$GITHUB_REF" = refs/heads/main ] || {
                 echo "::error::run the Release workflow by hand on main only (this is $GITHUB_REF)"; exit 1; }
               if [ -n "$INPUT" ]; then channel=stable; version=${INPUT#v}; draft=true

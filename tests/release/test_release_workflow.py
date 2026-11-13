@@ -50,7 +50,7 @@ def evaluate(expression, context):
     text = re.sub(r"\b(needs|github|steps|secrets|inputs)\.[\w.-]+", lambda match: repr(context.get(match.group(0))),
                   text)
     text = text.replace("&&", " and ").replace("||", " or ").replace("format(", "fmt(")
-    if re.search(r"[!$]", text):
+    if re.search(r"!(?!=)|\$", text):
         raise AssertionError(f"unsupported expression: {expression}")
     return eval(text, {"__builtins__": {}}, {"True": True, "fmt": str.format})  # noqa: S307 - our own workflow text
 
@@ -257,12 +257,18 @@ class PublishingSecrets(unittest.TestCase):
                 seen += 1
                 environment = job.get("environment")
                 self.assertIsNotNone(environment, f"{path.name} job {name} reads {used} outside an environment")
-                self.assertIn("'release'" if "${{" in str(environment) else "release", str(environment),
-                              f"{path.name} job {name}")
-                if "pull_request" in data["on"]:
-                    # A pull request run must not get the environment.
-                    self.assertIn("github.event_name != 'pull_request'", str(environment), f"{path.name} job {name}")
+                # Every trigger of the workflow gets the release environment,
+                # except a pull request, which gets none.
+                for event in data["on"]:
+                    got = group(str(environment), {"github.event_name": event})
+                    want = "" if event == "pull_request" else "release"
+                    self.assertEqual(got, want, f"{path.name} job {name} on {event}")
         self.assertGreaterEqual(seen, 6)
+
+    def test_pruning_never_falls_back_to_the_push_token(self):
+        text = (WORKFLOWS / "prune-nightlies.yml").read_text()
+        self.assertIsNone(re.search(r"secrets\.DOCKERHUB_TOKEN\b", text))
+        self.assertIn("secrets.DOCKERHUB_PRUNE_TOKEN", text)
 
     def test_ci_never_reads_a_publishing_secret(self):
         text = (WORKFLOWS / "ci.yml").read_text()
