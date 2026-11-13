@@ -58,6 +58,25 @@ def group(template, context):
     return re.sub(r"\$\{\{(.*?)\}\}", lambda match: str(evaluate(match.group(1), context)), template)
 
 
+def step_script(workflow, job, name):
+    """The run: script of a workflow step, found by its id or name."""
+    for step in load(workflow)["jobs"][job]["steps"]:
+        if name in (step.get("id"), step.get("name")):
+            assert "${{" not in step["run"], f"{workflow} {job} {name} must take its inputs from env"
+            return step["run"]
+    raise AssertionError(f"no step {name} in {workflow} job {job}")
+
+
+def run_bash(script, cwd, env):
+    """Run a step script the way GitHub runs a bash step."""
+    path = pathlib.Path(cwd) / ".step.sh"
+    path.write_text(script)
+    return subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(path)], cwd=cwd,
+                          env={"PATH": os.environ["PATH"], "HOME": str(cwd), "GIT_CONFIG_SYSTEM": os.devnull,
+                               "GIT_CONFIG_GLOBAL": os.devnull, **env},
+                          capture_output=True, text=True, timeout=60)
+
+
 def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
                           env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
@@ -116,9 +135,13 @@ class ReleaseGate(unittest.TestCase):
         self.assertFalse(evaluate(condition, {"needs.version.result": "skipped", "needs.version.outputs.stages": "",
                                               "needs.ci.result": "skipped"}))
 
-    def test_each_stable_tag_has_its_own_release_queue(self):
-        template = self.release["concurrency"]["group"]
-        self.assertIs(self.release["concurrency"]["cancel-in-progress"], False)
+    def test_stable_tags_share_one_queue_that_keeps_every_pending_run(self):
+        concurrency = self.release["concurrency"]
+        template = concurrency["group"]
+        # One run at a time, none cancelled, and every pending run kept (the
+        # default queue keeps one pending run and drops the older one).
+        self.assertIs(concurrency["cancel-in-progress"], False)
+        self.assertEqual(concurrency.get("queue"), "max")
         groups = {
             "tag 1.2.3": group(template, {"github.event_name": "push", "github.ref_name": "v1.2.3"}),
             "tag 1.2.4": group(template, {"github.event_name": "push", "github.ref_name": "v1.2.4"}),
@@ -130,9 +153,10 @@ class ReleaseGate(unittest.TestCase):
             "commit 7": group(template, {"github.event_name": "workflow_run", "github.run_id": 7}),
             "commit 8": group(template, {"github.event_name": "workflow_run", "github.run_id": 8}),
         }
-        self.assertEqual(groups["tag 1.2.3"], "release-stable-v1.2.3")
+        self.assertEqual(groups["tag 1.2.3"], "release-stable")
+        self.assertEqual(groups["tag 1.2.4"], groups["tag 1.2.3"])
         self.assertEqual(groups["manual nightly"], groups["nightly"])
-        distinct = [groups[name] for name in ("tag 1.2.3", "tag 1.2.4", "rehearsal", "nightly", "commit 7", "commit 8")]
+        distinct = [groups[name] for name in ("tag 1.2.3", "rehearsal", "nightly", "commit 7", "commit 8")]
         self.assertEqual(len(set(distinct)), len(distinct), groups)
 
     def test_a_call_checks_out_the_requested_commit_in_every_ci_job(self):
@@ -206,6 +230,7 @@ class VersionStep(unittest.TestCase):
         self.assertEqual((out["channel"], out["version"], out["draft"], out["stages"], out["sha"]),
                          ("stable", "1.2.3", "false", "all", self.main))
         self.assertEqual(out["extra_tags"], "1.2.3 latest")
+        self.assertEqual(out["newest"], "true")
 
     def test_a_tag_off_main_is_refused(self):
         result, out = self.run_step(self.side, "push", "refs/tags/v1.2.3")
@@ -213,10 +238,83 @@ class VersionStep(unittest.TestCase):
         self.assertIn("is not on main", result.stdout + result.stderr)
         self.assertNotIn("stages", out)
 
+    def test_an_older_version_tagged_later_moves_nothing_users_follow(self):
+        git(self.work, "tag", "v1.2.4", self.main)
+        git(self.work, "tag", "v1.2.3", self.main)
+        _, newest = self.run_step(self.main, "push", "refs/tags/v1.2.4")
+        self.assertEqual((newest["newest"], newest["image_tag"], newest["extra_tags"]), ("true", "", "1.2.4 latest"))
+        result, older = self.run_step(self.main, "push", "refs/tags/v1.2.3")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((older["channel"], older["stages"], older["newest"]), ("stable", "all", "false"))
+        # Its images get only its version (no :latest, :release or :repaired).
+        self.assertEqual((older["image_tag"], older["extra_tags"]), ("1.2.3", "1.2.3"))
+        self.assertIn("older than v1.2.4", result.stdout)
+
     def test_a_tag_that_is_not_a_version_is_refused(self):
         result, _ = self.run_step(self.main, "push", "refs/tags/v1.2.3.4")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bad version", result.stdout + result.stderr)
+
+
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class Publication(unittest.TestCase):
+    """The release and tap steps never move "Latest" or the formula back to an older version."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def release(self, newest, draft="false"):
+        log = self.tmp / "gh.log"
+        log.write_text("")
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        (bin_dir / "gh").write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{log}"\n'
+                                    '[ "$1 $2" = "release create" ]\n')
+        (bin_dir / "gh").chmod(0o755)
+        result = run_bash(step_script("release.yml", "release", "Create the GitHub Release"), self.tmp, {
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "GITHUB_REPOSITORY": "example/marsh",
+            "VERSION": "1.2.3", "CHANNEL": "stable", "FORMULA": "marsh", "DRAFT": draft, "NEWEST": newest,
+            "SHA": "a" * 40, "GH_TOKEN": "unused"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return log.read_text().split()
+
+    def test_only_the_newest_version_is_marked_latest(self):
+        self.assertIn("--latest", self.release("true"))
+        args = self.release("false")
+        self.assertIn("--latest=false", args)
+        self.assertNotIn("--latest", args)
+
+    def tap(self, version, newest):
+        dist = self.tmp / f"run-{version}" / "dist"
+        dist.mkdir(parents=True)
+        (dist / "marsh.rb").write_text(f'class Marsh < Formula\n  version "{version}"\nend\n')
+        result = run_bash(step_script("release.yml", "tap", "Update mcavage/homebrew-tap"), dist.parent, {
+            "VERSION": version, "FORMULA": "marsh", "NEWEST": newest, "TAP_TOKEN": "token",
+            "GIT_CONFIG_GLOBAL": str(self.gitconfig)})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    def test_an_older_release_finishing_last_leaves_the_newer_formula(self):
+        # The tap step itself, against a local bare repository standing in for
+        # mcavage/homebrew-tap.
+        tap = self.tmp / "tap.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(tap))
+        seed = self.tmp / "seed"
+        git(self.tmp, "clone", "-q", str(tap), str(seed))
+        (seed / "README").write_text("tap\n")
+        git(seed, "add", "README")
+        git(seed, "commit", "-q", "-m", "seed")
+        git(seed, "push", "-q", "origin", "HEAD:main")
+        self.gitconfig = self.tmp / "gitconfig"
+        self.gitconfig.write_text(f'[url "{tap}"]\n\tinsteadOf = https://x-access-token:token@github.com/mcavage/homebrew-tap.git\n'
+                                  '[advice]\n\tdetachedHead = false\n')
+        self.tap("1.2.4", "true")
+        result = self.tap("1.2.3", "false")
+        self.assertIn("formula stays", result.stdout)
+        formula = subprocess.run(["git", "--git-dir", str(tap), "show", "main:Formula/marsh.rb"],
+                                 capture_output=True, text=True, check=True).stdout
+        self.assertIn('version "1.2.4"', formula)
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")

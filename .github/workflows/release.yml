@@ -79,15 +79,19 @@ on:
         required: false
 permissions:
   contents: read
-# GitHub keeps one pending run per group and drops an older pending one, so
-# each stable tag has its own group: a tag pushed while another release (with
-# its full CI run) is going is never dropped. Rehearsals and nightlies each
-# keep one queue, where only the newest pending run matters. Per-commit runs
-# classify independently, so an unrelated commit cannot replace a pending
-# image publication. Only their selected image jobs share a queue (below).
+# Stable tags share one queue, so stable releases run one at a time, in the
+# order their tags were pushed, and never overwrite each other's :latest, the
+# GitHub "Latest" mark or the formula out of order. queue: max keeps every
+# pending run (the default keeps one and cancels the older pending run, which
+# would silently drop a tag). An older version tagged after a newer one is
+# handled in the version step. Rehearsals and nightlies have their own
+# queues. Per-commit runs classify independently, so an unrelated commit
+# cannot replace a pending image publication. Only their selected image jobs
+# share a queue (below).
 concurrency:
-  group: release-${{ github.event_name == 'push' && format('stable-{0}', github.ref_name) || github.event.inputs.version && 'rehearsal' || github.event_name == 'workflow_run' && format('commit-{0}', github.run_id) || 'nightly' }}
+  group: release-${{ github.event_name == 'push' && 'stable' || github.event.inputs.version && 'rehearsal' || github.event_name == 'workflow_run' && format('commit-{0}', github.run_id) || 'nightly' }}
   cancel-in-progress: false
+  queue: max
 env:
   KIT_REPOSITORY_PREFIX: docker.io/mcavage
   SHELL_IMAGE_REPOSITORY: docker.io/mcavage/marsh-shell-template
@@ -109,6 +113,7 @@ jobs:
       channel: ${{ steps.v.outputs.channel }}
       version: ${{ steps.v.outputs.version }}
       draft: ${{ steps.v.outputs.draft }}
+      newest: ${{ steps.v.outputs.newest }}
       sha: ${{ steps.v.outputs.sha }}
       formula: ${{ steps.v.outputs.formula }}
       image_tag: ${{ steps.v.outputs.image_tag }}
@@ -128,7 +133,7 @@ jobs:
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
-          promote_kits=false; stable_contracts=
+          promote_kits=false; stable_contracts=; newest=true
           # all: every stage. images: the Kit images only (a per-commit run).
           # none: nothing to publish.
           stages=all
@@ -173,6 +178,16 @@ jobs:
               git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${sha:0:7} is not on main"; exit 1; }
             fi
             formula=marsh; image_tag=; extra_tags="$version latest"
+            # A tag for an older version than one already tagged (a fix for
+            # an older line, or tags pushed out of order) publishes only its
+            # own version: :latest, the moving image tags (:release, :repaired),
+            # the GitHub "Latest" mark and the formula stay on the newest.
+            highest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+            if [ "$draft" = false ] && [ -n "$highest" ] && [ "$highest" != "v$version" ] &&
+               [ "$(printf '%s\n' "$highest" "v$version" | sort -V | tail -1)" = "$highest" ]; then
+              echo "::notice::v$version is older than $highest: publishing its version tags only"
+              newest=false; image_tag=$version; extra_tags=$version
+            fi
             # A draft rehearses the pipeline and announces nothing, so it must not
             # move a tag that users or the next release read (:release, :repaired,
             # :latest) and makes no version tag. Its images get the moving tag
@@ -198,7 +213,7 @@ jobs:
           fi
           {
             echo "stages=$stages"
-            echo "channel=$channel"; echo "version=$version"; echo "draft=$draft"; echo "sha=$sha"
+            echo "channel=$channel"; echo "version=$version"; echo "draft=$draft"; echo "sha=$sha"; echo "newest=$newest"
             echo "formula=$formula"; echo "image_tag=$image_tag"; echo "extra_tags=$extra_tags"
             echo "promote_kits=$promote_kits"; echo "stable_contracts=$stable_contracts"
           } >> "$GITHUB_OUTPUT"
@@ -423,6 +438,7 @@ jobs:
       CHANNEL: ${{ needs.version.outputs.channel }}
       FORMULA: ${{ needs.version.outputs.formula }}
       DRAFT: ${{ needs.version.outputs.draft }}
+      NEWEST: ${{ needs.version.outputs.newest }}
       SHA: ${{ needs.version.outputs.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -453,7 +469,9 @@ jobs:
                    --notes "Nightly build of ${SHA:0:7}. Install: brew install mcavage/tap/marsh-nightly")
           else
             args+=(--title "marsh $VERSION" --generate-notes)
-            if [ "$DRAFT" = true ]; then args+=(--draft); fi
+            if [ "$DRAFT" = true ]; then args+=(--draft)
+            elif [ "$NEWEST" = true ]; then args+=(--latest)
+            else args+=(--latest=false); fi
           fi
           files=("dist/marsh-$VERSION-darwin-arm64.tar.gz"
                  "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256"
@@ -496,6 +514,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       FORMULA: ${{ needs.version.outputs.formula }}
+      NEWEST: ${{ needs.version.outputs.newest }}
       TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -512,6 +531,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then echo "HOMEBREW_TAP_TOKEN not set; skipping the tap"; exit 0; fi
+          if [ "$NEWEST" != true ]; then echo "$VERSION is older than the newest release; the $FORMULA formula stays"; exit 0; fi
           case $FORMULA in marsh) class=Marsh;; marsh-nightly) class=MarshNightly;; *) echo "unknown formula $FORMULA" >&2; exit 1;; esac
           file="Formula/$FORMULA.rb"
           grep -q "^class $class < Formula\$" "dist/$FORMULA.rb" || { echo "dist/$FORMULA.rb is not the $FORMULA formula" >&2; exit 1; }
