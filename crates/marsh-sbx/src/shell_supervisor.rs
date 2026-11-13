@@ -18,7 +18,7 @@ use marsh_contracts::{JobSignal, TerminalSize};
 use marsh_runtime::{AttachedProcess, Attachment, AttachmentControl};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::{self, Read, Write},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
@@ -252,6 +252,8 @@ struct AttemptState {
     exit: Option<i32>,
     cleaned: Option<Result<(), String>>,
     done: BTreeMap<u64, Option<String>>,
+    /// Control requests waiting for their `Done`: only theirs are kept.
+    awaiting: BTreeSet<u64>,
     lost: bool,
     cancelled: bool,
 }
@@ -316,13 +318,20 @@ impl Supervisor {
         let (ready_send, ready) = mpsc::sync_channel(1);
         let reader = Arc::clone(&supervisor);
         thread::spawn(move || {
+            // However the reader ends (a panic too), the transport is lost.
+            struct Lose(Arc<Supervisor>);
+            impl Drop for Lose {
+                fn drop(&mut self) {
+                    self.0.lose();
+                }
+            }
+            let reader = Lose(reader);
             let first = read_frame::<Up>(&mut stdout);
-            let ok = matches!(&first, Ok((Up::Ready { generation }, _)) if *generation == reader.generation);
+            let ok = matches!(&first, Ok((Up::Ready { generation }, _)) if *generation == reader.0.generation);
             let _ = ready_send.send(ok);
             if ok {
-                reader.read_loop(&mut stdout);
+                reader.0.read_loop(&mut stdout);
             }
-            reader.lose();
         });
         if let Err(error) = supervisor.send(&Down::Hello { generation }, &[]) {
             supervisor.shutdown();
@@ -455,31 +464,44 @@ impl Supervisor {
                 | Up::Done { attempt, .. } => *attempt,
                 Up::Ready { .. } | Up::Pong { .. } => return,
             };
+            if let Up::Output { stream, .. } | Up::OutputEof { stream, .. } = &frame
+                && !matches!(*stream, STDOUT | STDERR)
+            {
+                // Not a stream of this protocol: the transport is broken.
+                return;
+            }
             let Some(shared) = lock(&self.attempts).get(&attempt).cloned() else {
                 continue;
             };
+            let mut violated = false;
             shared.update(|state| match frame {
                 Up::Started { .. } => state.started = Some(Ok(())),
                 Up::StartFailed { message, .. } => state.started = Some(Err(message)),
                 Up::Output { stream, .. } => {
-                    if let Some(queue) = state.output.get_mut(usize::from(stream) - 1) {
+                    let queue = &mut state.output[usize::from(stream) - 1];
+                    // Output beyond the credit the host gave is never
+                    // buffered: the supervisor broke the protocol.
+                    if queue.len() >= WINDOW {
+                        violated = true;
+                    } else {
                         queue.push_back(payload);
                     }
                 }
-                Up::OutputEof { stream, .. } => {
-                    if let Some(eof) = state.output_eof.get_mut(usize::from(stream) - 1) {
-                        *eof = true;
-                    }
-                }
+                Up::OutputEof { stream, .. } => state.output_eof[usize::from(stream) - 1] = true,
                 Up::InputCredit { .. } => state.input_credit = (state.input_credit + 1).min(WINDOW),
                 Up::InputClosed { .. } => state.input_closed = true,
                 Up::Exited { code, .. } => state.exit = Some(code),
                 Up::Cleaned { error, .. } => state.cleaned = Some(error.map_or(Ok(()), Err)),
                 Up::Done { seq, error, .. } => {
-                    state.done.insert(seq, error);
+                    if state.awaiting.contains(&seq) {
+                        state.done.insert(seq, error);
+                    }
                 }
                 Up::Ready { .. } | Up::Pong { .. } => {}
             });
+            if violated {
+                return;
+            }
         }
     }
 
@@ -590,6 +612,15 @@ impl Handle {
 
     fn control(&self, op: ControlOp, timeout: Duration) -> io::Result<()> {
         let seq = self.supervisor.next_seq.fetch_add(1, Ordering::Relaxed);
+        lock(&self.shared.state).awaiting.insert(seq);
+        let result = self.control_reply(seq, op, timeout);
+        let mut state = lock(&self.shared.state);
+        state.awaiting.remove(&seq);
+        state.done.remove(&seq);
+        result
+    }
+
+    fn control_reply(&self, seq: u64, op: ControlOp, timeout: Duration) -> io::Result<()> {
         self.supervisor.send(
             &Down::Control {
                 attempt: self.attempt,
@@ -862,5 +893,138 @@ impl AttachmentControl for Control {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! B-04: the host buffers only what it gave the guest credit for.
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    struct Idle;
+
+    impl AttachedProcess for Idle {
+        fn wait(&mut self) -> io::Result<i32> {
+            Ok(0)
+        }
+        fn try_wait(&mut self) -> io::Result<Option<i32>> {
+            Ok(None)
+        }
+        fn terminate(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A supervisor transport whose guest end the test drives, with one
+    /// child attempt started.
+    fn started() -> (Arc<Supervisor>, UnixStream, Attachment, u64) {
+        let (host, mut guest) = UnixStream::pair().unwrap();
+        let mut reader = guest.try_clone().unwrap();
+        let answer = thread::spawn(move || {
+            let (Down::Hello { generation }, _) = read_frame(&mut reader).unwrap() else {
+                panic!("no hello")
+            };
+            write_frame(&mut guest, &Up::Ready { generation }, &[]).unwrap();
+            guest
+        });
+        let supervisor = Supervisor::start(
+            Attachment {
+                stdin: Box::new(host.try_clone().unwrap()),
+                stdout: Box::new(host),
+                stderr: Box::new(io::empty()),
+                process: Box::new(Idle),
+                control: marsh_runtime::no_attachment_control(),
+            },
+            7,
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        let mut guest = answer.join().unwrap();
+        let child = supervisor
+            .spawn(StartSpec {
+                kind: StartKind::Child { uid: 1, gid: 1 },
+                program: b"true".to_vec(),
+                arguments: Vec::new(),
+                environment: Vec::new(),
+                working_directory: b"/".to_vec(),
+            })
+            .unwrap();
+        let (Down::Start { attempt, .. }, _) = read_frame(&mut guest).unwrap() else {
+            panic!("no start")
+        };
+        write_frame(&mut guest, &Up::Started { attempt }, &[]).unwrap();
+        (supervisor, guest, child, attempt)
+    }
+
+    fn lost_within(supervisor: &Supervisor) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while supervisor.alive.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "the transport was never lost");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn output_past_its_credit_loses_the_transport_instead_of_queueing() {
+        let (supervisor, mut guest, child, attempt) = started();
+        let chunk = vec![b'x'; CHUNK];
+        // The whole window is buffered while nobody reads it.
+        for _ in 0..WINDOW {
+            let frame = Up::Output {
+                attempt,
+                stream: STDOUT,
+            };
+            write_frame(&mut guest, &frame, &chunk).unwrap();
+        }
+        let ping = Arc::clone(&supervisor);
+        thread::spawn(move || ping.ping(Duration::from_secs(30)));
+        let (Down::Ping { generation, nonce }, _) = read_frame(&mut guest).unwrap() else {
+            panic!("no ping")
+        };
+        write_frame(&mut guest, &Up::Pong { generation, nonce }, &[]).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert!(supervisor.alive(), "a full window is within the protocol");
+        // One chunk more than the credit is a broken guest.
+        let frame = Up::Output {
+            attempt,
+            stream: STDOUT,
+        };
+        let _ = write_frame(&mut guest, &frame, &chunk);
+        lost_within(&supervisor);
+        drop(child);
+    }
+
+    #[test]
+    fn a_stream_outside_the_protocol_loses_the_transport_without_a_panic() {
+        let (supervisor, mut guest, child, attempt) = started();
+        write_frame(&mut guest, &Up::Output { attempt, stream: 0 }, b"x").unwrap();
+        lost_within(&supervisor);
+        drop(child);
+    }
+
+    #[test]
+    fn unrequested_done_frames_are_not_kept() {
+        let (supervisor, mut guest, child, attempt) = started();
+        for seq in 1_000..2_000 {
+            let frame = Up::Done {
+                attempt,
+                seq,
+                error: None,
+            };
+            write_frame(&mut guest, &frame, &[]).unwrap();
+        }
+        let ping = Arc::clone(&supervisor);
+        thread::spawn(move || ping.ping(Duration::from_secs(30)));
+        let (Down::Ping { generation, nonce }, _) = read_frame(&mut guest).unwrap() else {
+            panic!("no ping")
+        };
+        write_frame(&mut guest, &Up::Pong { generation, nonce }, &[]).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        let attempts = lock(&supervisor.attempts);
+        let kept = lock(&attempts[&attempt].state).done.len();
+        assert_eq!(kept, 0);
+        drop(attempts);
+        drop(child);
     }
 }
