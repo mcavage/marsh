@@ -199,7 +199,11 @@ TLC checks the model. Review and test the corresponding Rust code too.
 
 Managed inputs use explicit versions, package lockfiles and immutable image
 digests. Update those inputs and run the relevant builds/tests. Renovate sends
-updates through normal CI and merges passing PRs automatically. A new Docker
+updates through normal CI and merges passing PRs automatically. A new release
+waits 3 days (6 hours for the Kits' ACP adapters and Pi) before Renovate
+proposes it, except from the trusted vendors Docker, DHI, Anthropic and OpenAI,
+whose releases are taken at once (the list is in
+[build inputs](docs/design/supply-chain.md#keeping-pins-current)). A new Docker
 Compose version is the exception: Renovate moves the services engine's
 `docker-compose-plugin` pin in its own PR, which fails
 `tests/release/test_compose_pins.py` until you move the SHA-256-pinned copies

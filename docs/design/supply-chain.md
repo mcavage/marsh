@@ -17,6 +17,16 @@ explicit DHI apt-package versions, and the agent versions declared by the Kits.
 `.github/renovate.json5` describes the custom version locations and grouping;
 `.github/workflows/renovate.yml` runs Renovate hourly and after successful CI.
 
+A new release waits a minimum age before Renovate proposes it: 3 days by
+default, 6 hours for the Kits' ACP adapters and Pi. Releases from trusted
+vendors are taken as soon as they are published: Docker (its Engine, CLI,
+containerd, Compose and Buildx apt packages, and `docker/*` images), DHI
+(`dhi.io` images and its apt packages), Anthropic (`@anthropic-ai/*`, Claude
+Code) and OpenAI (`openai/codex`, `@openai/*`). The exemption covers packages
+and images only; GitHub Actions, including `docker/*` actions, keep the default.
+`tests/release/renovate-policy.mjs` checks both sides with Renovate's own rule
+matching.
+
 Updates go through normal CI builds and tests and merge automatically when
 those checks pass. To update a dependency manually, edit its version or lockfile
 and run the relevant build/tests. No generated metadata needs to be committed.

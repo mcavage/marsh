@@ -20,7 +20,8 @@
   // already merged by another PR.
   rebaseWhen: "behind-base-branch",
   // Avoid just-published releases (a compromised release is usually pulled
-  // within days). Security updates ignore this.
+  // within days). Security updates ignore this, and so do the trusted vendors
+  // (the last packageRules entry).
   minimumReleaseAge: "3 days",
   internalChecksFilter: "strict",
   ignorePaths: ["vendor/**", "packaging/dhi-notices/**", "**/node_modules/**", "docs/**"],
@@ -194,9 +195,7 @@
       matchPackageNames: ["@anthropic-ai/claude-code", "openai/codex"],
       // Fast follow: agent CLIs release several times a day, and a merged bump
       // reaches stable users' Kits through :latest within the day (release.yml).
-      // The main risk is a release pulled soon after publication; 6 hours
-      // covers most of that window.
-      minimumReleaseAge: "6 hours",
+      // Both are trusted vendors, so they wait for no release age (below).
       schedule: ["at any time"],
     },
     {
@@ -207,7 +206,9 @@
         "@earendil-works/pi-coding-agent",
         "pi-acp",
       ],
-      // The same fast follow as the agent CLIs above.
+      // The same fast follow as the agent CLIs above, but these are not
+      // the vendors' own packages: the main risk is a release pulled soon
+      // after publication, and 6 hours covers most of that window.
       minimumReleaseAge: "6 hours",
       schedule: ["at any time"],
     },
@@ -229,6 +230,31 @@
       matchManagers: ["github-actions"],
       groupName: "GitHub Actions",
       schedule: ["before 6am on monday"],
+    },
+    {
+      // Owner decision: releases from these vendors are taken as soon as they
+      // are published; everything else keeps the minimum release age above
+      // (3 days, or 6 hours for the Kits' ACP adapters and Pi). Last, so it
+      // overrides any earlier age. The vendors and what names them:
+      //   Docker: its Engine, CLI, containerd, Compose and Buildx apt packages,
+      //     and docker/* images (docker/dockerfile, docker/sandbox-kit).
+      //   DHI: dhi.io images; its apt packages are the deb datasource, which
+      //     is DHI's repository only (exempt above, and named here too).
+      //   Anthropic: @anthropic-ai/* (Claude Code).
+      //   OpenAI: openai/codex (GitHub releases) and @openai/*.
+      // Limited to package and image datasources, so a docker/* GitHub Action
+      // or a look-alike name in another ecosystem (npm's `docker-compose`)
+      // still waits; tests/release/renovate-policy.mjs checks both sides.
+      description: "Trusted vendors (Docker, DHI, Anthropic, OpenAI): no minimum release age",
+      matchDatasources: ["deb", "docker", "npm", "github-releases"],
+      matchPackageNames: [
+        "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "docker-buildx-plugin",
+        "docker/**", "docker.io/docker/**",
+        "dhi.io/**",
+        "@anthropic-ai/**",
+        "openai/codex", "@openai/**",
+      ],
+      minimumReleaseAge: null,
     },
   ],
 }

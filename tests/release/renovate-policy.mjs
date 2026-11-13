@@ -83,4 +83,45 @@ for (const dep of enginePackages) {
     assert.equal(packagePolicy.groupName, imagePolicy.groupName, `${dep.depName} must update with the DHI base`);
   }
 }
+// Trusted vendors take a release as soon as it is published; everything else
+// keeps a minimum release age. The deps are the repository's own where
+// Renovate extracts them, and names Renovate would extract elsewhere.
+const age = async (dep, packageFile) => (await applyPackageRules({
+  minimumReleaseAge: config.minimumReleaseAge, ...dep, packageName: dep.packageName ?? dep.depName,
+  packageFile, packageRules: config.packageRules,
+})).minimumReleaseAge;
+assert.equal(config.minimumReleaseAge, '3 days', 'The default minimum release age');
+const debManagers = config.customManagers.filter(manager => manager.datasourceTemplate === 'deb');
+assert.ok(debManagers.every(manager => manager.registryUrlTemplate.startsWith('http://dhi.io/')),
+  'Every apt package Renovate follows comes from DHI\'s repository');
+const vendor = [
+  ...enginePackages.map(dep => [dep, engineDockerfile]),
+  [image, imageFile],
+  [{ depName: 'docker/dockerfile', datasource: 'docker', manager: 'dockerfile' }, 'packaging/shell/Dockerfile'],
+  [{ depName: 'docker/sandbox-kit', datasource: 'docker', manager: 'dockerfile' }, 'kits/marsh-pi/pi.yaml'],
+  [{ depName: 'docker.io/docker/sandbox-kit', datasource: 'docker', manager: 'dockerfile' }, 'kits/marsh-pi/pi.yaml'],
+  [{ depName: 'docker-buildx-plugin', datasource: 'deb', manager: 'custom.regex' }, 'packaging/shell/Dockerfile'],
+  [{ depName: '@anthropic-ai/claude-code', datasource: 'npm', manager: 'custom.regex' }, 'kits/marsh-claude/claude.yaml'],
+  [{ depName: '@anthropic-ai/sdk', datasource: 'npm', manager: 'npm' }, 'kits/marsh-claude/package.json'],
+  [{ depName: 'openai/codex', datasource: 'github-releases', manager: 'custom.regex' }, 'kits/marsh-codex/codex.yaml'],
+  [{ depName: '@openai/codex', datasource: 'npm', manager: 'npm' }, 'kits/marsh-codex/package.json'],
+];
+for (const name of ['docker-ce', 'docker-ce-cli', 'containerd.io', 'docker-compose-plugin']) {
+  assert.ok(enginePackages.some(dep => dep.depName === name), `Renovate must discover the engine's ${name} pin`);
+}
+for (const [dep, packageFile] of vendor) {
+  assert.equal(await age(dep, packageFile) ?? null, null, `${dep.depName} (a trusted vendor) must not wait for a release age`);
+}
+const waits = [
+  [{ depName: 'serde', datasource: 'crate', manager: 'cargo' }, 'Cargo.toml', '3 days'],
+  [{ depName: 'docker-compose', datasource: 'npm', manager: 'npm' }, 'tests/acceptance/services/fixtures/tc/package.json', '3 days'],
+  [{ depName: 'docker/setup-buildx-action', datasource: 'github-tags', manager: 'github-actions' }, '.github/workflows/ci.yml', '3 days'],
+  [{ depName: 'rust', datasource: 'docker', manager: 'dockerfile' }, 'packaging/linux-arm64/Dockerfile', '3 days'],
+  [{ depName: 'openai-lookalike/codex', datasource: 'github-releases', manager: 'custom.regex' }, 'kits/marsh-codex/codex.yaml', '3 days'],
+  [{ depName: '@agentclientprotocol/codex-acp', datasource: 'npm', manager: 'custom.regex' }, 'kits/marsh-codex/codex.yaml', '6 hours'],
+  [{ depName: '@earendil-works/pi-coding-agent', datasource: 'npm', manager: 'custom.regex' }, 'kits/marsh-pi/pi.yaml', '6 hours'],
+];
+for (const [dep, packageFile, expected] of waits) {
+  assert.equal(await age(dep, packageFile), expected, `${dep.depName} (not a trusted vendor) must wait ${expected}`);
+}
 console.log('Renovate dependency policy passed');
