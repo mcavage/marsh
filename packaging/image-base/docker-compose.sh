@@ -7,12 +7,16 @@
 #
 #   TARGETARCH=arm64 docker-compose.sh OUT      (needs curl and ca-certificates)
 #
-# To move the pin, change the version and both digests together.
+# The version is the upstream version of the services engine's
+# docker-compose-plugin pin (packaging/svc-engine/Dockerfile), which Renovate
+# moves; tests/release/test_compose_pins.py fails until this and every other
+# copy follow it. To move the pin, change the version and both digests together,
+# and append the release's two digests to tests/release/compose-release-digests.txt.
 set -eu
-COMPOSE_VERSION=5.7.0
+COMPOSE_VERSION=5.7.1
 case "${TARGETARCH:?TARGETARCH is not set}" in
-  arm64) arch=aarch64; sha=15861535d14e26555736b49376c95e14bfd94285366c8446bfac7156a972e76f ;;
-  amd64) arch=x86_64; sha=7758048ad38e580f22559603312874fec8bb638d021a9e64182385fc17cc12a2 ;;
+  arm64) arch=aarch64; sha=f2f49f903240895fa764c0dca3a14548b754ad9426f6b609ccaf55ec5a3aa2a5 ;;
+  amd64) arch=x86_64; sha=af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf ;;
   *) echo "docker-compose.sh: unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;;
 esac
 plugins="$1/lib/docker/cli-plugins"

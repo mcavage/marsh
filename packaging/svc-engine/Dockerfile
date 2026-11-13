@@ -8,7 +8,11 @@
 # base digest (packaging/shell-image) and records the built image by digest.
 # The Compose plugin is in it because restore (S4) runs the compose client here,
 # as an unprivileged user on the agent's filtered socket (SECURITY-DESIGN A2);
-# it is pinned like dockerd and the build fails without it.
+# it is pinned like dockerd and the build fails without it, or when the binary
+# does not report the pinned package's upstream version (`X.Y.Z-R` -> vX.Y.Z;
+# a `~rc` or `+dfsg` package version does not map and fails the build).
+# That pin is the one Compose version; tests/release/test_compose_pins.py keeps
+# every other copy equal to it.
 # iptables and ip6tables are in it for the egress firewall `engine-up` installs
 # before the production engine starts (SECURITY-DESIGN A12); they are declared
 # here, and the build fails without them, rather than left to a dependency of
@@ -27,7 +31,9 @@ RUN apt-get update \
  && command -v mount && command -v fallocate && command -v mknod && command -v findmnt \
  && command -v iptables && command -v ip6tables \
  && test -x /usr/libexec/docker/cli-plugins/docker-compose \
- && docker compose version | grep -q 5.7.0 \
+ && compose=$(dpkg-query -W -f='${Version}' docker-compose-plugin) && test -n "$compose" \
+ && compose=${compose#*:} && reported=$(docker compose version --short) \
+ && test -n "${reported#v}" && test "${reported#v}" = "${compose%-*}" \
  && dockerd --version
 LABEL dev.marsh.image="svc-engine"
 ENTRYPOINT ["/marsh/marsh", "--internal-services", "engine-up"]

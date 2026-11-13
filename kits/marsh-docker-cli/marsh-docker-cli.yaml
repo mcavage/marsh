@@ -3,5 +3,5 @@ schemaVersion: "3"
 kind: mixin
 displayName: Docker CLI and Compose
 description: The docker CLI and the Compose plugin, so any agent image can use a project's private Docker endpoint
-provides: ["docker-cli@29.9.3", "docker-compose-plugin@5.7.0"]
+provides: ["docker-cli@29.9.3", "docker-compose-plugin@5.7.1"]
 dockerfile: ./marsh-docker-cli.dockerfile

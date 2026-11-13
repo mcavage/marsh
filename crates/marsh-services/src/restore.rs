@@ -485,6 +485,10 @@ mod linux {
     const MAX_CLIENT_STDOUT: usize = 2 << 20;
     const MAX_CLIENT_STDERR: usize = 64 << 10;
     const MAX_REPLY_BYTES: usize = 900 * 1024;
+    /// The engine's compose version, for labels, when `compose version` fails:
+    /// the upstream version of `packaging/svc-engine/Dockerfile`'s
+    /// `docker-compose-plugin` pin (`tests/release/test_compose_pins.py`).
+    const COMPOSE_FALLBACK_VERSION: &str = "5.7.1";
     /// Unprivileged fallback when the lane folder is owned by root.
     const NOBODY: u32 = 65534;
     /// Ports reserved for a prepared restore are forgotten after this long.
@@ -1680,7 +1684,7 @@ mod linux {
 
         fn compose_version(&self, session: &Session) -> String {
             let Some(empty) = std::fs::File::open("/").ok().map(OwnedFd::from) else {
-                return "5.7.0".into();
+                return COMPOSE_FALLBACK_VERSION.into();
             };
             let output = self.compose(
                 session,
@@ -1699,7 +1703,7 @@ mod linux {
             {
                 version
             } else {
-                "5.7.0".into()
+                COMPOSE_FALLBACK_VERSION.into()
             }
         }
 

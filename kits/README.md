@@ -131,12 +131,16 @@ A pull request that touches one builds and tests it and pushes nothing.
 
 `marsh-docker-cli` is a v3 **mixin**, not an agent. Its image holds only
 `/usr/local/bin/docker` (Docker's official static CLI, 29.9.3) and the Compose
-plugin (`/usr/local/lib/docker/cli-plugins/docker-compose`, v5.7.0), each
+plugin (`/usr/local/lib/docker/cli-plugins/docker-compose`, v5.7.1), each
 downloaded from the vendor at build time and checked against a pinned SHA-256
 (a mismatch fails the build; move a pin by changing the version and both
-digests together). A job of a project with Docker on already has `DOCKER_HOST`
-set to the project's private endpoint, so an agent image that ships these two
-files can use it.
+digests together). The Compose version is the services engine's
+(`docker-compose-plugin` in `packaging/svc-engine/Dockerfile`);
+`tests/release/test_compose_pins.py` fails until every copy matches it and
+both digests are upstream's for that version, as recorded in
+`tests/release/compose-release-digests.txt`. A job
+of a project with Docker on already has `DOCKER_HOST` set to the project's
+private endpoint, so an agent image that ships these two files can use it.
 
 Build it (arm64 and amd64) and publish it like any Kit:
 

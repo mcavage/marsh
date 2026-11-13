@@ -451,11 +451,13 @@ jobs:
         run: make test-model MODEL_FLAGS=--no-huge MODEL_CACHE="$TLC_CACHE"
 
   images:
-    # Builds the shell template and every Kit from their pinned inputs, without
-    # pushing (make kits, prepare-shell-image --validate-only). This is where a
-    # base-image or agent-CLI bump (Renovate) proves it still builds and
-    # the installed commands pass their smoke checks. It runs only
-    # when an input changed, and not for fork PRs (no registry secrets there).
+    # Builds the shell template, the services engine image and every Kit from
+    # their pinned inputs, without pushing (make kits, prepare-shell-image
+    # --validate-only, and the engine as a local OCI tar, the release's own
+    # step). This is where a base-image, apt-pin or agent-CLI bump (Renovate)
+    # proves it still builds and the installed commands pass their smoke
+    # checks. It runs only when an input changed, and not for fork PRs (no
+    # registry secrets there: the DHI base and the Kits' bases need a login).
     name: Kit and shell images (build, no push)
     needs: changes
     if: >-
@@ -483,6 +485,8 @@ jobs:
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Shell VM template
         run: python3 scripts/prepare-shell-image.py --validate-only
+      - name: Services engine image
+        run: python3 scripts/prepare-svc-engine-image.py --docker docker --output "$RUNNER_TEMP/svc-engine"
       - name: Kits and the acceptance fixture
         run: make kits TARGET_DIR="$RUNNER_TEMP/target"
 
