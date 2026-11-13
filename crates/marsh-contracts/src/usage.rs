@@ -273,7 +273,7 @@ pub struct Collector {
     max_line: usize,
     line: Vec<u8>,
     skipping: bool,
-    /// A line that may have carried usage was over `max_line`, unread.
+    /// A line that could have carried usage was over `max_line`, unread.
     skipped_long: bool,
     usage: Option<Usage>,
     message: Option<String>,
@@ -312,7 +312,7 @@ impl Collector {
                 self.line.extend_from_slice(chunk);
                 let uninteresting = self.uninteresting();
                 if self.line.len() > self.max_line || uninteresting {
-                    self.skipped_long |= !uninteresting;
+                    self.skipped_long |= !uninteresting && self.could_carry_usage();
                     self.line.clear();
                     self.skipping = true;
                 }
@@ -350,20 +350,34 @@ impl Collector {
     /// Whether the line so far names a `type` this parser ignores. Agents
     /// print `type` first (`{"type":"message_update",...`).
     fn uninteresting(&self) -> bool {
-        const START: &[u8] = b"{\"type\":\"";
-        if self.line.len() < TYPE_PREFIX || !self.line.starts_with(START) {
-            return false;
-        }
-        let rest = &self.line[START.len()..];
-        let Some(end) = rest.iter().position(|byte| *byte == b'"') else {
-            return false;
-        };
         let wanted: &[&[u8]] = match self.parser {
             CLAUDE_JSON => &[b"result"],
             CODEX_JSONL => &[b"turn.completed", b"item.completed"],
             _ => &[b"message_end"],
         };
-        !wanted.contains(&&rest[..end])
+        self.line_type().is_some_and(|kind| !wanted.contains(&kind))
+    }
+
+    /// Whether the line so far could carry usage: its `type` is the one
+    /// usage comes in, or could not be read.
+    fn could_carry_usage(&self) -> bool {
+        let usage: &[u8] = match self.parser {
+            CLAUDE_JSON => b"result",
+            CODEX_JSONL => b"turn.completed",
+            _ => b"message_end",
+        };
+        self.line_type().is_none_or(|kind| kind == usage)
+    }
+
+    /// The line's `type`, once its first bytes name one.
+    fn line_type(&self) -> Option<&[u8]> {
+        const START: &[u8] = b"{\"type\":\"";
+        if self.line.len() < TYPE_PREFIX || !self.line.starts_with(START) {
+            return None;
+        }
+        let rest = &self.line[START.len()..];
+        let end = rest.iter().position(|byte| *byte == b'"')?;
+        Some(&rest[..end])
     }
 
     fn line_done(&mut self, line: &[u8]) {
@@ -675,10 +689,29 @@ mod tests {
             usage.unavailable.as_deref(),
             Some("a claude-json line was over the 1024 KiB this reader takes, so it was not read")
         );
-        // A tree counts the job as incomplete.
+        // A tree counts the job as incomplete, and so does its parent's.
         let mut tree = TreeUsage::default();
         tree.add_usage(&usage);
         assert_eq!((tree.jobs, tree.incomplete_jobs), (1, 1));
+        let mut parent = TreeUsage::default();
+        parent.add_usage(&Usage::default());
+        parent.add_tree(&tree);
+        parent.add_tree(&tree);
+        assert_eq!((parent.jobs, parent.incomplete_jobs), (3, 2));
+        // A codex line over the bound that cannot carry usage (a command's
+        // large output in an `item.completed`) leaves the usage complete.
+        let mut collector = Collector::bounded(CODEX_JSONL, DAEMON_MAX_LINE).unwrap();
+        collector.feed(
+            br#"{"type":"item.completed","item":{"type":"command_execution","aggregated_output":""#,
+        );
+        for _ in 0..(DAEMON_MAX_LINE / filler.len() + 2) {
+            collector.feed(&filler);
+        }
+        collector.feed(b"\"}}\n");
+        collector.feed(br#"{"type":"turn.completed","usage":{"output_tokens":7}}"#);
+        collector.feed(b"\n");
+        let usage = collector.finish().usage.unwrap();
+        assert_eq!((usage.output_tokens, usage.unavailable), (7, None));
         // Costs saturate too.
         let mut tree = TreeUsage::default();
         for _ in 0..3 {
