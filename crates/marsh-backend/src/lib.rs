@@ -2856,6 +2856,12 @@ impl DaemonBackend for StockDaemonBackend {
                     }
                     Ok(WorkerResponse::CapClose { channel, .. }) => {
                         capability.channels.remove(&channel);
+                        if launch.responses.take_cut(channel) {
+                            // Never a silent cut: say why the connection ended.
+                            let _ = attachment.send(&AttachmentFrame::Stderr {
+                                bytes: CAP_CUT_NOTICE.as_bytes().to_vec(),
+                            });
+                        }
                     }
                     Ok(response @ (WorkerResponse::Ready { .. } | WorkerResponse::Pong { .. })) => {
                         transport_lost = true;
@@ -3574,6 +3580,10 @@ fn reconcile_worker_cleanup(
     }
     Ok(cleanup_uncertain)
 }
+
+/// What a job's caller reads when one of its `cap.sock` connections was cut
+/// because the daemon fell 8 MiB behind on it.
+const CAP_CUT_NOTICE: &str = "marsh: closed one of this job's daemon connections: more than 8 MiB of its data waited while the job's output was not being read\n";
 
 /// Bridges a job's split capability connections to this daemon's endpoint
 /// with a per-attempt token that is revoked when the job ends
