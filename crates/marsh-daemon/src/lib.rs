@@ -3633,12 +3633,16 @@ impl DaemonStore {
             .map(|(session, _)| session.clone())
             .collect::<Vec<_>>();
         for session in sessions {
-            if let Some(shell) = state.shells.get_mut(&session) {
+            let newly = state.shells.get_mut(&session).is_some_and(|shell| {
+                let newly = shell.state != ShellState::Detached;
                 shell.state = ShellState::Detached;
-            }
+                newly
+            });
             state.session_authorities.remove(&session);
             state.shell_cleanup_vms.remove(&session);
-            shell_admission::note_detached(&mut state, &session);
+            if newly {
+                shell_admission::note_detached(&mut state, &session);
+            }
             state
                 .authentication_tokens
                 .retain(|_, owner| owner.as_ref() != Some(&session));

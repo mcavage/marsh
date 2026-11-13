@@ -105,13 +105,17 @@ pub(super) fn detach_locked(state: &mut State, session: &str) -> Result<(), Daem
     if shell.state == ShellState::CleanupUncertain {
         return Err(DaemonError::ShellCleanupUncertain(session.into()));
     }
+    let newly = shell.state != ShellState::Detached;
     shell.state = ShellState::Detached;
     state
         .authentication_tokens
         .retain(|_, owner| owner.as_deref() != Some(session));
     state.session_authorities.remove(session);
     state.shell_cleanup_vms.remove(session);
-    note_detached(state, session);
+    // A repeated detach (the daemon's, then the host CLI's) is one detach.
+    if newly {
+        note_detached(state, session);
+    }
     Ok(())
 }
 
@@ -119,12 +123,23 @@ pub(super) fn detach_locked(state: &mut State, session: &str) -> Result<(), Daem
 /// still name a session that just detached.
 const DETACHED_KEPT: usize = 256;
 
-/// Record that `session` detached, and forget the oldest detached sessions
-/// past [`DETACHED_KEPT`] that no receipt names any more (one that a receipt
-/// names stays until the receipt is trimmed).
+/// Record that `session` detached (once: call it only when it became
+/// detached), and forget the oldest detached sessions past
+/// [`DETACHED_KEPT`] that no receipt names any more (one that a receipt names
+/// stays until the receipt is trimmed). Each detached session is listed
+/// once, so the list holds at most [`DETACHED_KEPT`] plus the sessions
+/// receipts name.
 pub(super) fn note_detached(state: &mut State, session: &str) {
     state.detached_sessions.push_back(session.to_owned());
     let mut excess = state.detached_sessions.len().saturating_sub(DETACHED_KEPT);
+    if excess == 0 {
+        return;
+    }
+    let named = state
+        .jobs
+        .values()
+        .map(|job| job.session_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
     let mut kept = Vec::new();
     while excess > 0 {
         excess -= 1;
@@ -139,7 +154,7 @@ pub(super) fn note_detached(state: &mut State, session: &str) {
             // Attached again or already gone: nothing to forget here.
             continue;
         }
-        if state.jobs.values().any(|job| job.session_id == oldest) {
+        if named.contains(&oldest) {
             kept.push(oldest);
             continue;
         }

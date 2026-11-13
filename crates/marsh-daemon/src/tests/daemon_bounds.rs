@@ -1031,3 +1031,60 @@ fn detached_sessions_are_forgotten_past_the_newest() {
     }
     daemon.answers();
 }
+
+/// A-09: a session detached twice (the daemon's split guard, then the host
+/// CLI's own detach) counts once: the newest 256 distinct sessions are all
+/// kept, and a receipt-named session detached again and again is listed
+/// once.
+#[test]
+fn a_repeated_detach_counts_once() {
+    let daemon = Daemon::start(|server| server);
+    let store = &daemon.server.store;
+    let (job, _) = daemon.job();
+    let pinned = store.job(&job).unwrap().session_id;
+    for _ in 0..600 {
+        store.detach_shell(&pinned).unwrap();
+    }
+    let sessions = (0..256)
+        .map(|_| daemon.session().session_id)
+        .collect::<Vec<_>>();
+    for session in &sessions {
+        store.detach_shell(session).unwrap();
+        store.detach_shell(session).unwrap();
+    }
+    let state = store.lock();
+    assert!(
+        sessions
+            .iter()
+            .all(|session| state.shells.contains_key(session)),
+        "a double detach halved what is kept"
+    );
+    assert!(state.shells.contains_key(&pinned));
+    assert!(
+        state.detached_sessions.len() <= 257,
+        "{}",
+        state.detached_sessions.len()
+    );
+}
+
+/// A-09: sessions detached by a verified shell-VM recovery are forgotten
+/// past the newest too.
+#[test]
+fn sessions_a_shell_vm_recovery_detaches_are_forgotten_past_the_newest() {
+    let daemon = Daemon::start(|server| server);
+    let store = &daemon.server.store;
+    for _ in 0..300 {
+        let session = daemon.session().session_id;
+        store
+            .bind_shell_cleanup_vm(&session, "marsh-s-recovered")
+            .unwrap();
+        store.lock().shells.get_mut(&session).unwrap().state = ShellState::CleanupUncertain;
+    }
+    store
+        .complete_shell_vm_recovery("marsh-s-recovered")
+        .unwrap();
+    let state = store.lock();
+    assert!(state.shells.len() <= 256, "{}", state.shells.len());
+    assert!(state.session_home_backings.len() <= 256);
+    assert!(state.session_project_identities.len() <= 256);
+}
