@@ -96,10 +96,9 @@ impl Daemon {
         split::session_spec(&session_id, &authority)
     }
 
-    /// One split of `branches` argv branches, run to its end and joined.
-    fn split(&self, branches: usize) {
-        let spec = split::SplitCreateSpec {
-            session: self.session(),
+    fn spec(&self, branches: usize, session: SessionSpec) -> split::SplitCreateSpec {
+        split::SplitCreateSpec {
+            session,
             cwd: self.project.clone(),
             branches: (0..branches)
                 .map(|index| split::BranchSpec {
@@ -117,7 +116,12 @@ impl Daemon {
             model: None,
             usage: None,
             spawn: None,
-        };
+        }
+    }
+
+    /// One split of `branches` argv branches, run to its end and joined.
+    fn split(&self, branches: usize) {
+        let spec = self.spec(branches, self.session());
         let mut stream = self
             .client()
             .open_request(PublicRequest::SplitCreate(spec))
