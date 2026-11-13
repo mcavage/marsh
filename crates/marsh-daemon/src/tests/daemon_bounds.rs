@@ -197,3 +197,104 @@ fn finished_splits_release_their_branch_connections_and_runtime() {
     });
     daemon.answers();
 }
+
+/// Argv branches that end at once, except one whose argument is `hold`,
+/// which runs until released.
+#[derive(Debug)]
+struct HoldOne(Arc<AtomicBool>);
+
+impl DaemonBackend for HoldOne {
+    fn registered_commands(&self) -> Result<Vec<String>, DaemonError> {
+        Ok(vec!["fixture".into()])
+    }
+
+    fn prepare(
+        &self,
+        _: &LoadSelection,
+        _: &SessionSpec,
+        _: PreparationProgress,
+        _: DaemonStore,
+    ) -> Result<PreparationResult, DaemonError> {
+        Ok(PreparationResult::default())
+    }
+
+    fn execute(
+        &self,
+        request: ExecuteSpec,
+        attachment: ServerAttachment,
+        _: DaemonStore,
+    ) -> Result<(), DaemonError> {
+        if request.arguments.iter().any(|argument| argument == b"hold") {
+            while !self.0.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        attachment.send(&AttachmentFrame::Exited { code: 0 })
+    }
+
+    fn open_shell(
+        &self,
+        _: ShellSpec,
+        _: ServerAttachment,
+        _: DaemonStore,
+    ) -> Result<(), DaemonError> {
+        Err(DaemonError::InvalidState("no shells here".into()))
+    }
+}
+
+/// A-02: a branch's daemon connection goes when the branch ends, while its
+/// siblings still run and while the creator still holds its create stream.
+#[test]
+fn an_ended_branch_releases_its_connection_while_the_split_runs_on() {
+    let release = Arc::new(AtomicBool::new(false));
+    let backend = Arc::new(HoldOne(Arc::clone(&release)));
+    let daemon = Daemon::start(|server| server.with_backend(backend));
+    let mut spec = daemon.spec(4, daemon.session());
+    spec.branches[0].argv = Some(vec![b"fixture".to_vec(), b"hold".to_vec()]);
+    let mut stream = daemon
+        .client()
+        .open_request(PublicRequest::SplitCreate(spec))
+        .unwrap();
+    stream.set_read_timeout(Some(PATIENCE)).unwrap();
+    write_frame(&mut stream, &AttachmentFrame::StdinEof).unwrap();
+    let PublicReply::SplitStarted { .. } = read_frame(&mut stream).unwrap() else {
+        panic!("split refused")
+    };
+    wait_until("the three quick branches release their connections", || {
+        daemon.server.splits.listed_executions() == 1
+    });
+    release.store(true, Ordering::Release);
+    let finished = read_frame::<PublicReply>(&mut stream).unwrap();
+    assert!(
+        matches!(finished, PublicReply::SplitFinished { status: 0, .. }),
+        "{finished:?}"
+    );
+    // The create stream is still open, so the runtime stays; its branches'
+    // connections do not.
+    assert_eq!(daemon.server.splits.runtimes(), 1);
+    assert_eq!(daemon.server.splits.listed_executions(), 0);
+    daemon.answers();
+}
+
+/// A-02: a client that goes away before it reads `SplitStarted` leaves no
+/// runtime and no running split behind.
+#[test]
+fn a_split_whose_client_left_before_it_started_leaves_nothing_running() {
+    let daemon = Daemon::start(|server| server);
+    let spec = daemon.spec(1, daemon.session());
+    let stream = daemon
+        .client()
+        .open_request(PublicRequest::SplitCreate(spec))
+        .unwrap();
+    stream.shutdown(std::net::Shutdown::Read).unwrap();
+    let mut writer = &stream;
+    write_frame(&mut writer, &AttachmentFrame::StdinEof).unwrap();
+    drop(stream);
+    wait_until("the abandoned split's runtime is released", || {
+        daemon.server.splits.runtimes() == 0
+    });
+    thread::sleep(Duration::from_millis(1500));
+    assert_eq!(daemon.server.splits.runtimes(), 0);
+    assert_eq!(daemon.server.splits.counts().active, 0);
+    daemon.answers();
+}

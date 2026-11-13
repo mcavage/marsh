@@ -1095,6 +1095,22 @@ impl SplitEngine {
         self.lock().runtime.len()
     }
 
+    /// Branch executions still listed in some runtime (tests).
+    #[cfg(test)]
+    pub(crate) fn listed_executions(&self) -> usize {
+        self.lock()
+            .runtime
+            .values()
+            .map(|runtime| {
+                runtime
+                    .executions
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .len()
+            })
+            .sum()
+    }
+
     /// `marsh workers reset`: uncertain branch slots are released.
     pub fn release_uncertain_slots(&self) {
         self.lock().uncertain_slots.clear();
@@ -1643,6 +1659,21 @@ impl SplitEngine {
             .collect()
     }
 
+    /// A split whose client went away before it learned the split started:
+    /// no branch ran, so its runtime and files go, and it ends cancelled.
+    fn abandon(&self, id: &str, record: &SplitRecord) {
+        self.lock().runtime.remove(id);
+        let message = Self::remove_files(record);
+        self.update(id, |record| {
+            record.state = SplitState::Cancelled;
+            record.status = Some(130);
+            record.finished_unix_ms = Some(unix_ms());
+            record.reason = Some(format!(
+                "cancelled: its client went away before it started; {message}"
+            ));
+        });
+    }
+
     fn cancel(&self, id: &str, reason: &str) {
         for child in self.children(id, None) {
             self.cancel(&child, "its parent split was cancelled");
@@ -1966,6 +1997,7 @@ impl SplitEngine {
                 },
             );
         }
+        let mut reader = stream.try_clone()?;
         let runtime = Arc::new(Runtime::default());
         {
             let mut inner = self.lock();
@@ -1973,13 +2005,16 @@ impl SplitEngine {
             inner.runtime.insert(id.clone(), Arc::clone(&runtime));
         }
         self.save();
-        write_frame(&mut stream, &PublicReply::SplitStarted { id: id.clone() })?;
+        if let Err(error) = write_frame(&mut stream, &PublicReply::SplitStarted { id: id.clone() })
+        {
+            self.abandon(&id, &record);
+            return Err(error);
+        }
         // A signal frame before capture cancels; so does a dropped stream,
         // unless the split was started detached.
         {
             let engine = Arc::clone(self);
             let id = id.clone();
-            let mut reader = stream.try_clone()?;
             let runtime = Arc::clone(&runtime);
             let detach = spec.detach;
             thread::spawn(move || {
