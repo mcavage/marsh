@@ -175,6 +175,9 @@ class ComposePins(unittest.TestCase):
         cases = {}
         for path in FETCHES:
             cases[f"swapped in {path}"] = {**texts, path: swap(texts[path], arm, amd)}
+            # arm64 fetching the x86_64 asset with that asset's real digest.
+            cases[f"assets and digests swapped in {path}"] = {
+                **texts, path: swap(swap(texts[path], arm, amd), "arch=aarch64", "arch=x86_64")}
         cases["swapped in both"] = {p: swap(t, arm, amd) for p, t in texts.items()}
         cases["an earlier version's amd64 digest in both"] = {p: t.replace(amd, older[0]) for p, t in texts.items()}
         cases["the version moved without its digests"] = {
