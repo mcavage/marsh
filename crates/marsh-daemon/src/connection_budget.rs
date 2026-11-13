@@ -1,10 +1,12 @@
-//! How many daemon connections jobs may hold. Every job capability
-//! connection (`cap.sock`) takes a slot here before its bridge connects, so
-//! jobs together never hold more than [`capability_share`] of the daemon's
-//! connection cap, and one job never more than its live `job-children` plus
-//! 4. The rest of the cap is the host's: `marsh` commands, `marsh jobs
-//! cancel`, relays, shells, and the daemon's own split-branch and child-job
-//! connections.
+//! How many daemon connections jobs may hold. A job's own `cap.sock`
+//! connections take a slot here before their bridge connects, and so do
+//! the daemon's connections to itself on a job's behalf (a `ProcessRun`
+//! child's start, the argv branches of a job's split). So jobs together
+//! never hold more than [`capability_share`] of the daemon's connection cap,
+//! and one job never more than twice its live `job-children` plus 4. The
+//! rest of the cap is left to the host: `marsh` commands, relays, shells,
+//! and host and session splits with their branches. What the host itself
+//! opens can still fill that rest.
 
 use std::{
     collections::BTreeMap,
@@ -19,11 +21,11 @@ pub const fn capability_share(cap: usize) -> usize {
 }
 
 /// What one job may hold at once with `job_children` live children allowed:
-/// one connection per child it waits on, plus 4 (as the worker's per-attempt
-/// limit, `marsh_contracts::process::CONNECTION_LIMIT`, at its maximum).
+/// two connections per child (the job's request, and the daemon's own
+/// connection that starts the child), plus 4.
 #[must_use]
 pub const fn per_job(job_children: usize) -> usize {
-    job_children.saturating_add(4)
+    job_children.saturating_mul(2).saturating_add(4)
 }
 
 #[derive(Debug, Default)]
@@ -77,7 +79,7 @@ impl Budget {
         let mine = held.by_job.get(job).copied().unwrap_or(0);
         if mine >= limit {
             return Err(format!(
-                "{} (at most {limit} at once: job-children + 4)",
+                "{} (at most {limit} at once: twice job-children, plus 4)",
                 marsh_contracts::process::CONNECTION_REFUSAL
             ));
         }

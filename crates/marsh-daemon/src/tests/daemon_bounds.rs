@@ -364,15 +364,15 @@ fn held(stream: &UnixStream) -> bool {
     )
 }
 
-/// A-03: one job holds at most `job-children` + 4 daemon connections, jobs
-/// together at most three quarters of the cap, and the host's quarter is
-/// left: a status request and a cancel still get through.
+/// A-03: one job holds at most twice `job-children`, plus 4, daemon
+/// connections, jobs together at most three quarters of the cap, and the
+/// host's quarter is left: a status and a jobs request still get through.
 #[test]
 fn jobs_never_take_the_hosts_share_of_daemon_connections() {
     let daemon = Daemon::start(|server| server.with_connection_cap(64));
     let per_job = connection_budget::per_job(daemon.server.store.job_limits().job_children);
     let share = connection_budget::capability_share(64);
-    assert_eq!((per_job, share), (20, 48));
+    assert_eq!((per_job, share), (36, 48));
     let (first, first_token) = daemon.job();
     let mut holding = (0..per_job)
         .map(|_| daemon.held_split(&first, &first_token).unwrap())
@@ -382,7 +382,7 @@ fn jobs_never_take_the_hosts_share_of_daemon_connections() {
         "the daemon must hold the split's create"
     );
     let refused = daemon.held_split(&first, &first_token).unwrap_err();
-    assert!(refused.contains("at most 20 at once"), "{refused}");
+    assert!(refused.contains("at most 36 at once"), "{refused}");
     // Other jobs fill the rest of the jobs' share, and no more.
     let refused = 'fill: loop {
         let (job, token) = daemon.job();
@@ -401,8 +401,7 @@ fn jobs_never_take_the_hosts_share_of_daemon_connections() {
         holding.iter().all(|(_, stream)| held(stream))
     });
     assert_eq!(holding.len(), share);
-    // The host still gets through: status, and `marsh stop` (cancel)
-    // reaches the daemon as one more host connection.
+    // The host still gets through: a status and a jobs request.
     daemon.answers();
     let client = daemon.client();
     let jobs = returns("a host jobs request", move || {
@@ -414,6 +413,126 @@ fn jobs_never_take_the_hosts_share_of_daemon_connections() {
     let (job, token) = daemon.job();
     daemon.held_split(&job, &token).unwrap();
     drop(holding);
+    wait_until("every slot is released", || {
+        daemon.server.store.lock().connections.held_total() == 0
+    });
+}
+
+/// A child the daemon runs for a job's `ProcessRun`, held until released:
+/// what a job's bridge does for one `cap.sock` channel, then the request.
+fn held_run(
+    daemon: &Daemon,
+    job: &str,
+    token: &str,
+) -> Result<(CapabilityConnection, UnixStream), String> {
+    let slot = daemon.server.store.capability_connection(job)?;
+    let mut stream = UnixStream::connect(&daemon.client().paths.socket).unwrap();
+    stream.set_read_timeout(Some(PATIENCE)).unwrap();
+    let session = daemon.server.store.job(job).unwrap().session_id;
+    let authority = authority(daemon.project.to_str().unwrap(), &daemon.home);
+    let spec = ExecuteSpec {
+        model: None,
+        usage: None,
+        label: None,
+        kit: None,
+        acp: false,
+        working_directory: None,
+        command: "fixture".into(),
+        arguments: vec![b"hold".to_vec()],
+        placement: Placement::Local,
+        environment: BTreeMap::new(),
+        session: split::session_spec(&session, &authority),
+        process: None,
+    };
+    write_frame(
+        &mut stream,
+        &Envelope {
+            protocol: PROTOCOL.into(),
+            token: token.to_owned(),
+            body: PublicRequest::ProcessRun(spec),
+        },
+    )
+    .unwrap();
+    match read_frame::<PublicReply>(&mut stream) {
+        Ok(PublicReply::ExecutionAccepted) => Ok((slot, stream)),
+        other => Err(format!("{other:?}")),
+    }
+}
+
+/// A-03: the daemon's own connection that starts a job's `ProcessRun` child
+/// takes one of the job's slots, so children within the jobs' share never
+/// fill the host's quarter (each child costs two of the 48 slots here).
+#[test]
+fn process_runs_within_the_jobs_share_leave_the_host_its_quarter() {
+    let release = Arc::new(AtomicBool::new(false));
+    let backend = Arc::new(HoldOne(Arc::clone(&release)));
+    let daemon = Daemon::start(|server| server.with_connection_cap(64).with_backend(backend));
+    let mut holding = Vec::new();
+    let refused = 'fill: loop {
+        let (job, token) = daemon.job();
+        for _ in 0..16 {
+            match held_run(&daemon, &job, &token) {
+                Ok(run) => holding.push(run),
+                Err(message) => break 'fill message,
+            }
+        }
+    };
+    assert!(
+        refused.contains("jobs hold 48 daemon connections"),
+        "{refused}"
+    );
+    assert_eq!(holding.len(), 24);
+    assert_eq!(daemon.server.store.lock().connections.held_total(), 48);
+    daemon.answers();
+    release.store(true, Ordering::Release);
+    drop(holding);
+    wait_until("every slot is released", || {
+        daemon.server.store.lock().connections.held_total() == 0
+    });
+}
+
+/// A-03: each argv branch of a job's split is a daemon connection on the
+/// job's behalf and takes one of its slots; branches past the jobs' share
+/// are refused, and the host is still served.
+#[test]
+fn a_jobs_split_branches_take_the_jobs_slots() {
+    let release = Arc::new(AtomicBool::new(false));
+    let backend = Arc::new(HoldOne(Arc::clone(&release)));
+    let daemon = Daemon::start(|server| server.with_connection_cap(16).with_backend(backend));
+    let (job, token) = daemon.job();
+    let slot = daemon.server.store.capability_connection(&job).unwrap();
+    let mut spec = daemon.spec(16, daemon.session());
+    for branch in &mut spec.branches {
+        branch.argv = Some(vec![b"fixture".to_vec(), b"hold".to_vec()]);
+    }
+    let mut stream = UnixStream::connect(&daemon.client().paths.socket).unwrap();
+    stream.set_read_timeout(Some(PATIENCE)).unwrap();
+    write_frame(
+        &mut stream,
+        &Envelope {
+            protocol: PROTOCOL.into(),
+            token,
+            body: PublicRequest::SplitCreate(spec),
+        },
+    )
+    .unwrap();
+    write_frame(&mut stream, &AttachmentFrame::StdinEof).unwrap();
+    let started = read_frame::<PublicReply>(&mut stream).unwrap();
+    assert!(
+        matches!(started, PublicReply::SplitStarted { .. }),
+        "{started:?}"
+    );
+    wait_until("the jobs' share is held", || {
+        daemon.server.store.lock().connections.held_total() == 12
+    });
+    daemon.answers();
+    release.store(true, Ordering::Release);
+    let finished = read_frame::<PublicReply>(&mut stream).unwrap();
+    assert!(
+        matches!(finished, PublicReply::SplitFinished { .. }),
+        "{finished:?}"
+    );
+    drop((slot, stream));
     wait_until("every slot is released", || {
         daemon.server.store.lock().connections.held_total() == 0
     });

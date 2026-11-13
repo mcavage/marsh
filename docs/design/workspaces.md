@@ -455,11 +455,15 @@ is 130. `split` exits with the first nonzero code in declaration order.
     a job that stops reading is disconnected instead of stalling the
     worker transport.
   - A connection reaches the daemon only once its first request arrived,
-    and only with a slot from the daemon's connection budget: at most the
-    job's live `job-children` + 4 at once, and for all jobs together three
-    quarters of the daemon's connection cap. The last quarter is the
-    host's, so `marsh` commands (cancel and stop included) still get
-    through. A refused connection gets a refusal frame.
+    and only with a slot from the daemon's connection budget. The daemon's
+    own connections on a job's behalf (a `ProcessRun` child's start, the
+    argv branches of a job's split) take one of the job's slots too. A job
+    holds at most twice its live `job-children`, plus 4, and all jobs
+    together three quarters of the daemon's connection cap. A refused
+    connection gets a refusal frame.
+  - So jobs cannot take the last quarter of the cap. It is left to host
+    `marsh` commands, relays, shells, and host and session splits with
+    their branches; only the host's own load can fill it.
   - The daemon raises its descriptor soft limit (up to 4096) for its 1024
     connections.
 - **Nested splits from a shell branch.** `marsh split` run inside a shell

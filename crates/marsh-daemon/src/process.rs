@@ -1114,6 +1114,12 @@ pub(crate) fn serve_run(
         spawn: link.spawn,
         ..ProcessLink::default()
     });
+    // The daemon's own connection for the child is the job's too: held
+    // until the child ends, it never takes the host's share.
+    let _slot = match store.capability_connection(job) {
+        Ok(slot) => slot,
+        Err(message) => return refuse(&mut stream, message),
+    };
     let execution = match client.start_execution(spec) {
         Ok(execution) => execution,
         Err(error) => return refuse(&mut stream, error.to_string()),
