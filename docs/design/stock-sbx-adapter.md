@@ -16,8 +16,9 @@ releases. The version check does
 not qualify every later version or prove that a build has the EROFS
 writable-layer discard fix; acceptance checks container cleanup directly.
 
-Homebrew owns installation of `sbx`. marsh resolves `MARSH_SBX`, otherwise
-`sbx` on `PATH`, and canonicalizes it. A running daemon keeps the executable it
+Homebrew owns installation of `sbx`. The client and marshd each resolve
+`MARSH_SBX`, otherwise `sbx` on `PATH`, and canonicalize it to an absolute
+path; the daemon refuses a relative one. A running daemon keeps the executable it
 resolved at startup, and its handshake includes a digest of that executable, so
 a client restarts an idle daemon after an SBX upgrade. A daemon never switches
 to another executable. When Homebrew deletes the pinned one, the daemon reports

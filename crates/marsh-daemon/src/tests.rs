@@ -3016,6 +3016,25 @@ fn public_client_authenticates_and_shares_daemon() {
     task.join().unwrap();
 }
 
+/// A relative stock path names another file once stock runs in a project
+/// (`sbx mount`), and the removed-sbx checks would disagree about it.
+#[test]
+fn a_relative_stock_sbx_path_is_refused_before_binding() {
+    let home = home();
+    // The test's cwd is this crate, so the relative path names a real file.
+    assert!(Path::new("Cargo.toml").is_file());
+    let error = Server::bind_with_stock_sbx(home.path(), Path::new("Cargo.toml"))
+        .err()
+        .expect("a relative stock SBX path is refused");
+    assert!(error.to_string().contains("must be absolute"), "{error}");
+    assert!(
+        !EndpointPaths::for_home(home.path())
+            .unwrap()
+            .socket
+            .exists()
+    );
+}
+
 #[test]
 fn matching_installed_daemon_build_is_reused() {
     let home = home();

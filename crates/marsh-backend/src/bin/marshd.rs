@@ -473,11 +473,12 @@ fn resolve_sbx() -> Result<PathBuf, Box<dyn std::error::Error>> {
     )
 }
 
-/// The absolute path of stock: `MARSH_SBX` if set (a path is taken relative
-/// to the launch directory; a bare name is looked up on the absolute entries
-/// of `PATH`, as the client does), else `program` on those entries. Stock
-/// also runs with a project as its cwd (`sbx mount`), where a relative path
-/// would name another file.
+/// The canonical absolute path of stock, as the client pins it
+/// (`marsh_daemon::canonical_executable`): `MARSH_SBX` if set (a path is
+/// taken relative to the launch directory; a bare name is looked up on the
+/// absolute entries of `PATH`, as the client does), else `program` on those
+/// entries. Stock also runs with a project as its cwd (`sbx mount`), where a
+/// relative path would name another file.
 fn resolve_program(
     variable: &str,
     program: &str,
@@ -502,15 +503,14 @@ fn resolve_program(
             })?
         }
     };
-    if !candidate.is_file() {
-        return Err(format!(
-            "{variable}={} does not name a file (a relative path is taken against the \
-             directory marshd started in); set it to the absolute path of {program}",
+    marsh_daemon::canonical_executable(&candidate).map_err(|_| {
+        format!(
+            "{variable}={} does not name a regular file (a relative path is taken against \
+             the directory marshd started in); set it to the absolute path of {program}",
             candidate.display()
         )
-        .into());
-    }
-    Ok(candidate)
+        .into()
+    })
 }
 
 /// The programs marshd's settings name, resolved before it leaves its launch
@@ -846,7 +846,7 @@ mod tests {
         // suggests installing it.
         assert_eq!(
             resolve_program("MARSH_SBX", "sbx", Some(OsStr::new("sbx")), Some(&search)).unwrap(),
-            user_bin.join("sbx")
+            user_bin.join("sbx").canonicalize().unwrap()
         );
         let bare_missing = resolve_program(
             "MARSH_SBX",
@@ -866,6 +866,27 @@ mod tests {
             .to_string();
         assert!(unset.contains("brew install"), "{unset}");
         assert!(resolve_program("MARSH_SBX", "sbx", Some(OsStr::new("src/")), None).is_err());
+    }
+
+    /// marshd pins stock as the client does: canonical and absolute, whether
+    /// named by a symlinked or relative `MARSH_SBX` or found on `PATH`.
+    #[test]
+    fn stock_sbx_is_pinned_by_its_canonical_absolute_path() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real-sbx");
+        fs::write(&real, b"#!/bin/sh\n").unwrap();
+        let link = root.path().join("sbx");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let canonical = real.canonicalize().unwrap();
+        let resolve = |configured: Option<&OsStr>, search: Option<&OsStr>| {
+            resolve_program("MARSH_SBX", "sbx", configured, search)
+        };
+        assert_eq!(resolve(Some(link.as_os_str()), None).unwrap(), canonical);
+        let search = env::join_paths([Path::new("relative-missing"), root.path()]).unwrap();
+        assert_eq!(resolve(None, Some(&search)).unwrap(), canonical);
+        // The test's cwd is this crate: a relative path is pinned absolute.
+        let relative = resolve(Some(OsStr::new("./Cargo.toml")), None).unwrap();
+        assert_eq!(relative, Path::new("Cargo.toml").canonicalize().unwrap());
     }
 
     #[test]
