@@ -5072,6 +5072,15 @@ impl Server {
         stock_sbx: &Path,
         journal_home: &Path,
     ) -> Result<Self, DaemonError> {
+        // Stock also runs with a project as its cwd (`sbx mount`), and the
+        // removed-sbx checks here and in `StockSbx::removed_executable` agree
+        // only for an absolute path.
+        if !stock_sbx.is_absolute() {
+            return Err(DaemonError::InvalidState(format!(
+                "the stock SBX path must be absolute: {}",
+                stock_sbx.display()
+            )));
+        }
         let executable = std::env::current_exe()?;
         let mut server = Self::bind_with_identity_and_journal_home(
             home,
