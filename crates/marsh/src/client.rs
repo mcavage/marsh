@@ -1419,7 +1419,21 @@ fn resolve_stock_sbx_from(
     path: Option<&OsStr>,
 ) -> Result<PathBuf, ClientError> {
     if let Some(configured) = configured {
-        return marsh_daemon::canonical_executable(Path::new(configured)).map_err(|error| {
+        // A bare name is a program on PATH, never a file in this directory,
+        // which is often a project a job can write.
+        let candidate = if marsh_daemon::names_a_path(configured) {
+            PathBuf::from(configured)
+        } else {
+            marsh_daemon::find_on_absolute_path(configured, path).ok_or_else(|| {
+                ClientError(format!(
+                    "stock sbx {} (MARSH_SBX) was not found on the absolute entries of PATH \
+                     (relative entries such as `.` are not searched); set MARSH_SBX to the \
+                     absolute path of sbx, or unset it",
+                    Path::new(configured).display()
+                ))
+            })?
+        };
+        return marsh_daemon::canonical_executable(&candidate).map_err(|error| {
             let reason = match &error {
                 marsh_daemon::DaemonError::Io(io) if io.kind() == std::io::ErrorKind::NotFound => {
                     "not found".to_owned()
@@ -1438,10 +1452,8 @@ fn resolve_stock_sbx_from(
     }
     let path = path
         .ok_or_else(|| ClientError("PATH is required to locate stock sbx; set MARSH_SBX".into()))?;
-    let candidate = std::env::split_paths(path)
-        .map(|directory| directory.join("sbx"))
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
+    let candidate =
+        marsh_daemon::find_on_absolute_path(OsStr::new("sbx"), Some(path)).ok_or_else(|| {
             ClientError(format!(
                 "stock sbx not found on PATH. {SBX_INSTALL_HINT} (or set MARSH_SBX to its path)"
             ))
@@ -2198,6 +2210,38 @@ mod tests {
             resolve_stock_sbx_from(None, Some(checkout.path().join("tools").as_os_str())).unwrap(),
             path_sbx.canonicalize().unwrap()
         );
+    }
+
+    /// A bare `MARSH_SBX`, like the default lookup, is found on the user's own
+    /// PATH (`~/.local/bin`, `~/.docker/bin`), skipping the empty, `.` and
+    /// relative entries that would name this directory; a path is a path.
+    #[test]
+    fn bare_sbx_names_are_found_only_on_absolute_path_entries() {
+        let checkout = tempfile::tempdir().unwrap();
+        let user_bin = checkout.path().join("home/.local/bin");
+        file(&user_bin.join("sbx"));
+        let search = std::env::join_paths([
+            Path::new(""),
+            Path::new("."),
+            Path::new("src"),
+            user_bin.as_path(),
+        ])
+        .unwrap();
+        let expected = user_bin.join("sbx").canonicalize().unwrap();
+        assert_eq!(
+            resolve_stock_sbx_from(Some(OsStr::new("sbx")), Some(&search)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            resolve_stock_sbx_from(None, Some(&search)).unwrap(),
+            expected
+        );
+        let only_relative = std::env::join_paths([Path::new("."), Path::new("")]).unwrap();
+        let error = resolve_stock_sbx_from(Some(OsStr::new("sbx")), Some(&only_relative))
+            .unwrap_err()
+            .0;
+        assert!(error.contains("absolute entries of PATH"), "{error}");
+        assert!(!error.contains("brew install"), "{error}");
     }
 
     #[test]

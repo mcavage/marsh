@@ -631,6 +631,27 @@ fn artifact_identity(path: &Path) -> Result<String, DaemonError> {
     ))
 }
 
+/// Whether a program setting names a path (it contains a `/`), rather than a
+/// bare program name to look up on a search path.
+#[must_use]
+pub fn names_a_path(value: &std::ffi::OsStr) -> bool {
+    value.as_encoded_bytes().contains(&b'/')
+}
+
+/// The first `name` that is a file in an absolute entry of `search` (a
+/// `PATH` value). Empty and relative entries (`.`, `bin`) name the caller's
+/// working directory, often a project a job can write, and are skipped.
+#[must_use]
+pub fn find_on_absolute_path(
+    name: &std::ffi::OsStr,
+    search: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    std::env::split_paths(search?)
+        .filter(|directory| directory.is_absolute())
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
 /// Resolve an executable to the regular file that will be used for daemon
 /// configuration. Callers pass the returned path to the child process so the
 /// identity checked before spawn is also the path resolved by the daemon.
