@@ -307,6 +307,8 @@ class Publication(unittest.TestCase):
         self.gh_mode.write_text("")
         self.gh_log = self.tmp / "gh.log"
         self.gh_log.write_text("")
+        # Call N of the listing uses tags.N and gh-mode.N when they exist.
+        self.gh_calls = self.tmp / "gh-calls"
         bin_dir = self.tmp / "bin"
         bin_dir.mkdir()
         # gh: the tag listing (what --jq '.[].ref' prints) and release create.
@@ -316,11 +318,14 @@ class Publication(unittest.TestCase):
             [ -n "${{GH_TOKEN:-}}" ] || {{ echo "gh: GH_TOKEN is not set" >&2; exit 4; }}
             case "$*" in
               "api --paginate repos/example/marsh/git/matching-refs/tags/v --jq .[].ref")
-                case "$(cat "{self.gh_mode}")" in
+                n=$(( $(cat "{self.gh_calls}" 2>/dev/null || echo 0) + 1 )); echo "$n" > "{self.gh_calls}"
+                tags="{self.tags}"; [ -f "$tags.$n" ] && tags="$tags.$n"
+                mode="{self.gh_mode}"; [ -f "$mode.$n" ] && mode="$mode.$n"
+                case "$(cat "$mode")" in
                   fail) echo "gh: HTTP 503: rate limited" >&2; exit 1 ;;
-                  partial) sed '$d; s#^#refs/tags/#' "{self.tags}"; echo "gh: HTTP 502 on page 2" >&2; exit 1 ;;
+                  partial) sed '$d; s#^#refs/tags/#' "$tags"; echo "gh: HTTP 502 on page 2" >&2; exit 1 ;;
                 esac
-                sed 's#^#refs/tags/#' "{self.tags}"; exit 0 ;;
+                sed 's#^#refs/tags/#' "$tags"; exit 0 ;;
               "release create "*) exit 0 ;;
             esac
             echo "unexpected gh call: $*" >&2
@@ -345,8 +350,9 @@ class Publication(unittest.TestCase):
                 "secrets.GITHUB_TOKEN": "token", "secrets.HOMEBREW_TAP_TOKEN": "token"}
 
     def run_job_step(self, job, step, version, work, ok=True, **extra):
+        # No waiting between the script's retries here (the default is tested below).
         env = {**step_env("release.yml", job, step, self.outputs(version)), "PATH": self.path,
-               "GITHUB_REPOSITORY": "example/marsh", **extra}
+               "GITHUB_REPOSITORY": "example/marsh", "NEWEST_RELEASE_DELAYS": "0 0 0 0", **extra}
         result = run_step_script("release.yml", job, step, work, env)
         if ok:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -397,9 +403,13 @@ class Publication(unittest.TestCase):
                        ("partial", ("v1.2.2", "v1.2.3", "v1.2.4")),  # the page with v1.2.4 fails
                        ("", ("v1.2.2", "v1.2.4")))  # lists no v1.2.3: truncated, or the tag was deleted
 
+    def listings(self):
+        return int(self.gh_calls.read_text()) if self.gh_calls.exists() else 0
+
     def test_a_broken_tag_listing_fails_the_images_step_and_pushes_nothing(self):
         for mode, tags in self.BROKEN_LISTINGS:
             self.gh_mode.write_text(mode)
+            self.gh_calls.unlink(missing_ok=True)
             self.tags.write_text("".join(f"{tag}\n" for tag in tags))
             work = self.workspace(f"images-broken-{mode or 'missing'}")
             output = work / "output"
@@ -407,10 +417,42 @@ class Publication(unittest.TestCase):
             result = self.run_job_step("images", "fresh", "1.2.3", work, ok=False, GITHUB_OUTPUT=str(output))
             self.assertNotEqual(result.returncode, 0, (mode, result.stdout))
             self.assertEqual(output.read_text(), "", mode)
+            # Five tries, then the step fails.
+            self.assertEqual(self.listings(), 5, mode)
+
+    def test_a_tag_that_shows_up_on_a_later_try_is_found(self):
+        # Right after the push the listing may not show the new tag yet, or
+        # a call may fail; a later try sees it.
+        for first in ("missing", "fail"):
+            self.gh_calls.unlink(missing_ok=True)
+            self.tags.write_text("v1.2.3\nv1.2.4\n")
+            pathlib.Path(f"{self.tags}.1").write_text("v1.2.3\n")
+            pathlib.Path(f"{self.gh_mode}.1").write_text("fail" if first == "fail" else "")
+            work = self.workspace(f"images-late-{first}")
+            output = work / "output"
+            output.write_text("")
+            self.run_job_step("images", "fresh", "1.2.4", work, GITHUB_OUTPUT=str(output))
+            self.assertEqual(output.read_text().split(), ["image_tag=", "extra_tags=1.2.4", "latest"], first)
+            self.assertEqual(self.listings(), 2, first)
+
+    def test_the_listing_is_tried_five_times_over_about_a_minute_by_default(self):
+        bin_dir = self.tmp / "bin"
+        sleeps = self.tmp / "sleeps"
+        (bin_dir / "sleep").write_text(f'#!/bin/sh\necho "$1" >> "{sleeps}"\n')
+        (bin_dir / "sleep").chmod(0o755)
+        self.tags.write_text("v1.2.2\n")
+        result = subprocess.run(["sh", str(ROOT / "scripts/newest-release.sh"), "--github", "1.2.3"],
+                                env={"PATH": self.path, "GITHUB_REPOSITORY": "example/marsh", "GH_TOKEN": "token"},
+                                capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.listings(), 5)
+        self.assertEqual(sleeps.read_text().split(), ["4", "8", "16", "32"])
 
     def test_a_broken_tag_listing_fails_the_release_step_before_any_release(self):
         for mode, tags in self.BROKEN_LISTINGS:
             self.gh_mode.write_text(mode)
+            self.gh_calls.unlink(missing_ok=True)
             self.tags.write_text("".join(f"{tag}\n" for tag in tags))
             self.gh_log.write_text("")
             result = self.run_job_step("release", "Create the GitHub Release", "1.2.3",

@@ -302,10 +302,9 @@ jobs:
           set -euo pipefail
           image_tag=$IMAGE_TAG; extra_tags=$EXTRA_TAGS
           if [ "$CHANNEL" = stable ] && [ "$DRAFT" = false ]; then
-            # A failed or partial listing, or one without this version's tag,
-            # fails this step, so the job pushes nothing.
-            tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref')
-            newest=$(printf '%s\n' "$tags" | sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
+            # A listing that fails, or does not show this version's tag, after
+            # the script's retries fails this step, so the job pushes nothing.
+            newest=$(sh scripts/newest-release.sh --github "$VERSION")
             if [ "$newest" != true ]; then
               echo "::notice::a version above $VERSION is tagged: publishing its version tags only"
               image_tag=$VERSION; extra_tags=$VERSION
@@ -507,8 +506,7 @@ jobs:
               # Decided now (see the concurrency comment): an older version
               # never takes the "Latest" mark. A failed or partial listing
               # fails this step before any release is created.
-              tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref')
-              newest=$(printf '%s\n' "$tags" | sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
+              newest=$(sh scripts/newest-release.sh --github "$VERSION")
               if [ "$newest" = true ]; then args+=(--latest); else args+=(--latest=false); fi
             fi
           fi
@@ -580,8 +578,7 @@ jobs:
           # Decided now (see the concurrency comment). A failed or partial
           # listing fails this step before the tap is touched.
           if [ "$FORMULA" = marsh ]; then
-            tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref')
-            newest=$(printf '%s\n' "$tags" | sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
+            newest=$(sh scripts/newest-release.sh --github "$VERSION")
             if [ "$newest" != true ]; then echo "a version above $VERSION is tagged; the $FORMULA formula stays"; exit 0; fi
           fi
           case $FORMULA in marsh) class=Marsh;; marsh-nightly) class=MarshNightly;; *) echo "unknown formula $FORMULA" >&2; exit 1;; esac
