@@ -703,24 +703,36 @@ struct RetainedWorker {
     /// Requests the reader sends the worker (cancels, closes), and whether
     /// a thread is writing them: one writer at a time, never the reader.
     soon: Mutex<(std::collections::VecDeque<WorkerRequest>, bool)>,
+    /// Writer threads `send_soon` started (tests).
+    #[cfg(test)]
+    soon_writers: AtomicUsize,
 }
 
+/// Requests the reader's queue for the worker holds at most. Past it, a
+/// channel close is not queued: the worker then keeps that channel open,
+/// which holds the job at its channel limit. A cancel is always queued.
+const SOON_REQUESTS: usize = 1024;
+
 /// Queue `request` for the worker without blocking the caller. One writer
-/// thread at a time drains the queue. It holds at most a cancel per
-/// attempt and a close per channel the worker still counts as open, so a
-/// job is held at its channel limit while the queue waits.
+/// thread at a time drains the queue, which holds at most
+/// [`SOON_REQUESTS`] closes.
 fn send_soon(worker: &Arc<RetainedWorker>, request: WorkerRequest) {
     {
         let mut soon = worker
             .soon
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if soon.0.len() >= SOON_REQUESTS && matches!(request, WorkerRequest::CapClose { .. }) {
+            return;
+        }
         soon.0.push_back(request);
         if soon.1 {
             return;
         }
         soon.1 = true;
     }
+    #[cfg(test)]
+    worker.soon_writers.fetch_add(1, Ordering::AcqRel);
     let worker = Arc::clone(worker);
     thread::spawn(move || {
         loop {
@@ -932,6 +944,14 @@ impl AttemptRoute {
                 if self.closed_channels.remove(channel) {
                     return Admission::Drop;
                 }
+            }
+            // A channel closed or refused here: the consumer never hears
+            // more of it (it never heard of a refused one).
+            WorkerResponse::ChanEof { channel, .. }
+            | WorkerResponse::ChanCredit { channel, .. }
+                if self.closed_channels.contains(channel) =>
+            {
+                return Admission::Drop;
             }
             // The job's side of an endpoint channel is done: no more of its
             // data follows (`ChanEof` comes after it on the transport).
@@ -6546,6 +6566,8 @@ impl StockSbx {
             active: AtomicUsize::new(0),
             loss: WorkerLoss::default(),
             soon: Mutex::default(),
+            #[cfg(test)]
+            soon_writers: AtomicUsize::new(0),
         });
         let reader_worker = Arc::clone(&retained);
         thread::spawn(move || {

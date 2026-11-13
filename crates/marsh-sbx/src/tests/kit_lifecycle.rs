@@ -834,18 +834,10 @@ fn a_worker_that_fails_before_ready_is_reported_replaceable_and_its_vm_replaced(
     }
 }
 
-/// B-01, through a real attempt route and its reader: `cap.sock` data the
-/// consumer takes frees the budget (four budgets' worth passes uncut), and
-/// data a stalled consumer leaves past the budget cuts that channel on both
-/// sides: the worker is told to close it, and the consumer gets its close,
-/// marked as a cut.
-#[test]
-fn cap_sock_data_is_budgeted_against_what_the_consumer_has_not_taken() {
-    use marsh_worker::{WorkerRequest, WorkerResponse};
-    let model = StockModel::new();
-    let (adapter, kit, ready) = warm_kit(&model, KIT);
+/// A worker attempt launched on the stock model, for driving its route.
+fn cap_attempt(model: &Arc<StockModel>, attempt: &str) -> WorkerChannel {
+    let (adapter, kit, ready) = warm_kit(model, KIT);
     let source = directory(kit.dir.path(), "project");
-    let attempt = "attempt-cap";
     let grants = adapter
         .prepare_job_grants(
             &ready,
@@ -861,6 +853,40 @@ fn cap_sock_data_is_budgeted_against_what_the_consumer_has_not_taken() {
     let launched = adapter
         .launch_worker(&ready, &grants, attempt, job_spec())
         .unwrap();
+    // The adapter and its grants go; the retained worker and route stay.
+    std::mem::forget((adapter, kit));
+    launched
+}
+
+fn cap_data(attempt: &str, channel: u32, bytes: usize) -> marsh_worker::WorkerResponse {
+    marsh_worker::WorkerResponse::CapData {
+        attempt: attempt.into(),
+        channel,
+        bytes: vec![7; bytes],
+    }
+}
+
+fn cap_open(attempt: &str, channel: u32) -> marsh_worker::WorkerResponse {
+    marsh_worker::WorkerResponse::CapOpen {
+        attempt: attempt.into(),
+        channel,
+    }
+}
+
+const BUDGET: usize = 8 << 20;
+const CHUNK: usize = 64 * 1024;
+
+/// B-01, through a real attempt route and its reader: `cap.sock` data the
+/// consumer takes frees the budget (four budgets' worth passes uncut), and
+/// data a stalled consumer leaves past the budget cuts that channel on both
+/// sides: the worker is told to close it, and the consumer gets its close,
+/// marked as a cut.
+#[test]
+fn cap_sock_data_is_budgeted_against_what_the_consumer_has_not_taken() {
+    use marsh_worker::{WorkerRequest, WorkerResponse};
+    let model = StockModel::new();
+    let attempt = "attempt-cap";
+    let launched = cap_attempt(&model, attempt);
     let responses = &launched.responses;
     let next = || responses.recv_timeout(WAIT_LIMIT).unwrap();
     model.worker_says(
@@ -901,4 +927,140 @@ fn cap_sock_data_is_budgeted_against_what_the_consumer_has_not_taken() {
     assert_eq!(taken, budget / chunk);
     assert!(responses.take_cut(1));
     assert!(!responses.take_cut(1));
+}
+
+/// B-01: with the budget full and the consumer stalled, openings are
+/// refused on the worker only: one writer thread sends every close, the
+/// worker gets a close for each, and the consumer never hears of them.
+#[test]
+fn refused_openings_reach_only_the_worker_through_one_writer() {
+    use marsh_worker::{WorkerRequest, WorkerResponse};
+    let model = StockModel::new();
+    let attempt = "attempt-churn";
+    let launched = cap_attempt(&model, attempt);
+    // Fill the budget exactly: channel 1 is cut at its 128th chunk (its
+    // close is charged), channel 2's opening and one chunk fill the rest.
+    model.worker_says(KIT, &cap_open(attempt, 1));
+    for _ in 0..BUDGET / CHUNK {
+        model.worker_says(KIT, &cap_data(attempt, 1, CHUNK));
+    }
+    model.worker_says(KIT, &cap_open(attempt, 2));
+    model.worker_says(KIT, &cap_data(attempt, 2, CHUNK - 3 * 256));
+    model.wait_worker_request(KIT, |request| {
+        matches!(request, WorkerRequest::CapClose { channel: 1, .. })
+    });
+    let input = model.gate_worker_input();
+    for channel in 3..=52 {
+        model.worker_says(KIT, &cap_open(attempt, channel));
+    }
+    input.wait_entered(1);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        launched
+            .responses
+            .worker
+            .soon_writers
+            .load(Ordering::Acquire),
+        2,
+        "a writer per refusal (one wrote channel 1's close earlier)"
+    );
+    input.release();
+    for channel in 3..=52 {
+        model.wait_worker_request(KIT, |request| {
+            matches!(request, WorkerRequest::CapClose { channel: c, .. } if *c == channel)
+        });
+    }
+    let mut seen = Vec::new();
+    while let Ok(response) = launched.responses.recv_timeout(Duration::from_millis(300)) {
+        seen.push(response);
+    }
+    assert!(
+        seen.iter().all(|response| matches!(
+            response,
+            WorkerResponse::CapOpen { channel: 1 | 2, .. }
+                | WorkerResponse::CapData { channel: 1 | 2, .. }
+                | WorkerResponse::CapClose { channel: 1, .. }
+        )),
+        "a refused opening reached the consumer"
+    );
+    assert_eq!(seen.len(), 1 + (BUDGET / CHUNK - 1) + 1 + 1 + 1);
+}
+
+/// B-01: the close the consumer gets for a cut channel counts against the
+/// budget until taken, like an opening: with it queued, data that would
+/// fit only without it cuts the next channel.
+#[test]
+fn a_cut_channels_queued_close_counts_against_the_budget() {
+    use marsh_worker::{WorkerRequest, WorkerResponse};
+    let model = StockModel::new();
+    let attempt = "attempt-charge";
+    let launched = cap_attempt(&model, attempt);
+    let responses = &launched.responses;
+    let next = || responses.recv_timeout(WAIT_LIMIT).unwrap();
+    model.worker_says(KIT, &cap_open(attempt, 1));
+    assert!(matches!(next(), WorkerResponse::CapOpen { channel: 1, .. }));
+    for _ in 0..=BUDGET / CHUNK {
+        model.worker_says(KIT, &cap_data(attempt, 1, CHUNK));
+    }
+    model.wait_worker_request(KIT, |request| {
+        matches!(request, WorkerRequest::CapClose { channel: 1, .. })
+    });
+    for _ in 0..BUDGET / CHUNK {
+        assert!(matches!(next(), WorkerResponse::CapData { channel: 1, .. }));
+    }
+    // Held now: channel 1's close, then channel 2's opening (256 each).
+    model.worker_says(KIT, &cap_open(attempt, 2));
+    for _ in 0..BUDGET / CHUNK - 1 {
+        model.worker_says(KIT, &cap_data(attempt, 2, CHUNK));
+    }
+    model.worker_says(KIT, &cap_data(attempt, 2, CHUNK - 512));
+    // Held: 512 + 8 MiB - 512 = the budget. One byte more cuts channel 2.
+    model.worker_says(KIT, &cap_data(attempt, 2, 1));
+    model.wait_worker_request(KIT, |request| {
+        matches!(request, WorkerRequest::CapClose { channel: 2, .. })
+    });
+}
+
+/// B-01: while the worker's input is stalled, the closes queued for it are
+/// bounded, however many openings are refused.
+#[test]
+fn closes_queued_for_a_stalled_worker_are_bounded() {
+    use marsh_worker::WorkerRequest;
+    let model = StockModel::new();
+    let attempt = "attempt-stalled";
+    let launched = cap_attempt(&model, attempt);
+    model.worker_says(KIT, &cap_open(attempt, 1));
+    for _ in 0..BUDGET / CHUNK {
+        model.worker_says(KIT, &cap_data(attempt, 1, CHUNK));
+    }
+    model.worker_says(KIT, &cap_open(attempt, 2));
+    model.worker_says(KIT, &cap_data(attempt, 2, CHUNK - 3 * 256));
+    model.wait_worker_request(KIT, |request| {
+        matches!(request, WorkerRequest::CapClose { channel: 1, .. })
+    });
+    let input = model.gate_worker_input();
+    for channel in 3..3000 {
+        model.worker_says(KIT, &cap_open(attempt, channel));
+    }
+    model.worker_says(KIT, &cap_open(attempt, 3000));
+    input.wait_entered(1);
+    let queued = || launched.responses.worker.soon.lock().unwrap().0.len();
+    let deadline = std::time::Instant::now() + WAIT_LIMIT;
+    while launched
+        .responses
+        .worker
+        .routes
+        .lock()
+        .unwrap()
+        .get(attempt)
+        .is_some_and(|route| !route.closed_channels.contains(&3000))
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "opening 3000 never read"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(queued() <= 1024, "{} closes queued", queued());
+    input.release();
 }
