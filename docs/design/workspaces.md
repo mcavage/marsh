@@ -423,8 +423,12 @@ is 130. `split` exits with the first nonzero code in declaration order.
   C-quoting included), and 100,000 changed paths (`rejected: capture
   limit`), with a 5 s deadline per text diff. Each walked tree holds at
   most 1,000,000 entries (directories included) and 256 MiB of path names,
-  256 levels deep; a directory is listed only while its entries fit, and
-  the plain walk holds one directory descriptor at a time. A fork with
+  256 levels deep; a directory is listed only while its entries fit, every
+  name listed counts (an ignored one too, as it stays in memory while the
+  walk is below it), and the plain walk holds one directory descriptor at
+  a time. Each refusal names the limit and what to do: list generated
+  trees in `.gitignore` in a Git project, or have the branch change fewer
+  files. A fork with
   more new entries than the change bound is refused while it is walked;
   edits are refused at the change bound. Paths in
   `files` are C-quoted when they contain control characters, `"`, or `\`.

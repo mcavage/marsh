@@ -996,7 +996,9 @@ fn a_branch_past_the_change_bound_fails_its_capture_and_the_daemon_serves_on() {
     let shown = daemon.server.splits.record(&id).unwrap();
     let status = shown.branches[0].status.clone().unwrap_or_default();
     assert!(
-        status.contains("capture limit: the fork has more than 50 entries the snapshot does not"),
+        status.contains(
+            "capture limit: the branch added more than 50 paths; have the branch change fewer files"
+        ),
         "{status}"
     );
     daemon.answers();

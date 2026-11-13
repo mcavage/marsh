@@ -86,6 +86,13 @@ impl Bounds {
 pub(crate) static TEST_CHANGE_LIMIT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
+/// What a refusal for the size of a walked tree tells the user to do.
+const TREE_REMEDY: &str =
+    "make the project a Git project and list generated trees such as node_modules in .gitignore";
+/// What a refusal for the size of a branch's changes tells the user to do.
+const CHANGE_REMEDY: &str =
+    "have the branch change fewer files, or list what it generates in .gitignore";
+
 /// What one walk holds against its bounds: entries, directories included,
 /// and their path bytes. A directory is listed only while its entries fit.
 struct Walk {
@@ -108,31 +115,33 @@ impl Walk {
         }
     }
 
-    fn list(&self, dir: &Dir, relative: &Path) -> Result<Vec<(OsString, FileType)>, String> {
+    /// List a directory, charging every name listed (ignored ones too: a
+    /// listing stays in memory while the walk is below it) and its path
+    /// bytes to the walk.
+    fn list(&mut self, dir: &Dir, relative: &Path) -> Result<Vec<(OsString, FileType)>, String> {
         if relative.components().count() >= self.bounds.depth {
             return Err(format!(
-                "capture limit: more than {} directory levels",
+                "capture limit: more than {} directory levels; {TREE_REMEDY}",
                 self.bounds.depth
             ));
         }
-        dir.entries_at_most(self.limit - self.seen)
+        let listed = dir
+            .entries_at_most(self.limit - self.seen)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| self.past_limit.clone())
-    }
-
-    fn count(&mut self, key: &[u8]) -> Result<(), String> {
-        self.seen += 1;
-        self.bytes += key.len() as u64;
-        if self.seen > self.limit {
-            return Err(self.past_limit.clone());
-        }
+            .ok_or_else(|| self.past_limit.clone())?;
+        let prefix = relative.as_os_str().len() as u64 + 1;
+        self.seen += listed.len();
+        self.bytes += listed
+            .iter()
+            .map(|(name, _)| prefix + name.len() as u64)
+            .sum::<u64>();
         if self.bytes > self.bounds.path_bytes {
             return Err(format!(
-                "capture limit: paths in one tree exceed {} MiB",
+                "capture limit: paths in one tree exceed {} MiB; {TREE_REMEDY}",
                 self.bounds.path_bytes >> 20
             ));
         }
-        Ok(())
+        Ok(listed)
     }
 }
 
@@ -1230,7 +1239,6 @@ fn tree(
             }
             let path = relative.join(&name);
             let key = path.as_os_str().as_bytes().to_vec();
-            walk.count(&key)?;
             if kind == FileType::Directory {
                 stack.push(path);
             } else {
@@ -1327,7 +1335,6 @@ fn walk_fork(
         {
             continue;
         }
-        walk.count(&key)?;
         if kind == FileType::Directory {
             walk_fork(
                 &dir.open(&name).map_err(io)?,
@@ -1404,11 +1411,25 @@ pub fn capture(
 /// A walked tree's files and symlinks, by path.
 type Tree = BTreeMap<Vec<u8>, Entry>;
 
+/// A changed file that could not be read, with the remedy when it is over
+/// [`FILE_LIMIT`].
+fn read_failed(path: &[u8], error: &io::Error) -> String {
+    let remedy = if error.to_string().contains("exceeds the capture limit") {
+        "; keep files over 32 MiB out of what the branch changes"
+    } else {
+        ""
+    };
+    format!(
+        "capture limit: {}: {error}{remedy}",
+        String::from_utf8_lossy(path)
+    )
+}
+
 /// What exceeds the bytes read for changed files and link targets.
 fn read_past(total: u64, bounds: &Bounds) -> Option<String> {
     (total > bounds.read).then(|| {
         format!(
-            "capture limit: changed bytes exceed {} MiB",
+            "capture limit: changed bytes exceed {} MiB; {CHANGE_REMEDY}",
             bounds.read >> 20
         )
     })
@@ -1422,7 +1443,7 @@ fn walk_both(
     bounds: Bounds,
 ) -> Result<(Tree, Tree), String> {
     let entries_past = format!(
-        "capture limit: more than {} entries in one tree",
+        "capture limit: more than {} entries in one tree; {TREE_REMEDY}",
         bounds.entries
     );
     let mut walk = Walk::new(bounds, bounds.entries, entries_past.clone());
@@ -1432,7 +1453,7 @@ fn walk_both(
     let added = walk.seen.saturating_add(bounds.changes);
     let mut walk = if added < bounds.entries {
         let past = format!(
-            "capture limit: the fork has more than {} entries the snapshot does not",
+            "capture limit: the branch added more than {} paths; {CHANGE_REMEDY}",
             bounds.changes
         );
         Walk::new(bounds, added, past)
@@ -1498,9 +1519,8 @@ fn capture_within(
                         Some((0o120_000, target.clone()))
                     }
                     Some(Entry::File { executable, .. }) => {
-                        let bytes = read_at(root, &path, FILE_LIMIT).map_err(|e| {
-                            format!("capture limit: {}: {e}", String::from_utf8_lossy(&path))
-                        })?;
+                        let bytes =
+                            read_at(root, &path, FILE_LIMIT).map_err(|e| read_failed(&path, &e))?;
                         total += bytes.len() as u64;
                         if let Some(error) = over(total) {
                             return Err(error);
@@ -1516,7 +1536,7 @@ fn capture_within(
         }
         if changes.len() >= bounds.changes {
             return Err(format!(
-                "capture limit: more than {} changed paths",
+                "capture limit: more than {} changed paths; {CHANGE_REMEDY}",
                 bounds.changes
             ));
         }
@@ -1534,7 +1554,7 @@ fn capture_within(
         listed += listing(&path).len() as u64 + 3 + path.len() as u64;
         if patch.len() as u64 + listed > bounds.output {
             return Err(format!(
-                "capture limit: the listing and patch exceed {} MiB",
+                "capture limit: the listing and patch exceed {} MiB; {CHANGE_REMEDY}",
                 bounds.output >> 20
             ));
         }
@@ -1911,7 +1931,7 @@ mod tests {
         for exclude in [None, Some(&b""[..])] {
             assert_eq!(
                 capture_bounded(&split, exclude, bounds).unwrap_err(),
-                "capture limit: the fork has more than 23 entries the snapshot does not"
+                format!("capture limit: the branch added more than 23 paths; {CHANGE_REMEDY}")
             );
             assert!(!split.root.join("out/files").exists());
         }
@@ -1940,7 +1960,7 @@ mod tests {
         };
         assert_eq!(
             capture_bounded(&split, None, bounds).unwrap_err(),
-            "capture limit: more than 20 changed paths"
+            format!("capture limit: more than 20 changed paths; {CHANGE_REMEDY}")
         );
     }
 
@@ -1958,7 +1978,7 @@ mod tests {
         };
         assert_eq!(
             capture_bounded(&split, None, bounds).unwrap_err(),
-            "capture limit: more than 3 entries in one tree"
+            format!("capture limit: more than 3 entries in one tree; {TREE_REMEDY}")
         );
         let base = split.root.join("base");
         fs::remove_dir_all(&base).unwrap();
@@ -1966,7 +1986,7 @@ mod tests {
         for exclude in [None, Some(&b""[..])] {
             assert_eq!(
                 capture_bounded(&split, exclude, bounds).unwrap_err(),
-                "capture limit: more than 3 entries in one tree"
+                format!("capture limit: more than 3 entries in one tree; {TREE_REMEDY}")
             );
         }
     }
@@ -1988,7 +2008,7 @@ mod tests {
         for exclude in [None, Some(&b""[..])] {
             assert_eq!(
                 capture_bounded(&split, exclude, bounds).unwrap_err(),
-                "capture limit: more than 5 directory levels"
+                format!("capture limit: more than 5 directory levels; {TREE_REMEDY}")
             );
         }
     }
@@ -2008,7 +2028,7 @@ mod tests {
         };
         assert_eq!(
             capture_bounded(&split, None, bounds).unwrap_err(),
-            "capture limit: paths in one tree exceed 0 MiB"
+            format!("capture limit: paths in one tree exceed 0 MiB; {TREE_REMEDY}")
         );
     }
 
@@ -2028,7 +2048,7 @@ mod tests {
         };
         assert_eq!(
             capture_bounded(&split, None, tight).unwrap_err(),
-            "capture limit: the listing and patch exceed 0 MiB"
+            format!("capture limit: the listing and patch exceed 0 MiB; {CHANGE_REMEDY}")
         );
         assert_eq!(
             capture_bounded(&split, None, Bounds::DEFAULT)
@@ -2053,7 +2073,7 @@ mod tests {
         };
         assert_eq!(
             capture_bounded(&split, None, tight).unwrap_err(),
-            "capture limit: changed bytes exceed 0 MiB"
+            format!("capture limit: changed bytes exceed 0 MiB; {CHANGE_REMEDY}")
         );
         assert_eq!(
             capture_bounded(&split, None, Bounds::DEFAULT)
@@ -2061,6 +2081,109 @@ mod tests {
                 .len(),
             20
         );
+    }
+
+    /// A-06: names a Git walk lists but ignores stay in memory while it walks
+    /// below them, so they count too: ten levels of eighty ignored 200-byte
+    /// names exceed a path budget that each level alone fits in.
+    #[test]
+    fn ignored_names_pending_in_a_git_walk_count_toward_its_paths() {
+        let split = split();
+        copy_tree(&split.base, &split.fork);
+        let mut level = split.fork.clone();
+        for depth in 0..10 {
+            for index in 0..80 {
+                let name = format!("{depth}-{index}-{}.ign", "n".repeat(190));
+                fs::write(level.join(name), "").unwrap();
+            }
+            level = level.join("d");
+            fs::create_dir(&level).unwrap();
+        }
+        let bounds = Bounds {
+            path_bytes: 100_000,
+            ..Bounds::DEFAULT
+        };
+        assert_eq!(
+            capture_bounded(&split, Some(b"*.ign"), bounds).unwrap_err(),
+            format!("capture limit: paths in one tree exceed 0 MiB; {TREE_REMEDY}")
+        );
+    }
+
+    /// A-06: the plain walk holds one directory descriptor at a time, so a
+    /// tree of 2,000 directories is captured under a 1,024-descriptor limit,
+    /// by both walks.
+    #[test]
+    fn a_wide_tree_of_directories_fits_a_small_descriptor_limit() {
+        let split = split();
+        for index in 0..2000 {
+            fs::create_dir(split.base.join(format!("d{index}"))).unwrap();
+        }
+        copy_tree(&split.base, &split.fork);
+        for index in 0..2000 {
+            fs::write(split.fork.join(format!("d{index}/f")), "x\n").unwrap();
+        }
+        let nofile = rustix::process::Resource::Nofile;
+        let limit = rustix::process::getrlimit(nofile);
+        rustix::process::setrlimit(
+            nofile,
+            rustix::process::Rlimit {
+                current: Some(1024),
+                maximum: limit.maximum,
+            },
+        )
+        .unwrap();
+        let plain = capture_bounded(&split, None, Bounds::DEFAULT).map(|changes| changes.len());
+        let again = split_like(&split);
+        let git = capture_bounded(&again, Some(b""), Bounds::DEFAULT).map(|changes| changes.len());
+        rustix::process::setrlimit(nofile, limit).unwrap();
+        assert_eq!(plain, Ok(2000));
+        assert_eq!(git, Ok(2000));
+    }
+
+    /// Another split with the same base and fork (its own `out`).
+    fn split_like(original: &Split) -> Split {
+        let split = split();
+        fs::remove_dir(&split.base).unwrap();
+        copy_tree(&original.base, &split.base);
+        copy_tree(&original.fork, &split.fork);
+        split
+    }
+
+    /// A-06: the listing and patch are counted to the byte, with the
+    /// listing's own C-quoting of control bytes and `"`: a bound one byte
+    /// short of what they hold refuses, and one equal to it captures.
+    #[test]
+    fn the_listing_and_patch_are_counted_to_the_byte() {
+        let split = split();
+        copy_tree(&split.base, &split.fork);
+        for index in 0..20 {
+            let name = format!("{index}\u{1}\"{}", "\t".repeat(50));
+            fs::write(split.fork.join(name), "x\n").unwrap();
+        }
+        let tight = split_like(&split);
+        let changes = capture_bounded(&split, None, Bounds::DEFAULT).unwrap();
+        let held = fs::metadata(split.root.join("out/files")).unwrap().len()
+            + fs::metadata(split.root.join("out/diff.patch"))
+                .unwrap()
+                .len()
+            + changes
+                .iter()
+                .map(|change| change.path.len() as u64)
+                .sum::<u64>();
+        let short = Bounds {
+            output: held - 1,
+            ..Bounds::DEFAULT
+        };
+        assert_eq!(
+            capture_bounded(&tight, None, short).unwrap_err(),
+            format!("capture limit: the listing and patch exceed 0 MiB; {CHANGE_REMEDY}")
+        );
+        let exact = split_like(&split);
+        let bounds = Bounds {
+            output: held,
+            ..Bounds::DEFAULT
+        };
+        assert_eq!(capture_bounded(&exact, None, bounds).unwrap().len(), 20);
     }
 
     /// A-06: a directory wider than what the walk may still hold is refused
