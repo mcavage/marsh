@@ -1497,3 +1497,51 @@ async fn an_export_server_runs_at_most_four_calls_at_once() {
     }
     assert_eq!(backend.signals().len(), 4);
 }
+
+/// D-01: the tools of one declaration share its 4 places: two calls held
+/// on each of two tools refuse a fifth call on either.
+#[tokio::test]
+async fn the_tools_of_a_declaration_share_its_four_places() {
+    let mut backend = TestKitBackend::new(vec!["slides".into(), "employees".into()]);
+    backend.job = Job::HoldUntilSignalled;
+    let backend = Arc::new(backend);
+    let harness = TestHarness::new(backend.clone());
+    let mut first = make_declaration("slides");
+    first.tool_name = "read_slides".into();
+    let mut second = make_declaration("employees");
+    second.tool_name = "find_employee".into();
+    let connection = harness.connect_bundle(vec![first, second]).await;
+    let call = |name: &'static str| {
+        let client = connection.client.peer().clone();
+        async move {
+            let mut params = call_params(json!({"filter": "held"}));
+            params.name = name.into();
+            client.call_tool(params).await.unwrap()
+        }
+    };
+    let mut calls = Vec::new();
+    for name in [
+        "read_slides",
+        "read_slides",
+        "find_employee",
+        "find_employee",
+    ] {
+        calls.push(tokio::spawn(call(name)));
+        notified(&backend.started, "each call's job to start").await;
+    }
+    for name in ["read_slides", "find_employee"] {
+        let refused = call(name).await;
+        assert_eq!(refused.is_error, Some(true));
+        assert!(
+            error_text(&refused).contains("at most 4 calls run at once"),
+            "{refused:?}"
+        );
+    }
+    connection.server.shutdown_server().await.unwrap();
+    for call in calls {
+        assert_eq!(
+            structured(&call.await.unwrap())["data"]["outcome"],
+            "cancelled"
+        );
+    }
+}
