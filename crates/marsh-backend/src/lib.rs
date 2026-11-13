@@ -3595,98 +3595,134 @@ impl CapabilityBridges {
         };
         let (send, receive) = mpsc::sync_channel::<Vec<u8>>(64);
         self.channels.insert(channel, send);
-        let (socket, control, attempt, store, job) = (
-            self.socket.clone(),
-            self.control.clone(),
-            self.attempt.clone(),
-            self.store.clone(),
-            self.job.clone(),
-        );
-        thread::spawn(move || {
-            let close = |control: &marsh_sbx::WorkerControlHandle| {
-                let _ = control.send(&WorkerRequest::CapClose {
-                    attempt: attempt.clone(),
-                    channel,
-                });
+        let control = self.control.clone();
+        let to_worker: ToWorker =
+            Arc::new(move |request: &WorkerRequest| control.send(request).is_ok());
+        let bridge = Bridge {
+            attempt: self.attempt.clone(),
+            channel,
+            socket: self.socket.clone(),
+            token,
+            store: self.store.clone(),
+            job: self.job.clone(),
+            to_worker,
+        };
+        thread::spawn(move || bridge.run(&receive));
+    }
+}
+
+/// Sends one request to the attempt's worker; false once it is gone.
+type ToWorker = Arc<dyn Fn(&WorkerRequest) -> bool + Send + Sync>;
+
+/// One `cap.sock` channel bridged to a daemon connection.
+struct Bridge {
+    attempt: String,
+    channel: u32,
+    socket: PathBuf,
+    token: String,
+    store: DaemonStore,
+    job: String,
+    to_worker: ToWorker,
+}
+
+impl Bridge {
+    fn run(&self, receive: &mpsc::Receiver<Vec<u8>>) {
+        let (channel, attempt, token) = (self.channel, &self.attempt, &self.token);
+        // Connect only once a whole first request arrived: an idle
+        // connection holds a channel slot, never a daemon handshake.
+        let mut daemon: Option<DaemonSide> = None;
+        let mut pending = Vec::new();
+        for bytes in receive {
+            if let Some((daemon, _, _)) = &mut daemon {
+                if daemon.write_all(&bytes).is_err() {
+                    break;
+                }
+                continue;
+            }
+            pending.extend_from_slice(&bytes);
+            let Some(length) = pending.get(..4).map(|prefix| {
+                u32::from_be_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as usize
+            }) else {
+                continue;
             };
-            // Connect only once a whole first request arrived: an idle
-            // connection holds a channel slot, never a daemon handshake.
-            let mut daemon: Option<DaemonSide> = None;
-            let mut pending = Vec::new();
-            for bytes in receive {
-                if let Some((daemon, _, _)) = &mut daemon {
-                    if daemon.write_all(&bytes).is_err() {
-                        break;
-                    }
-                    continue;
-                }
-                pending.extend_from_slice(&bytes);
-                let Some(length) = pending.get(..4).map(|prefix| {
-                    u32::from_be_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as usize
-                }) else {
-                    continue;
-                };
-                if length > marsh_daemon::MAX_FRAME_BYTES {
-                    break;
-                }
-                if pending.len() < 4 + length {
-                    continue;
-                }
-                let Ok(frame) =
-                    marsh_daemon::Client::reauthorize_envelope(&pending[4..4 + length], &token)
-                else {
-                    break;
-                };
-                let mut out = u32::try_from(frame.len())
-                    .unwrap_or(0)
-                    .to_be_bytes()
-                    .to_vec();
-                out.extend_from_slice(&frame);
-                out.extend_from_slice(&pending[4 + length..]);
-                // The job's slot among the daemon's connections, held while
-                // this one lasts: jobs never take the host's share.
-                let slot = match store.capability_connection(&job) {
-                    Ok(slot) => slot,
-                    Err(message) => {
-                        refuse_capability_channel(&control, &attempt, channel, message);
-                        break;
-                    }
-                };
-                let Ok(mut stream) = marsh_runtime::connect_unix(&socket) else {
-                    break;
-                };
-                let Ok(mut reader) = stream.try_clone() else {
-                    break;
-                };
-                let (reply_control, reply_attempt) = (control.clone(), attempt.clone());
-                let replies = thread::spawn(move || {
-                    let mut buffer = vec![0_u8; 32 * 1024];
-                    while let Ok(count) = reader.read(&mut buffer) {
-                        if count == 0
-                            || reply_control
-                                .send(&WorkerRequest::CapData {
-                                    attempt: reply_attempt.clone(),
-                                    channel,
-                                    bytes: buffer[..count].to_vec(),
-                                })
-                                .is_err()
-                        {
-                            break;
-                        }
-                    }
-                });
-                if stream.write_all(&out).is_err() {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    let _ = replies.join();
-                    break;
-                }
-                daemon = Some((stream, replies, slot));
+            if length > marsh_daemon::MAX_FRAME_BYTES {
+                break;
             }
-            if let Some((stream, replies, _slot)) = daemon {
-                let _ = stream.shutdown(std::net::Shutdown::Write);
+            if pending.len() < 4 + length {
+                continue;
+            }
+            let Ok(frame) =
+                marsh_daemon::Client::reauthorize_envelope(&pending[4..4 + length], token)
+            else {
+                break;
+            };
+            let mut out = u32::try_from(frame.len())
+                .unwrap_or(0)
+                .to_be_bytes()
+                .to_vec();
+            out.extend_from_slice(&frame);
+            out.extend_from_slice(&pending[4 + length..]);
+            // The job's slot among the daemon's connections, held while
+            // this one lasts: jobs never take the host's share.
+            let slot = match self.store.capability_connection(&self.job) {
+                Ok(slot) => slot,
+                Err(message) => {
+                    self.refuse(message);
+                    break;
+                }
+            };
+            let Ok(mut stream) = marsh_runtime::connect_unix(&self.socket) else {
+                break;
+            };
+            let Ok(mut reader) = stream.try_clone() else {
+                break;
+            };
+            let (to_worker, reply_attempt) = (Arc::clone(&self.to_worker), attempt.clone());
+            let replies = thread::spawn(move || {
+                let mut buffer = vec![0_u8; 32 * 1024];
+                while let Ok(count) = reader.read(&mut buffer) {
+                    if count == 0
+                        || !to_worker(&WorkerRequest::CapData {
+                            attempt: reply_attempt.clone(),
+                            channel,
+                            bytes: buffer[..count].to_vec(),
+                        })
+                    {
+                        break;
+                    }
+                }
+            });
+            if stream.write_all(&out).is_err() {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
                 let _ = replies.join();
+                break;
             }
-            close(&control);
+            daemon = Some((stream, replies, slot));
+        }
+        if let Some((stream, replies, _slot)) = daemon {
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+            let _ = replies.join();
+        }
+        (self.to_worker)(&WorkerRequest::CapClose {
+            attempt: attempt.clone(),
+            channel,
+        });
+    }
+
+    /// The job's reply on a channel the daemon has no slot for.
+    fn refuse(&self, message: String) {
+        let mut reply = Vec::new();
+        let _ = marsh_daemon::write_frame(
+            &mut reply,
+            &marsh_daemon::PublicReply::Error {
+                code: marsh_daemon::ErrorCode::InvalidRequest,
+                message,
+            },
+        );
+        (self.to_worker)(&WorkerRequest::CapData {
+            attempt: self.attempt.clone(),
+            channel: self.channel,
+            bytes: reply,
         });
     }
 }
@@ -3697,28 +3733,6 @@ type DaemonSide = (
     thread::JoinHandle<()>,
     marsh_daemon::CapabilityConnection,
 );
-
-/// The job's reply on a channel the daemon has no slot for.
-fn refuse_capability_channel(
-    control: &marsh_sbx::WorkerControlHandle,
-    attempt: &str,
-    channel: u32,
-    message: String,
-) {
-    let mut reply = Vec::new();
-    let _ = marsh_daemon::write_frame(
-        &mut reply,
-        &marsh_daemon::PublicReply::Error {
-            code: marsh_daemon::ErrorCode::InvalidRequest,
-            message,
-        },
-    );
-    let _ = control.send(&WorkerRequest::CapData {
-        attempt: attempt.to_owned(),
-        channel,
-        bytes: reply,
-    });
-}
 
 impl Drop for CapabilityBridges {
     fn drop(&mut self) {
