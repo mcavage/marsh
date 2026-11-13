@@ -2552,10 +2552,12 @@ impl DaemonBackend for StockDaemonBackend {
         }
         // `marsh run --usage PARSER` (the task tool): the agent reports its
         // token usage on stdout; read it as the output streams past.
-        let mut usage_collector = request
-            .usage
-            .as_deref()
-            .and_then(marsh_contracts::usage::Collector::new);
+        let mut usage_collector = request.usage.as_deref().and_then(|parser| {
+            marsh_contracts::usage::Collector::bounded(
+                parser,
+                marsh_contracts::usage::DAEMON_MAX_LINE,
+            )
+        });
         // Drop-ins are read at every job start, so an edit applies to the
         // next job (`docs/peer-review.md`). Only a root job (the agent that reports to the user) is asked for
         // a review: a reviewer or another child does not start its own.

@@ -30,6 +30,13 @@ pub const PARSERS: [&str; 3] = [CLAUDE_JSON, CODEX_JSONL, PI_JSONL];
 /// A line longer than this is not read for usage (pi's streaming updates
 /// repeat the whole message; they are skipped without being buffered).
 const MAX_LINE: usize = 8 * 1024 * 1024;
+/// The longest line the daemon reads for a job's usage
+/// ([`Collector::bounded`]): it holds one such line for every live job. A
+/// longer result line (a final answer over 1 MiB) is skipped, and the job
+/// reports no usage.
+pub const DAEMON_MAX_LINE: usize = 1024 * 1024;
+/// The longest model name kept; a longer one is not a model name.
+const MAX_MODEL: usize = 128;
 /// Bytes of a line read before deciding whether its `type` matters.
 const TYPE_PREFIX: usize = 64;
 
@@ -249,6 +256,7 @@ pub struct Captured {
 #[derive(Debug)]
 pub struct Collector {
     parser: &'static str,
+    max_line: usize,
     line: Vec<u8>,
     skipping: bool,
     usage: Option<Usage>,
@@ -259,9 +267,16 @@ impl Collector {
     /// A collector for `parser`, or `None` for an unknown one.
     #[must_use]
     pub fn new(parser: &str) -> Option<Self> {
+        Self::bounded(parser, MAX_LINE)
+    }
+
+    /// [`Self::new`], reading only lines of at most `max_line` bytes.
+    #[must_use]
+    pub fn bounded(parser: &str, max_line: usize) -> Option<Self> {
         let parser = PARSERS.into_iter().find(|known| *known == parser)?;
         Some(Self {
             parser,
+            max_line,
             line: Vec::new(),
             skipping: false,
             usage: None,
@@ -278,7 +293,7 @@ impl Collector {
             bytes = rest;
             if !self.skipping {
                 self.line.extend_from_slice(chunk);
-                if self.line.len() > MAX_LINE || self.uninteresting() {
+                if self.line.len() > self.max_line || self.uninteresting() {
                     self.line.clear();
                     self.skipping = true;
                 }
@@ -365,16 +380,18 @@ impl Collector {
         {
             let mut main = None::<(&str, u64)>;
             for (model, counts) in models {
-                usage.input_tokens += count(counts, "inputTokens");
-                usage.output_tokens += count(counts, "outputTokens");
-                usage.cached_tokens += count(counts, "cacheReadInputTokens");
-                usage.cache_write_tokens += count(counts, "cacheCreationInputTokens");
+                usage.add_counts(
+                    count(counts, "inputTokens"),
+                    count(counts, "outputTokens"),
+                    count(counts, "cacheReadInputTokens"),
+                    count(counts, "cacheCreationInputTokens"),
+                );
                 let output = count(counts, "outputTokens");
                 if main.is_none_or(|(_, most)| output > most) {
                     main = Some((model, output));
                 }
             }
-            usage.model = main.map(|(model, _)| model.to_owned());
+            usage.model = main.and_then(|(model, _)| model_name(model));
         } else {
             let Some(counts) = value.get("usage").filter(|usage| usage.is_object()) else {
                 return;
@@ -407,11 +424,7 @@ impl Collector {
                     .saturating_sub(cached)
                     .saturating_sub(write);
                 let output = count("output_tokens");
-                let usage = self.usage();
-                usage.input_tokens += input;
-                usage.cached_tokens += cached;
-                usage.cache_write_tokens += write;
-                usage.output_tokens += output;
+                self.usage().add_counts(input, output, cached, write);
             }
             _ => {}
         }
@@ -443,21 +456,30 @@ impl Collector {
         let (input, output) = (count("input"), count("output"));
         let (cached, write) = (count("cacheRead"), count("cacheWrite"));
         let cost = finite_cost(counts["cost"].get("total"));
-        let model = message["model"]
-            .as_str()
-            .filter(|model| !model.is_empty() && model.len() <= 128)
-            .map(str::to_owned);
+        let model = message["model"].as_str().and_then(model_name);
         let usage = self.usage();
-        usage.input_tokens += input;
-        usage.output_tokens += output;
-        usage.cached_tokens += cached;
-        usage.cache_write_tokens += write;
+        usage.add_counts(input, output, cached, write);
         if let Some(cost) = cost {
             usage.cost_usd = Some(round_cost(usage.cost_usd.unwrap_or(0.0) + cost));
         }
         if model.is_some() {
             usage.model = model;
         }
+    }
+}
+
+/// A model name an agent reported: 1 to [`MAX_MODEL`] bytes.
+fn model_name(model: &str) -> Option<String> {
+    (!model.is_empty() && model.len() <= MAX_MODEL).then(|| model.to_owned())
+}
+
+impl Usage {
+    /// Add reported counts; an agent's numbers never overflow the totals.
+    fn add_counts(&mut self, input: u64, output: u64, cached: u64, write: u64) {
+        self.input_tokens = self.input_tokens.saturating_add(input);
+        self.output_tokens = self.output_tokens.saturating_add(output);
+        self.cached_tokens = self.cached_tokens.saturating_add(cached);
+        self.cache_write_tokens = self.cache_write_tokens.saturating_add(write);
     }
 }
 
@@ -576,6 +598,48 @@ mod tests {
         assert_eq!(capture(CODEX_JSONL, b"pong\n"), Captured::default());
         assert_eq!(capture(PI_JSONL, b""), Captured::default());
         assert!(Collector::new("guess").is_none());
+    }
+
+    /// DA3-06: what a job prints cannot overflow the counts, plant an
+    /// unbounded model name, or make the daemon hold more than its line.
+    #[test]
+    fn reported_usage_is_bounded_whatever_the_job_prints() {
+        let max = u64::MAX;
+        let line = format!(
+            r#"{{"type":"result","modelUsage":{{"a":{{"inputTokens":{max},"outputTokens":1}},"b":{{"inputTokens":{max},"outputTokens":2}}}}}}"#
+        );
+        let usage = capture(CLAUDE_JSON, line.as_bytes()).usage.unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (max, 3));
+        let long = "m".repeat(MAX_MODEL + 1);
+        let line = format!(r#"{{"type":"result","modelUsage":{{"{long}":{{"outputTokens":1}}}}}}"#);
+        assert_eq!(
+            capture(CLAUDE_JSON, line.as_bytes()).usage.unwrap().model,
+            None
+        );
+        let turn = format!(r#"{{"type":"turn.completed","usage":{{"output_tokens":{max}}}}}"#);
+        let usage = capture(CODEX_JSONL, format!("{turn}\n{turn}\n").as_bytes())
+            .usage
+            .unwrap();
+        assert_eq!(usage.output_tokens, max);
+        let end = format!(
+            r#"{{"type":"message_end","message":{{"role":"assistant","usage":{{"output":{max}}}}}}}"#
+        );
+        let usage = capture(PI_JSONL, format!("{end}\n{end}\n").as_bytes())
+            .usage
+            .unwrap();
+        assert_eq!(usage.output_tokens, max);
+        // The daemon's collector holds at most its line bound, and a result
+        // line past it is skipped.
+        let mut collector = Collector::bounded(CLAUDE_JSON, DAEMON_MAX_LINE).unwrap();
+        collector.feed(br#"{"type":"result","result":""#);
+        let filler = vec![b'x'; 64 * 1024];
+        for _ in 0..(DAEMON_MAX_LINE / filler.len() + 2) {
+            collector.feed(&filler);
+            assert!(collector.line.len() <= DAEMON_MAX_LINE);
+        }
+        collector.feed(br#"","usage":{"output_tokens":5}}"#);
+        collector.feed(b"\n");
+        assert_eq!(collector.finish().usage, None);
     }
 
     #[test]
