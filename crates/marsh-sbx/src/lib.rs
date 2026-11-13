@@ -130,6 +130,14 @@ const SUPERVISOR_RECENT: Duration = Duration::from_secs(2);
 const RETAINED_PROCESS_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const RETAINED_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const RETAINED_RESPONSE_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// `cap.sock` bytes one attempt's route holds for its consumer at most. The
+/// worker sends them with no credit, so past this the channel that sent
+/// them is closed rather than queued (endpoint channels have credit and are
+/// not counted).
+const RETAINED_CAPABILITY_BUFFER_BYTES: usize = 8 * 1024 * 1024;
+/// What a channel's opening counts toward that bound, so a job opening and
+/// closing connections in a loop is bounded too.
+const RETAINED_CHANNEL_OPEN_BYTES: usize = 256;
 static NEXT_LOCAL_SCRATCH: AtomicU64 = AtomicU64::new(1);
 static NEXT_SHELL_MOUNT: AtomicU64 = AtomicU64::new(1);
 const SHELL_MOUNT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -786,24 +794,111 @@ impl Drop for PendingWorkerPing<'_> {
     }
 }
 
+/// A response on its attempt's route, with the bytes counted for it until
+/// the consumer takes it.
+struct Routed {
+    response: WorkerResponse,
+    output: usize,
+    capability: usize,
+}
+
 struct AttemptRoute {
-    send: mpsc::Sender<WorkerResponse>,
+    send: mpsc::Sender<Routed>,
     queued_bytes: usize,
     byte_limit: usize,
     overflowing: bool,
+    capability_bytes: usize,
+    capability_limit: usize,
+    /// Endpoint channels (`ChanOpen`): their data is credit-limited.
+    endpoint_channels: BTreeSet<u32>,
+    /// `cap.sock` channels closed for overflow: their later frames are
+    /// dropped, and the worker's own close is not passed on twice.
+    closed_channels: BTreeSet<u32>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum Admission {
+    Deliver {
+        output: usize,
+        capability: usize,
+    },
+    /// Output past the budget: the attempt is cancelled once.
+    Overflow,
+    /// `cap.sock` data past the budget: close this channel.
+    Close(u32),
+    Drop,
 }
 
 impl AttemptRoute {
-    fn admit(&mut self, response: &WorkerResponse) -> bool {
+    fn new(send: mpsc::Sender<Routed>, byte_limit: usize) -> Self {
+        Self {
+            send,
+            queued_bytes: 0,
+            byte_limit,
+            overflowing: false,
+            capability_bytes: 0,
+            capability_limit: RETAINED_CAPABILITY_BUFFER_BYTES,
+            endpoint_channels: BTreeSet::new(),
+            closed_channels: BTreeSet::new(),
+        }
+    }
+
+    fn admit(&mut self, response: &WorkerResponse) -> Admission {
+        match response {
+            WorkerResponse::CapOpen { channel, .. } | WorkerResponse::ChanOpen { channel, .. } => {
+                if self
+                    .capability_bytes
+                    .saturating_add(RETAINED_CHANNEL_OPEN_BYTES)
+                    > self.capability_limit
+                {
+                    self.closed_channels.insert(*channel);
+                    return Admission::Close(*channel);
+                }
+                if matches!(response, WorkerResponse::ChanOpen { .. }) {
+                    self.endpoint_channels.insert(*channel);
+                }
+                self.capability_bytes += RETAINED_CHANNEL_OPEN_BYTES;
+                return Admission::Deliver {
+                    output: 0,
+                    capability: RETAINED_CHANNEL_OPEN_BYTES,
+                };
+            }
+            WorkerResponse::CapClose { channel, .. } => {
+                self.endpoint_channels.remove(channel);
+                if self.closed_channels.remove(channel) {
+                    return Admission::Drop;
+                }
+            }
+            WorkerResponse::CapData { channel, bytes, .. }
+                if !self.endpoint_channels.contains(channel) =>
+            {
+                if self.closed_channels.contains(channel) {
+                    return Admission::Drop;
+                }
+                if self.capability_bytes.saturating_add(bytes.len()) > self.capability_limit {
+                    self.closed_channels.insert(*channel);
+                    return Admission::Close(*channel);
+                }
+                self.capability_bytes += bytes.len();
+                return Admission::Deliver {
+                    output: 0,
+                    capability: bytes.len(),
+                };
+            }
+            _ => {}
+        }
         let buffered = response_buffer_bytes(response);
         if buffered > 0
             && (self.overflowing || self.queued_bytes.saturating_add(buffered) > self.byte_limit)
         {
             self.overflowing = true;
-            false
+            Admission::Overflow
         } else {
             self.queued_bytes = self.queued_bytes.saturating_add(buffered);
-            true
+            Admission::Deliver {
+                output: buffered,
+                capability: 0,
+            }
         }
     }
 }
@@ -819,7 +914,7 @@ pub struct WorkerChannel {
 pub struct WorkerResponses {
     attempt: String,
     worker: Arc<RetainedWorker>,
-    receive: mpsc::Receiver<WorkerResponse>,
+    receive: mpsc::Receiver<Routed>,
 }
 
 impl WorkerResponses {
@@ -828,9 +923,8 @@ impl WorkerResponses {
     /// # Errors
     /// Returns an error when the retained transport route closes.
     pub fn recv(&self) -> Result<WorkerResponse, mpsc::RecvError> {
-        let response = self.receive.recv()?;
-        self.release_buffered_bytes(&response);
-        Ok(response)
+        let routed = self.receive.recv()?;
+        Ok(self.release_buffered_bytes(routed))
     }
 
     /// Receives the next response before the supplied deadline and releases
@@ -842,9 +936,8 @@ impl WorkerResponses {
         &self,
         timeout: Duration,
     ) -> Result<WorkerResponse, mpsc::RecvTimeoutError> {
-        let response = self.receive.recv_timeout(timeout)?;
-        self.release_buffered_bytes(&response);
-        Ok(response)
+        let routed = self.receive.recv_timeout(timeout)?;
+        Ok(self.release_buffered_bytes(routed))
     }
 
     /// Why the retained transport ended, once its reader has stopped.
@@ -863,20 +956,19 @@ impl WorkerResponses {
             .is_some_and(|route| route.overflowing)
     }
 
-    fn release_buffered_bytes(&self, response: &WorkerResponse) {
-        let bytes = response_buffer_bytes(response);
-        if bytes == 0 {
-            return;
-        }
-        if let Some(route) = self
-            .worker
-            .routes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_mut(&self.attempt)
+    fn release_buffered_bytes(&self, routed: Routed) -> WorkerResponse {
+        if (routed.output, routed.capability) != (0, 0)
+            && let Some(route) = self
+                .worker
+                .routes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_mut(&self.attempt)
         {
-            route.queued_bytes = route.queued_bytes.saturating_sub(bytes);
+            route.queued_bytes = route.queued_bytes.saturating_sub(routed.output);
+            route.capability_bytes = route.capability_bytes.saturating_sub(routed.capability);
         }
+        routed.response
     }
 }
 
@@ -5104,15 +5196,7 @@ impl StockSbx {
             if routes.contains_key(attempt) {
                 return Err(SbxError::WorkerLeaseLost(vm.name.clone()));
             }
-            routes.insert(
-                attempt.to_owned(),
-                AttemptRoute {
-                    send,
-                    queued_bytes: 0,
-                    byte_limit,
-                    overflowing: false,
-                },
-            );
+            routes.insert(attempt.to_owned(), AttemptRoute::new(send, byte_limit));
         }
         worker.active.fetch_add(1, Ordering::AcqRel);
         let request = WorkerRequest::Start {
@@ -6409,7 +6493,7 @@ impl StockSbx {
                     | WorkerResponse::ChanCredit { attempt, .. }
                     | WorkerResponse::PortReport { attempt, .. } => {
                         let route_attempt = attempt.clone();
-                        let mut cancel = false;
+                        let mut request = None;
                         let route = {
                             let mut routes = reader_worker
                                 .routes
@@ -6417,28 +6501,58 @@ impl StockSbx {
                                 .unwrap_or_else(std::sync::PoisonError::into_inner);
                             routes.get_mut(attempt).and_then(|route| {
                                 let was_overflowing = route.overflowing;
-                                if route.admit(&response) {
-                                    Some(route.send.clone())
-                                } else {
-                                    cancel = !was_overflowing;
-                                    None
+                                match route.admit(&response) {
+                                    Admission::Deliver { output, capability } => Some((
+                                        route.send.clone(),
+                                        Routed {
+                                            response,
+                                            output,
+                                            capability,
+                                        },
+                                    )),
+                                    Admission::Overflow => {
+                                        request =
+                                            (!was_overflowing).then(|| WorkerRequest::Cancel {
+                                                attempt: route_attempt.clone(),
+                                            });
+                                        None
+                                    }
+                                    // The consumer is that far behind: the job's
+                                    // connection is closed, as a stalled daemon
+                                    // side closes it, and the attempt goes on.
+                                    Admission::Close(channel) => {
+                                        request = Some(WorkerRequest::CapClose {
+                                            attempt: route_attempt.clone(),
+                                            channel,
+                                        });
+                                        Some((
+                                            route.send.clone(),
+                                            Routed {
+                                                response: WorkerResponse::CapClose {
+                                                    attempt: route_attempt.clone(),
+                                                    channel,
+                                                },
+                                                output: 0,
+                                                capability: 0,
+                                            },
+                                        ))
+                                    }
+                                    Admission::Drop => None,
                                 }
                             })
                         };
-                        if let Some(route) = route {
-                            let _ = route.send(response);
+                        if let Some((route, routed)) = route {
+                            let _ = route.send(routed);
                         }
-                        if cancel {
-                            let cancelling = Arc::clone(&reader_worker);
+                        if let Some(request) = request {
+                            let writing = Arc::clone(&reader_worker);
                             thread::spawn(move || {
                                 let _ = write_frame(
-                                    &mut *cancelling
+                                    &mut *writing
                                         .input
                                         .lock()
                                         .unwrap_or_else(std::sync::PoisonError::into_inner),
-                                    &WorkerRequest::Cancel {
-                                        attempt: route_attempt,
-                                    },
+                                    &request,
                                 );
                             });
                         }

@@ -317,34 +317,121 @@ fn worker_loss_reason_keeps_a_printable_bounded_stderr_tail() {
 #[test]
 fn retained_response_budget_drops_only_output_after_limit_and_keeps_terminal() {
     let (send, _receive) = mpsc::channel();
-    let mut route = AttemptRoute {
-        send,
-        queued_bytes: 0,
-        byte_limit: 3,
-        overflowing: false,
-    };
-    assert!(route.admit(&WorkerResponse::Stdout {
-        attempt: "attempt-1".into(),
-        bytes: vec![1, 2],
-    }));
-    assert!(!route.admit(&WorkerResponse::Stderr {
-        attempt: "attempt-1".into(),
-        bytes: vec![3, 4],
-    }));
+    let mut route = AttemptRoute::new(send, 3);
+    assert!(matches!(
+        route.admit(&WorkerResponse::Stdout {
+            attempt: "attempt-1".into(),
+            bytes: vec![1, 2],
+        }),
+        Admission::Deliver { output: 2, .. }
+    ));
+    assert_eq!(
+        route.admit(&WorkerResponse::Stderr {
+            attempt: "attempt-1".into(),
+            bytes: vec![3, 4],
+        }),
+        Admission::Overflow
+    );
     assert!(route.overflowing);
     assert_eq!(route.queued_bytes, 2);
-    assert!(route.admit(&WorkerResponse::Terminal {
+    assert!(matches!(
+        route.admit(&WorkerResponse::Terminal {
+            attempt: "attempt-1".into(),
+            report: marsh_worker::WorkerReport {
+                container_id: None,
+                execution: marsh_worker::ExecutionOutcome::SupervisionFailed,
+                delivery: marsh_worker::DeliveryOutcome::Failed,
+                control_errors: 1,
+                retained_processes: Vec::new(),
+                cleanup: marsh_worker::CleanupOutcome::Verified,
+                quarantine: false,
+            },
+        }),
+        Admission::Deliver { .. }
+    ));
+}
+
+/// B-01: `cap.sock` data the consumer has not taken is bounded per attempt.
+/// Past the bound the channel that sent it is closed (once) and its later
+/// frames dropped; other channels, endpoint data, output and the terminal
+/// still pass, and taking the queued data frees the budget.
+#[test]
+fn retained_capability_data_is_bounded_and_closes_only_the_flooding_channel() {
+    let (send, receive) = mpsc::channel();
+    let mut route = AttemptRoute::new(send, 1 << 20);
+    let data = |channel: u32, bytes: usize| WorkerResponse::CapData {
         attempt: "attempt-1".into(),
-        report: marsh_worker::WorkerReport {
-            container_id: None,
-            execution: marsh_worker::ExecutionOutcome::SupervisionFailed,
-            delivery: marsh_worker::DeliveryOutcome::Failed,
-            control_errors: 1,
-            retained_processes: Vec::new(),
-            cleanup: marsh_worker::CleanupOutcome::Verified,
-            quarantine: false,
-        },
-    }));
+        channel,
+        bytes: vec![0; bytes],
+    };
+    let chunk = 64 * 1024;
+    let mut admitted = 0;
+    let closed = loop {
+        match route.admit(&data(1, chunk)) {
+            Admission::Deliver { capability, .. } => admitted += capability,
+            other => break other,
+        }
+        assert!(admitted <= RETAINED_CAPABILITY_BUFFER_BYTES, "unbounded");
+    };
+    assert_eq!(closed, Admission::Close(1));
+    assert_eq!(admitted, RETAINED_CAPABILITY_BUFFER_BYTES);
+    assert_eq!(route.admit(&data(1, chunk)), Admission::Drop);
+    assert_eq!(route.admit(&data(2, chunk)), Admission::Close(2));
+    // A small request on another channel still fits beside a full queue.
+    route.capability_bytes -= chunk;
+    assert!(matches!(
+        route.admit(&data(3, 100)),
+        Admission::Deliver {
+            capability: 100,
+            ..
+        }
+    ));
+    // A channel that opens past the bound is closed at once.
+    route.capability_bytes = RETAINED_CAPABILITY_BUFFER_BYTES;
+    assert_eq!(
+        route.admit(&WorkerResponse::CapOpen {
+            attempt: "attempt-1".into(),
+            channel: 5,
+        }),
+        Admission::Close(5)
+    );
+    // Endpoint channels have credit: their data is never counted or closed
+    // here (their opening is).
+    route.capability_bytes -= chunk;
+    assert!(matches!(
+        route.admit(&WorkerResponse::ChanOpen {
+            attempt: "attempt-1".into(),
+            channel: 4,
+            kind: marsh_contracts::process::ChannelKind::Docker,
+        }),
+        Admission::Deliver {
+            capability: RETAINED_CHANNEL_OPEN_BYTES,
+            ..
+        }
+    ));
+    assert_eq!(
+        route.admit(&data(4, chunk)),
+        Admission::Deliver {
+            output: 0,
+            capability: 0
+        }
+    );
+    assert!(matches!(
+        route.admit(&WorkerResponse::Stdout {
+            attempt: "attempt-1".into(),
+            bytes: vec![1],
+        }),
+        Admission::Deliver { output: 1, .. }
+    ));
+    // The worker's own close of a channel closed here is not passed twice.
+    assert_eq!(
+        route.admit(&WorkerResponse::CapClose {
+            attempt: "attempt-1".into(),
+            channel: 1,
+        }),
+        Admission::Drop
+    );
+    drop(receive);
 }
 
 #[test]
