@@ -985,6 +985,7 @@ fn tree_usage_sums_descendants_and_follows_a_late_child() {
             cache_write_tokens: 5000,
             cost_usd: Some(0.05),
             source: "claude-json".into(),
+            unavailable: None,
         },
     );
     end(&store, &task, CleanupState::Verified);

@@ -58,6 +58,10 @@ pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
     pub source: String,
+    /// Why some or all of the job's usage could not be read; the counts are
+    /// then what was read, possibly none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
 }
 
 // Costs are always finite (`finite_cost`), so equality is total.
@@ -65,7 +69,8 @@ impl Eq for Usage {}
 
 /// A job tree's usage: the job's own plus every descendant's that reported
 /// one. `jobs` counts the jobs that did; `cost_usd` sums the costs reported
-/// and `uncosted_jobs` counts jobs whose agent reported tokens but no cost.
+/// and `uncosted_jobs` counts jobs whose agent reported tokens but no cost;
+/// `incomplete_jobs` counts jobs whose usage could not all be read.
 /// `models` breaks the totals down by model; its entries sum to them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TreeUsage {
@@ -78,6 +83,8 @@ pub struct TreeUsage {
     pub jobs: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub uncosted_jobs: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incomplete_jobs: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, ModelUsage>,
 }
@@ -136,6 +143,9 @@ impl TreeUsage {
         if usage.cost_usd.is_none() {
             self.uncosted_jobs = self.uncosted_jobs.saturating_add(1);
         }
+        if usage.unavailable.is_some() {
+            self.incomplete_jobs = self.incomplete_jobs.saturating_add(1);
+        }
         let model = usage.model.as_deref().unwrap_or(UNKNOWN_MODEL);
         self.add_model(
             model,
@@ -153,6 +163,7 @@ impl TreeUsage {
     /// Add a child's tree.
     pub fn add_tree(&mut self, tree: &Self) {
         self.uncosted_jobs = self.uncosted_jobs.saturating_add(tree.uncosted_jobs);
+        self.incomplete_jobs = self.incomplete_jobs.saturating_add(tree.incomplete_jobs);
         for (model, share) in &tree.models {
             self.add_model(model, share);
         }
@@ -179,7 +190,10 @@ impl TreeUsage {
 
 /// Costs to a millionth of a dollar, so sums stay readable.
 fn round_cost(cost: f64) -> f64 {
-    (cost * 1_000_000.0).round() / 1_000_000.0
+    // A sum of finite costs saturates rather than reaching infinity.
+    let cost = cost.clamp(f64::MIN, f64::MAX);
+    let rounded = (cost * 1_000_000.0).round() / 1_000_000.0;
+    if rounded.is_finite() { rounded } else { cost }
 }
 
 fn finite_cost(value: Option<&serde_json::Value>) -> Option<f64> {
@@ -259,6 +273,8 @@ pub struct Collector {
     max_line: usize,
     line: Vec<u8>,
     skipping: bool,
+    /// A line that may have carried usage was over `max_line`, unread.
+    skipped_long: bool,
     usage: Option<Usage>,
     message: Option<String>,
 }
@@ -279,6 +295,7 @@ impl Collector {
             max_line,
             line: Vec::new(),
             skipping: false,
+            skipped_long: false,
             usage: None,
             message: None,
         })
@@ -293,7 +310,9 @@ impl Collector {
             bytes = rest;
             if !self.skipping {
                 self.line.extend_from_slice(chunk);
-                if self.line.len() > self.max_line || self.uninteresting() {
+                let uninteresting = self.uninteresting();
+                if self.line.len() > self.max_line || uninteresting {
+                    self.skipped_long |= !uninteresting;
                     self.line.clear();
                     self.skipping = true;
                 }
@@ -314,6 +333,13 @@ impl Collector {
         if !self.skipping && !self.line.is_empty() {
             let line = std::mem::take(&mut self.line);
             self.line_done(&line);
+        }
+        if self.skipped_long {
+            let (parser, max_line) = (self.parser, self.max_line);
+            self.usage().unavailable = Some(format!(
+                "a {parser} line was over the {} KiB this reader takes, so it was not read",
+                max_line >> 10
+            ));
         }
         Captured {
             usage: self.usage,
@@ -529,6 +555,7 @@ mod tests {
                 cache_write_tokens: 14502,
                 cost_usd: Some(0.072_598),
                 source: CLAUDE_JSON.into(),
+                unavailable: None,
             })
         );
         // Without `modelUsage`, the top-level `usage` counts.
@@ -554,6 +581,7 @@ mod tests {
                 cache_write_tokens: 12236,
                 cost_usd: None,
                 source: CODEX_JSONL.into(),
+                unavailable: None,
             })
         );
         let usage = read(CODEX_JSONL, CODEX_MAC).usage.unwrap();
@@ -583,6 +611,7 @@ mod tests {
                 cache_write_tokens: 4798,
                 cost_usd: Some(0.030_098),
                 source: PI_JSONL.into(),
+                unavailable: None,
             })
         );
     }
@@ -628,18 +657,37 @@ mod tests {
             .usage
             .unwrap();
         assert_eq!(usage.output_tokens, max);
-        // The daemon's collector holds at most its line bound, and a result
-        // line past it is skipped.
+        // The daemon's collector buffers at most its line bound plus one
+        // chunk. A result line past it is skipped, and the usage says why,
+        // never an empty "no usage".
         let mut collector = Collector::bounded(CLAUDE_JSON, DAEMON_MAX_LINE).unwrap();
         collector.feed(br#"{"type":"result","result":""#);
         let filler = vec![b'x'; 64 * 1024];
         for _ in 0..(DAEMON_MAX_LINE / filler.len() + 2) {
             collector.feed(&filler);
-            assert!(collector.line.len() <= DAEMON_MAX_LINE);
+            assert!(collector.line.len() <= DAEMON_MAX_LINE + filler.len());
         }
         collector.feed(br#"","usage":{"output_tokens":5}}"#);
         collector.feed(b"\n");
-        assert_eq!(collector.finish().usage, None);
+        let usage = collector.finish().usage.unwrap();
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(
+            usage.unavailable.as_deref(),
+            Some("a claude-json line was over the 1024 KiB this reader takes, so it was not read")
+        );
+        // A tree counts the job as incomplete.
+        let mut tree = TreeUsage::default();
+        tree.add_usage(&usage);
+        assert_eq!((tree.jobs, tree.incomplete_jobs), (1, 1));
+        // Costs saturate too.
+        let mut tree = TreeUsage::default();
+        for _ in 0..3 {
+            tree.add_usage(&Usage {
+                cost_usd: Some(f64::MAX),
+                ..Usage::default()
+            });
+        }
+        assert_eq!(tree.cost_usd, Some(f64::MAX));
     }
 
     #[test]

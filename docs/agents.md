@@ -162,7 +162,9 @@ reports none, it is the model the task asked for, and absent if the task
 named none. `cost_usd` is the agent's own figure, present only when the agent
 reports one. In `tree_usage`, `jobs` counts the jobs that reported usage,
 `cost_usd` sums the reported costs, and `uncosted_jobs` counts jobs that
-reported tokens without a cost. `models` breaks the totals down by model so
+reported tokens without a cost. A job whose usage could not all be read (the
+daemon reads lines of at most 1 MiB; a longer result line is skipped) has
+`unavailable` in its `usage`, saying why, and counts in `incomplete_jobs`. `models` breaks the totals down by model so
 a mixed tree can be priced. Each entry has the same token counts, its own
 `cost_usd` (when its jobs reported one), and `jobs`, and the entries sum to
 the totals. Jobs without a known model are under `"unknown"`. Past 32 models,
