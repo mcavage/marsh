@@ -18,7 +18,7 @@ on:
     secrets:
       DOCKERHUB_USERNAME:
         required: false
-      DOCKERHUB_TOKEN:
+      DOCKERHUB_READ_TOKEN:
         required: false
 permissions:
   contents: read
@@ -517,6 +517,8 @@ jobs:
     # proves it still builds and the installed commands pass their smoke
     # checks. It runs only when an input changed, and not for fork PRs (no
     # registry secrets there: the DHI base and the Kits' bases need a login).
+    # It pulls with the read-only token; the push token is only in the
+    # release environment (release.yml).
     name: Kit and shell images (build, no push)
     needs: changes
     if: >-
@@ -530,13 +532,13 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Log in to Docker Hub and Docker Hardened Images
+      - name: Log in to Docker Hub and Docker Hardened Images (read-only)
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_READ_TOKEN: ${{ secrets.DOCKERHUB_READ_TOKEN }}
         run: |
           for registry in docker.io dhi.io; do
-            printf '%s' "$DOCKERHUB_TOKEN" | docker login "$registry" --username "$DOCKERHUB_USERNAME" --password-stdin
+            printf '%s' "$DOCKERHUB_READ_TOKEN" | docker login "$registry" --username "$DOCKERHUB_USERNAME" --password-stdin
           done
       - name: Publisher dependencies
         run: |
