@@ -4,15 +4,33 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # release.yml runs every lane on the commit it is about to build.
+  workflow_call:
+    inputs:
+      all:
+        description: Run every lane, whatever changed.
+        type: boolean
+        default: false
+      ref:
+        description: The commit to check out in every job (default the caller's).
+        type: string
+        default: ''
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
 permissions:
   contents: read
 # Every commit on main gets its own run: GitHub keeps one pending run per
-# group, so a shared group would drop the in-between commits (and a cancelled
-# run cannot be the "CI passed" that release.yml waits for). A newer push
-# cancels a superseded pull request run. The huge TLA+ configs run in
-# model.yml, never in this group.
+# group, so a shared group would drop the in-between commits. A newer push
+# cancels a superseded pull request run. A call from release.yml sees the
+# caller's github context (its sha can be the same commit's push run), so it
+# takes a group of its own per release run: it never queues behind, or
+# replaces, the push run. The huge TLA+ configs run in model.yml, never in
+# this group.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ci-${{ inputs.ref && format('release-{0}', github.run_id) || (github.event_name == 'pull_request' && github.ref || github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: "0"
@@ -28,6 +46,8 @@ env:
 # callers and the entrypoint harnesses. PRs and main pushes run only the
 # lanes their files need (scripts/ci-changes.sh): a docs-only
 # change runs the docs check alone. "CI passed" is the one required check.
+# Manual runs, and release.yml's call (all: true) on the commit it builds,
+# run every lane.
 # The huge TLA+ configs run weekly (model.yml) and in make regress. The macOS release build is not
 # here: the nightly and release workflows build it (release.yml).
 # What it does not: start microVMs. GitHub's macOS arm64 runners are VMs
@@ -53,14 +73,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - name: Classify the changed files
         id: classify
         env:
+          ALL: ${{ inputs.all }}
           BASE_REF: ${{ github.base_ref }}
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          if [ "$ALL" = true ]; then
+            # A release (workflow_call with all): check everything.
+            sh scripts/ci-changes.sh </dev/null | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             git diff --name-only "origin/$BASE_REF...HEAD" | sh scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
             exit 0
@@ -83,6 +110,8 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - name: Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - name: Compiler cache (content-addressed, reusable across source changes)
@@ -110,6 +139,8 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -176,6 +207,8 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -214,6 +247,8 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - name: Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal
       - name: Compiler cache (content-addressed, reusable across source changes)
@@ -266,6 +301,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       # The publisher venv gets an interpreter its pinned PyYAML has wheels
       # for, leaving the runner's python3 alone.
       - id: publisher-python
@@ -289,6 +326,8 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -352,6 +391,8 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -407,6 +448,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - name: Install mandoc
         run: sudo apt-get update -q && sudo apt-get install -y -q mandoc
       - name: Man page (lint clean)
@@ -429,6 +472,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -468,6 +513,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to Docker Hub and Docker Hardened Images
@@ -498,6 +544,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -514,6 +562,7 @@ jobs:
     # The one required status check: every lane above passed or was not
     # needed. A skipped lane is fine; a failed or cancelled one is not. (When
     # the classifier fails, every lane runs, so its own result is not counted.)
+    # When release.yml asks for every lane, a skipped lane fails too.
     name: CI passed
     needs: [lint, linux-unit, linux-callers, linux-bash, tools, macos-unit, macos-callers, docs, model, images, renovate-config]
     if: always()
@@ -523,8 +572,13 @@ jobs:
       - name: Every lane passed or was skipped
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          ALL: ${{ inputs.all }}
         run: |
           echo "$RESULTS"
           for result in $RESULTS; do
-            case $result in success|skipped) ;; *) echo "::error::a lane ended $result"; exit 1;; esac
+            case $result in
+              success) ;;
+              skipped) [ "$ALL" != true ] || { echo "::error::a lane was skipped in a run of every lane"; exit 1; } ;;
+              *) echo "::error::a lane ended $result"; exit 1;;
+            esac
           done
