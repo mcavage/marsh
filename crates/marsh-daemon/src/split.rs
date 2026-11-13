@@ -29,7 +29,11 @@ const MAX_DEPTH: u32 = 3;
 const POOL: usize = 16;
 const SPOOL_LIMIT: usize = 64 << 20;
 /// Split input all running and spooling splits may hold together.
-const SPOOL_TOTAL: usize = 256 << 20;
+/// Split input the host's and sessions' splits may hold together.
+const HOST_SPOOL_TOTAL: usize = 256 << 20;
+/// Split input all jobs' splits may hold together, and one job's.
+const JOBS_SPOOL_TOTAL: usize = 192 << 20;
+const JOB_SPOOL_TOTAL: usize = SPOOL_LIMIT;
 const OUTPUT_LIMIT: usize = 16 << 20;
 const LEASE: Duration = Duration::from_mins(1);
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
@@ -526,18 +530,106 @@ pub struct SplitEngine {
     saving: Mutex<()>,
     /// Lanes whose services are still to be dropped (C3).
     pub lane_drops: crate::lane_services::LaneDrops,
-    /// Bytes of split input held now, at most `spool_total`.
-    spooled: AtomicUsize,
-    /// [`SPOOL_TOTAL`]; tests lower it.
-    spool_total: AtomicUsize,
+    /// Split input held now, by who created the split.
+    spooled: Mutex<SpoolBudget>,
 }
 
-/// Split input counted in the engine's `spooled`, released when dropped.
-struct Spooled<'a>(&'a AtomicUsize, usize);
+/// Split input held by spooling and running splits. Jobs' splits draw on
+/// their own pool, so no job can refuse the host's or a session's splits.
+#[derive(Debug)]
+struct SpoolBudget {
+    host: usize,
+    jobs: usize,
+    by_job: BTreeMap<String, usize>,
+    host_limit: usize,
+    jobs_limit: usize,
+    job_limit: usize,
+}
+
+impl Default for SpoolBudget {
+    fn default() -> Self {
+        Self {
+            host: 0,
+            jobs: 0,
+            by_job: BTreeMap::new(),
+            host_limit: HOST_SPOOL_TOTAL,
+            jobs_limit: JOBS_SPOOL_TOTAL,
+            job_limit: JOB_SPOOL_TOTAL,
+        }
+    }
+}
+
+impl SpoolBudget {
+    /// Count `bytes` more of `creator`'s input, or say which limit refuses.
+    fn take(&mut self, creator: &Creator, bytes: usize) -> Result<(), String> {
+        let refused = |what: &str, limit: usize| {
+            Err(format!(
+                "split: {what} hold {} MiB of input, the most; try again when one ends",
+                limit >> 20
+            ))
+        };
+        match creator {
+            Creator::Job(job) => {
+                let mine = self.by_job.get(job).copied().unwrap_or(0);
+                if mine + bytes > self.job_limit {
+                    return refused("this job's splits", self.job_limit);
+                }
+                if self.jobs + bytes > self.jobs_limit {
+                    return refused("jobs' splits", self.jobs_limit);
+                }
+                self.jobs += bytes;
+                self.by_job.insert(job.clone(), mine + bytes);
+            }
+            Creator::Host | Creator::Session(_) => {
+                if self.host + bytes > self.host_limit {
+                    return refused("the host's and sessions' splits", self.host_limit);
+                }
+                self.host += bytes;
+            }
+        }
+        Ok(())
+    }
+
+    fn give_back(&mut self, creator: &Creator, bytes: usize) {
+        match creator {
+            Creator::Job(job) => {
+                self.jobs = self.jobs.saturating_sub(bytes);
+                if let Some(mine) = self.by_job.get_mut(job) {
+                    *mine = mine.saturating_sub(bytes);
+                    if *mine == 0 {
+                        self.by_job.remove(job);
+                    }
+                }
+            }
+            Creator::Host | Creator::Session(_) => self.host = self.host.saturating_sub(bytes),
+        }
+    }
+}
+
+/// One create's input, counted in the engine's spool budget until dropped.
+struct Spooled<'a> {
+    budget: &'a Mutex<SpoolBudget>,
+    creator: &'a Creator,
+    bytes: usize,
+}
+
+impl Spooled<'_> {
+    fn take(&mut self, bytes: usize) -> Result<(), String> {
+        self.budget
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take(self.creator, bytes)?;
+        self.bytes += bytes;
+        Ok(())
+    }
+}
 
 impl Drop for Spooled<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(self.1, Ordering::AcqRel);
+        self.budget
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .give_back(self.creator, self.bytes);
     }
 }
 
@@ -676,8 +768,7 @@ impl SplitEngine {
             kept_retention_ms: AtomicU64::new(KEPT_RETENTION_MS),
             roots: Mutex::new(roots),
             saving: Mutex::new(()),
-            spooled: AtomicUsize::new(0),
-            spool_total: AtomicUsize::new(SPOOL_TOTAL),
+            spooled: Mutex::default(),
             lane_drops: crate::lane_services::LaneDrops::open(journal_home),
         });
         engine.save();
@@ -1106,10 +1197,15 @@ impl SplitEngine {
         }
     }
 
-    /// Lower the input all splits may hold together (tests).
+    /// Lower the spool limits: the host's and sessions', all jobs', one
+    /// job's (tests).
     #[cfg(test)]
-    pub(crate) fn set_spool_total(&self, bytes: usize) {
-        self.spool_total.store(bytes, Ordering::Release);
+    pub(crate) fn set_spool_limits(&self, host: usize, jobs: usize, job: usize) {
+        let mut budget = self
+            .spooled
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (budget.host_limit, budget.jobs_limit, budget.job_limit) = (host, jobs, job);
     }
 
     /// Splits whose runtime is still held (tests).
@@ -1955,25 +2051,20 @@ impl SplitEngine {
         // toward every split's input until this create returns.
         stream.set_read_timeout(None)?;
         let mut spool = Vec::new();
-        let mut spooled = Spooled(&self.spooled, 0);
+        let mut spooled = Spooled {
+            budget: &self.spooled,
+            creator: &caller,
+            bytes: 0,
+        };
         loop {
             match read_frame::<AttachmentFrame>(&mut stream) {
                 Ok(AttachmentFrame::Stdin { bytes }) => {
                     if spool.len() + bytes.len() > SPOOL_LIMIT {
                         return error(&mut stream, "split: input exceeds the 64 MiB spool");
                     }
-                    let total = self.spool_total.load(Ordering::Acquire);
-                    if self.spooled.fetch_add(bytes.len(), Ordering::AcqRel) + bytes.len() > total {
-                        self.spooled.fetch_sub(bytes.len(), Ordering::AcqRel);
-                        return error(
-                            &mut stream,
-                            format!(
-                                "split: running splits hold {} MiB of input, the most; try again when one ends",
-                                total >> 20
-                            ),
-                        );
+                    if let Err(message) = spooled.take(bytes.len()) {
+                        return error(&mut stream, message);
                     }
-                    spooled.1 += bytes.len();
                     spool.extend_from_slice(&bytes);
                 }
                 Ok(AttachmentFrame::StdinEof) => break,
