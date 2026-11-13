@@ -21,7 +21,7 @@
   rebaseWhen: "behind-base-branch",
   // Avoid just-published releases (a compromised release is usually pulled
   // within days). Security updates ignore this, and so do the trusted vendors
-  // (the last packageRules entry).
+  // (the last packageRules entries, one per ecosystem).
   minimumReleaseAge: "3 days",
   internalChecksFilter: "strict",
   ignorePaths: ["vendor/**", "packaging/dhi-notices/**", "**/node_modules/**", "docs/**"],
@@ -187,7 +187,7 @@
       matchPackageNames: ["docker-compose-plugin"],
       groupName: "Docker Compose",
       prBodyNotes: [
-        "If the upstream version moved, CI fails until every copy follows it: set `COMPOSE_VERSION` and both SHA-256 digests (from the release's `docker-compose-linux-{aarch64,x86_64}.sha256`) in `packaging/image-base/docker-compose.sh` and `kits/marsh-docker-cli/marsh-docker-cli.dockerfile`, then the version in `kits/marsh-docker-cli/marsh-docker-cli.yaml`, `kits/README.md` and `COMPOSE_FALLBACK_VERSION` in `crates/marsh-services/src/restore.rs` (`python3 tests/release/test_compose_pins.py`).",
+        "If the upstream version moved, CI fails until every copy follows it: set `COMPOSE_VERSION` and both SHA-256 digests (from the release's `docker-compose-linux-{aarch64,x86_64}.sha256`) in `packaging/image-base/docker-compose.sh` and `kits/marsh-docker-cli/marsh-docker-cli.dockerfile`, append the release's two `VERSION ASSET SHA256` lines to `tests/release/compose-release-digests.txt`, then the version in `kits/marsh-docker-cli/marsh-docker-cli.yaml`, `kits/README.md` and `COMPOSE_FALLBACK_VERSION` in `crates/marsh-services/src/restore.rs` (`python3 tests/release/test_compose_pins.py`).",
       ],
     },
     {
@@ -231,29 +231,37 @@
       groupName: "GitHub Actions",
       schedule: ["before 6am on monday"],
     },
+    // Owner decision: releases from the trusted vendors Docker, DHI, Anthropic
+    // and OpenAI are taken as soon as they are published; everything else
+    // keeps the minimum release age above (3 days, or 6 hours for the Kits'
+    // ACP adapters and Pi). One rule per ecosystem, because a rule's
+    // datasources and names match as a cross product: each vendor name is
+    // exempt only where that vendor publishes it, so the same name elsewhere
+    // (npm `docker-ce`, a Docker Hub image `openai/codex`) and every GitHub
+    // Action, docker/* ones included, still wait. Last, so these override any
+    // earlier age. tests/release/renovate-policy.mjs checks both sides.
     {
-      // Owner decision: releases from these vendors are taken as soon as they
-      // are published; everything else keeps the minimum release age above
-      // (3 days, or 6 hours for the Kits' ACP adapters and Pi). Last, so it
-      // overrides any earlier age. The vendors and what names them:
-      //   Docker: its Engine, CLI, containerd, Compose and Buildx apt packages,
-      //     and docker/* images (docker/dockerfile, docker/sandbox-kit).
-      //   DHI: dhi.io images; its apt packages are the deb datasource, which
-      //     is DHI's repository only (exempt above, and named here too).
-      //   Anthropic: @anthropic-ai/* (Claude Code).
-      //   OpenAI: openai/codex (GitHub releases) and @openai/*.
-      // Limited to package and image datasources, so a docker/* GitHub Action
-      // or a look-alike name in another ecosystem (npm's `docker-compose`)
-      // still waits; tests/release/renovate-policy.mjs checks both sides.
-      description: "Trusted vendors (Docker, DHI, Anthropic, OpenAI): no minimum release age",
-      matchDatasources: ["deb", "docker", "npm", "github-releases"],
-      matchPackageNames: [
-        "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "docker-buildx-plugin",
-        "docker/**", "docker.io/docker/**",
-        "dhi.io/**",
-        "@anthropic-ai/**",
-        "openai/codex", "@openai/**",
-      ],
+      description: "Trusted vendor Docker: its Engine, CLI, containerd, Compose and Buildx apt packages (DHI's repository, already exempt above)",
+      matchDatasources: ["deb"],
+      matchPackageNames: ["docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "docker-buildx-plugin"],
+      minimumReleaseAge: null,
+    },
+    {
+      description: "Trusted vendors Docker and DHI: docker/* images (such as docker/dockerfile) and dhi.io images",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["docker/**", "docker.io/docker/**", "dhi.io/**"],
+      minimumReleaseAge: null,
+    },
+    {
+      description: "Trusted vendors Anthropic and OpenAI: their npm scopes (Claude Code is @anthropic-ai/claude-code)",
+      matchDatasources: ["npm"],
+      matchPackageNames: ["@anthropic-ai/**", "@openai/**"],
+      minimumReleaseAge: null,
+    },
+    {
+      description: "Trusted vendor OpenAI: Codex's GitHub releases",
+      matchDatasources: ["github-releases"],
+      matchPackageNames: ["openai/codex"],
       minimumReleaseAge: null,
     },
   ],

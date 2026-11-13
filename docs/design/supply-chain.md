@@ -22,10 +22,13 @@ default, 6 hours for the Kits' ACP adapters and Pi. Releases from trusted
 vendors are taken as soon as they are published: Docker (its Engine, CLI,
 containerd, Compose and Buildx apt packages, and `docker/*` images), DHI
 (`dhi.io` images and its apt packages), Anthropic (`@anthropic-ai/*`, Claude
-Code) and OpenAI (`openai/codex`, `@openai/*`). The exemption covers packages
-and images only; GitHub Actions, including `docker/*` actions, keep the default.
-`tests/release/renovate-policy.mjs` checks both sides with Renovate's own rule
-matching.
+Code) and OpenAI (`openai/codex`, `@openai/*`). Each name is exempt only in the
+ecosystem where that vendor publishes it (the apt names as DHI apt packages,
+`docker/*` and `dhi.io/*` as images, the scopes on npm, `openai/codex` as GitHub
+releases), so the same name elsewhere, such as an npm package `docker-ce` or a
+Docker Hub image `openai/codex`, keeps the default, as do all GitHub Actions,
+`docker/*` actions included. `tests/release/renovate-policy.mjs` checks both
+sides with Renovate's own rule matching.
 
 Updates go through normal CI builds and tests and merge automatically when
 those checks pass. To update a dependency manually, edit its version or lockfile

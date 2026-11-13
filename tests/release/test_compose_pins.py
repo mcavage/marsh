@@ -30,8 +30,14 @@ COPIES = {
     "kits/README.md": re.compile(r"`/usr/local/lib/docker/cli-plugins/docker-compose`, v([^)\s]+)\)"),
     "crates/marsh-services/src/restore.rs": re.compile(r'const COMPOSE_FALLBACK_VERSION: &str = "([^"]+)";'),
 }
-# The two fetches of Compose's release binary: the same asset, the same digests.
+# The two fetches of Compose's release binary, and the record of upstream's
+# digests for each version they have fetched (append-only).
 FETCHES = ("packaging/image-base/docker-compose.sh", "kits/marsh-docker-cli/marsh-docker-cli.dockerfile")
+RELEASES = "tests/release/compose-release-digests.txt"
+ASSETS = {"arm64": "aarch64", "amd64": "x86_64"}
+RESTORE = "crates/marsh-services/src/restore.rs"
+# A quoted three-part version (not an IPv4 address) in Rust source.
+VERSION_LITERAL = re.compile(r'"v?\d+\.\d+\.\d+(?![.\d])[^"]*"')
 # Text that names a Compose version: a pin's shape, or a dotted version near the
 # word "compose". A new file with one must be added to COPIES (or to RECORDS).
 MENTIONS = re.compile(
@@ -67,15 +73,52 @@ def upstream(deb_version):
 
 
 def compose_digests(text):
-    """{TARGETARCH: SHA-256 of Compose's release binary} of one fetch script."""
+    """{TARGETARCH: (release asset, SHA-256)} of one fetch script."""
     arms = re.findall(r"(?ms)^\s*(arm64|amd64)\)(.*?);;", text)
     digests = {}
     for arch, body in arms:
         found = re.findall(r"(?<![a-z_])(?:compose_)?sha=([0-9a-f]{64})", body)
-        if len(found) != 1:
-            raise AssertionError(f"{arch}: expected one Compose digest, found {found}")
-        digests[arch] = found[0]
+        asset = re.findall(r"(?<![a-z_])arch=([a-z0-9_]+)", body)
+        if len(found) != 1 or len(asset) != 1:
+            raise AssertionError(f"{arch}: expected one asset and one Compose digest, found {asset} {found}")
+        digests[arch] = (asset[0], found[0])
     return digests
+
+
+def release_digests(text):
+    """{(version, asset): SHA-256} of the upstream record; each digest once."""
+    record = {}
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        version, asset, digest = line.split()
+        if (version, asset) in record or digest in record.values():
+            raise AssertionError(f"{RELEASES}: {line!r} repeats a version's asset or a digest")
+        record[(version, asset)] = digest
+    return record
+
+
+def fetch_problems(texts, record):
+    """What is wrong with these fetch scripts' digests; empty when nothing."""
+    problems = []
+    for path, text in texts.items():
+        version = re.findall(r"(?m)^(?:ARG )?COMPOSE_VERSION=(\S+)$", text)
+        digests = compose_digests(text)
+        if len(version) != 1 or sorted(digests) != sorted(ASSETS):
+            problems.append(f"{path}: one version and one digest per architecture, found {version} {digests}")
+            continue
+        for arch, (asset, digest) in sorted(digests.items()):
+            if asset != ASSETS[arch]:
+                problems.append(f"{path}: {arch} fetches {asset}, not {ASSETS[arch]}")
+            expected = record.get((version[0], asset))
+            if digest != expected:
+                problems.append(f"{path}: {arch} digest {digest} is not upstream's {expected} "
+                                f"for {version[0]} {asset} ({RELEASES})")
+    return problems
+
+
+def swap(text, first, second):
+    return text.replace(first, "\0").replace(second, first).replace("\0", second)
 
 
 def engine_check():
@@ -100,29 +143,55 @@ class ComposePins(unittest.TestCase):
             self.assertEqual(found, [expected], f"{path}: Compose version must be {expected} (the "
                              f"upstream version of {ENGINE}'s docker-compose-plugin pin)")
 
-    def test_restore_names_the_fallback_once(self):
-        text = read("crates/marsh-services/src/restore.rs")
+    def test_restore_falls_back_to_the_pin_everywhere(self):
+        text = read(RESTORE)
         expected = upstream(engine_pin())
-        self.assertEqual(text.count(f'"{expected}"'), 1, "restore.rs: use COMPOSE_FALLBACK_VERSION")
+        # The constant is the only version literal, so neither fallback can
+        # name another; and compose_version falls back to it on both paths.
+        self.assertEqual(VERSION_LITERAL.findall(text), [f'"{expected}"'],
+                         f"{RESTORE}: the only Compose version is COMPOSE_FALLBACK_VERSION")
+        body = re.search(r"(?ms)^        fn compose_version\(.*?^        }$", text)
+        self.assertIsNotNone(body, f"{RESTORE}: no compose_version")
+        self.assertEqual(body.group(0).count("COMPOSE_FALLBACK_VERSION.into()"), 2,
+                         "compose_version: both fallbacks return COMPOSE_FALLBACK_VERSION")
+        for stale in ('"5.7.0".into()', "String::from(\"5.7.0\")"):
+            mutated = text.replace("COMPOSE_FALLBACK_VERSION.into()", stale, 1)
+            self.assertNotEqual(VERSION_LITERAL.findall(mutated), [f'"{expected}"'])
 
-    def test_both_release_binary_fetches_pin_the_same_digests(self):
-        digests = {path: compose_digests(read(path)) for path in FETCHES}
-        first, second = digests.values()
-        self.assertEqual(sorted(first), ["amd64", "arm64"], f"{FETCHES[0]}: one Compose digest per architecture")
-        self.assertEqual(first, second, digests)
+    def test_release_binary_fetches_pin_upstreams_digests(self):
+        record = release_digests(read(RELEASES))
+        self.assertEqual(fetch_problems({path: read(path) for path in FETCHES}, record), [])
+        for version in {version for version, _ in record}:
+            self.assertEqual(sorted(a for v, a in record if v == version), sorted(ASSETS.values()), version)
 
-    def test_swapped_architecture_digests_disagree(self):
+    def test_wrong_digests_fail_the_comparison(self):
+        record = release_digests(read(RELEASES))
+        texts = {path: read(path) for path in FETCHES}
+        current = compose_digests(texts[FETCHES[0]])
+        arm, amd = current["arm64"][1], current["amd64"][1]
+        version = re.findall(r"(?m)^(?:ARG )?COMPOSE_VERSION=(\S+)$", texts[FETCHES[0]])[0]
+        older = [d for (v, a), d in record.items() if v != version and a == "x86_64"]
+        self.assertTrue(older, f"{RELEASES}: keep an earlier version to test against")
+        cases = {}
         for path in FETCHES:
-            text = read(path)
-            digests = compose_digests(text)
-            swapped = (text.replace(digests["arm64"], "ARM").replace(digests["amd64"], digests["arm64"])
-                       .replace("ARM", digests["amd64"]))
-            self.assertNotEqual(compose_digests(swapped), digests, path)
-            self.assertEqual(compose_digests(swapped)["arm64"], digests["amd64"], path)
+            cases[f"swapped in {path}"] = {**texts, path: swap(texts[path], arm, amd)}
+        cases["swapped in both"] = {p: swap(t, arm, amd) for p, t in texts.items()}
+        cases["an earlier version's amd64 digest in both"] = {p: t.replace(amd, older[0]) for p, t in texts.items()}
+        cases["the version moved without its digests"] = {
+            p: re.sub(r"(?m)^((?:ARG )?COMPOSE_VERSION=)\S+$", r"\g<1>9.9.9", t) for p, t in texts.items()}
+        for name, mutated in cases.items():
+            self.assertNotEqual(fetch_problems(mutated, record), [], name)
+
+    def test_the_record_refuses_a_reused_digest(self):
+        text = read(RELEASES)
+        line = next(l for l in text.splitlines() if l and not l.startswith("#"))
+        _, asset, digest = line.split()
+        with self.assertRaises(AssertionError):
+            release_digests(text + f"9.9.9 {asset} {digest}\n")
 
     def test_no_other_file_pins_compose(self):
         listed = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True)
-        known = {ENGINE, *COPIES}
+        known = {ENGINE, RELEASES, *COPIES}
         strays = []
         for name in listed.stdout.decode().split("\0"):
             if not name or name in known or name.startswith(SKIP) or name.startswith(tuple(RECORDS)):

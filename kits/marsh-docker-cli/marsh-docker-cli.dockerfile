@@ -2,7 +2,8 @@
 # binary (github.com/docker/compose), each pinned to a version and a SHA-256.
 # To move a pin, change the version and both digests together; the build
 # fails on a mismatch. COMPOSE_VERSION follows the services engine's
-# docker-compose-plugin pin (tests/release/test_compose_pins.py).
+# docker-compose-plugin pin (tests/release/test_compose_pins.py), and its
+# digests are upstream's (tests/release/compose-release-digests.txt).
 FROM debian:trixie-slim AS build
 ARG TARGETARCH
 ARG DOCKER_VERSION=29.9.3

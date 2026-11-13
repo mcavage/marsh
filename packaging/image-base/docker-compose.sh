@@ -10,7 +10,8 @@
 # The version is the upstream version of the services engine's
 # docker-compose-plugin pin (packaging/svc-engine/Dockerfile), which Renovate
 # moves; tests/release/test_compose_pins.py fails until this and every other
-# copy follow it. To move the pin, change the version and both digests together.
+# copy follow it. To move the pin, change the version and both digests together,
+# and append the release's two digests to tests/release/compose-release-digests.txt.
 set -eu
 COMPOSE_VERSION=5.7.1
 case "${TARGETARCH:?TARGETARCH is not set}" in
