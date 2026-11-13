@@ -430,10 +430,10 @@ impl Services {
         self.root_for(project, workspace).unwrap();
     }
 
-    /// Bind roots held open, and attempts and roots with a connection count
-    /// (tests).
+    /// Bind roots held open, and attempts, roots and workspaces with a
+    /// connection count (tests).
     #[cfg(test)]
-    pub(crate) fn tracked(&self) -> (usize, usize, usize) {
+    pub(crate) fn tracked(&self) -> (usize, usize, usize, usize) {
         let c = self
             .counts
             .lock()
@@ -443,7 +443,7 @@ impl Services {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .len();
-        (roots, c.attempts.len(), c.roots.len())
+        (roots, c.attempts.len(), c.roots.len(), c.workspaces.len())
     }
 
     /// Record what `.git` and `.marsh` are under this root, the first time

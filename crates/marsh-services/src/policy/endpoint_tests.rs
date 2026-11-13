@@ -737,8 +737,8 @@ fn volumes_from_keeps_the_pin_alive_after_the_original_is_deleted() {
 
 // --- long-lived state ---------------------------------------------------------
 
-/// DA1-06: per-attempt and per-root connection counts go when their last
-/// connection does; the endpoint still serves afterwards.
+/// DA1-06: per-attempt, per-root and per-workspace connection counts go
+/// when their last connection does; the endpoint still serves afterwards.
 #[test]
 fn ended_attempts_leave_no_connection_counts_behind() {
     let h = H::new("state", false, no_custom(), |_| {});
@@ -759,8 +759,8 @@ fn ended_attempts_leave_no_connection_counts_behind() {
     drop(clients);
     assert!(
         wait_for(Duration::from_secs(5), || {
-            let (_, attempts, roots) = h.svc.tracked();
-            (attempts, roots) == (0, 0)
+            let (_, attempts, roots, workspaces) = h.svc.tracked();
+            (attempts, roots, workspaces) == (0, 0, 0)
         }),
         "{:?}",
         h.svc.tracked()
@@ -859,4 +859,5 @@ fn a_late_bind_does_not_bring_back_a_forgotten_root() {
             == 0));
     }
     assert_eq!(h.svc.tracked().0, 0, "forgotten roots came back");
+    assert_eq!(h.svc.tracked().3, 0, "ended workspaces kept a count");
 }
