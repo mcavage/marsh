@@ -1009,7 +1009,7 @@ impl SplitEngine {
             .is_some_and(|record| caller == &Creator::Host || &record.creator == caller)
     }
 
-    fn record(&self, id: &str) -> Option<SplitRecord> {
+    pub(crate) fn record(&self, id: &str) -> Option<SplitRecord> {
         self.lock().records.get(id).cloned()
     }
 

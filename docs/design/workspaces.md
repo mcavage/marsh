@@ -418,8 +418,11 @@ is 130. `split` exits with the first nonzero code in declaration order.
 - **Capture.** Same-size files whose mtime matches are still compared byte
   for byte when their ctime is at or after the fork's creation; a branch
   cannot set ctime, so an edit that restores the mtime is still seen. The
-  limits are 32 MiB per file and 256 MiB of changed bytes in total
-  (`rejected: capture limit`), with a 5 s deadline per text diff. Paths in
+  limits are 32 MiB per file, 256 MiB of changed bytes in total (link
+  targets and 256 bytes per changed path count too), 100,000 changed paths,
+  and 1,000,000 entries per walked tree (`rejected: capture limit`), with a
+  5 s deadline per text diff. A fork past the path bound is refused while
+  it is walked, before its listing or patch is built. Paths in
   `files` are C-quoted when they contain control characters, `"`, or `\`.
 - **Writers before capture.** After a shell branch exits, capture waits
   up to 30 s until no Kit job of the branch's session is queued or running.
