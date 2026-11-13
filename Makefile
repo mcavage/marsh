@@ -254,7 +254,8 @@ test-tools:
 	sh tests/kits/acp-proxy.sh
 	node --test tests/kits/pi-acp-patch.test.mjs
 	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
-	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py
+	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py \
+		tests/release/test_release_workflow.py
 
 # The publisher's one dependency, hash-pinned.
 $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
