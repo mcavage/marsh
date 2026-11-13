@@ -430,8 +430,8 @@ jobs:
         run: make test-callers NEXTEST_PROFILE=ci
       - name: make test-entrypoints (onboarding, MCP protocol callers)
         run: make test-entrypoints
-      # On main, the tooling self-tests run on macOS too: the release tooling
-      # (make release, make regress) runs on a Mac.
+      # On main, the tooling self-tests run on macOS too: make regress and
+      # its harness run on a Mac.
       - id: publisher-python
         if: github.event_name != 'pull_request'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
