@@ -997,10 +997,21 @@ mod tests {
 
     #[test]
     fn a_stream_outside_the_protocol_loses_the_transport_without_a_panic() {
+        // Each test is its own process: count every panic in it.
+        static PANICS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        std::panic::set_hook(Box::new(|_| {
+            PANICS.fetch_add(1, Ordering::SeqCst);
+        }));
         let (supervisor, mut guest, child, attempt) = started();
         write_frame(&mut guest, &Up::Output { attempt, stream: 0 }, b"x").unwrap();
         lost_within(&supervisor);
         drop(child);
+        let (supervisor, mut guest, child, attempt) = started();
+        write_frame(&mut guest, &Up::OutputEof { attempt, stream: 3 }, &[]).unwrap();
+        lost_within(&supervisor);
+        drop(child);
+        let _ = std::panic::take_hook();
+        assert_eq!(PANICS.load(Ordering::SeqCst), 0, "the reader panicked");
     }
 
     #[test]
