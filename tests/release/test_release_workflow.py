@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import unittest
 
 try:
@@ -46,25 +47,45 @@ def evaluate(expression, context):
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2]
     text = text.replace("!cancelled()", "True")
-    text = re.sub(r"\b(needs|github)\.[\w.-]+", lambda match: repr(context.get(match.group(0))), text)
+    text = re.sub(r"\b(needs|github|steps|secrets|inputs)\.[\w.-]+", lambda match: repr(context.get(match.group(0))),
+                  text)
     text = text.replace("&&", " and ").replace("||", " or ").replace("format(", "fmt(")
-    if re.search(r"[!$]|\b(inputs|steps)\.", text):
+    if re.search(r"[!$]", text):
         raise AssertionError(f"unsupported expression: {expression}")
     return eval(text, {"__builtins__": {}}, {"True": True, "fmt": str.format})  # noqa: S307 - our own workflow text
 
 
 def group(template, context):
     """A concurrency group template with each ${{ }} evaluated."""
-    return re.sub(r"\$\{\{(.*?)\}\}", lambda match: str(evaluate(match.group(1), context)), template)
+    def value(match):
+        result = evaluate(match.group(1), context)
+        return "" if result is None else str(result)
+    return re.sub(r"\$\{\{(.*?)\}\}", value, template)
+
+
+def find_step(workflow, job, name):
+    """A workflow step, found by its id or name."""
+    for step in load(workflow)["jobs"][job]["steps"]:
+        if name in (step.get("id"), step.get("name")):
+            return step
+    raise AssertionError(f"no step {name} in {workflow} job {job}")
 
 
 def step_script(workflow, job, name):
     """The run: script of a workflow step, found by its id or name."""
-    for step in load(workflow)["jobs"][job]["steps"]:
-        if name in (step.get("id"), step.get("name")):
-            assert "${{" not in step["run"], f"{workflow} {job} {name} must take its inputs from env"
-            return step["run"]
-    raise AssertionError(f"no step {name} in {workflow} job {job}")
+    step = find_step(workflow, job, name)
+    assert "${{" not in step["run"], f"{workflow} {job} {name} must take its inputs from env"
+    return step["run"]
+
+
+def step_env(workflow, job, name, context):
+    """The environment the workflow gives a step: the job's env, then the step's,
+    each value evaluated against context (a missing name is empty, as in Actions).
+    Running a script with this, not with hand-picked values, tests the bindings too."""
+    env = {}
+    for scope in (load(workflow)["jobs"][job].get("env", {}), find_step(workflow, job, name).get("env", {})):
+        env.update({key: group(str(value), context) for key, value in scope.items()})
+    return env
 
 
 def run_bash(script, cwd, env):
@@ -159,6 +180,16 @@ class ReleaseGate(unittest.TestCase):
         distinct = [groups[name] for name in ("tag 1.2.3", "rehearsal", "nightly", "commit 7", "commit 8")]
         self.assertEqual(len(set(distinct)), len(distinct), groups)
 
+    def test_every_freshness_check_has_the_script_checked_out_first(self):
+        for name in ("images", "release", "tap"):
+            steps = self.jobs[name]["steps"]
+            uses = next(i for i, step in enumerate(steps) if "scripts/newest-release.sh" in str(step.get("run", "")))
+            checkouts = [step for step in steps[:uses] if str(step.get("uses", "")).startswith("actions/checkout@")]
+            self.assertEqual(len(checkouts), 1, name)
+            checkout = checkouts[0].get("with", {})
+            self.assertEqual(checkout.get("ref"), "${{ needs.version.outputs.sha }}", name)
+            self.assertIn(checkout.get("sparse-checkout", "scripts/newest-release.sh"), ("scripts/newest-release.sh",), name)
+
     def test_a_call_checks_out_the_requested_commit_in_every_ci_job(self):
         call = self.ci["on"]["workflow_call"]["inputs"]
         self.assertEqual(call["all"]["type"], "boolean")
@@ -213,11 +244,12 @@ class VersionStep(unittest.TestCase):
         git(self.work, "checkout", "-q", "--detach", commit)
         output = self.tmp / "output"
         output.write_text("")
+        context = {"github.event.inputs.version": version, "github.token": "unused"}
         env = {"PATH": self.path, "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": os.devnull,
                "GIT_CONFIG_SYSTEM": os.devnull, "GITHUB_EVENT_NAME": event, "GITHUB_REF": ref,
                "GITHUB_REF_NAME": ref.rsplit("/", 1)[-1], "GITHUB_REPOSITORY": "example/marsh",
                "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(self.tmp / "summary"),
-               "RUNNER_TEMP": str(self.tmp), "INPUT": version, "CI_RUN_ID": "", "GH_TOKEN": "unused"}
+               "RUNNER_TEMP": str(self.tmp), **step_env("release.yml", "version", "v", context)}
         result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(self.script)],
                                 cwd=self.work, env=env, capture_output=True, text=True, timeout=60)
         outputs = dict(line.split("=", 1) for line in output.read_text().splitlines() if "=" in line)
@@ -229,8 +261,7 @@ class VersionStep(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((out["channel"], out["version"], out["draft"], out["stages"], out["sha"]),
                          ("stable", "1.2.3", "false", "all", self.main))
-        self.assertEqual(out["extra_tags"], "1.2.3 latest")
-        self.assertEqual(out["newest"], "true")
+        self.assertEqual((out["image_tag"], out["extra_tags"]), ("", "1.2.3 latest"))
 
     def test_a_tag_off_main_is_refused(self):
         result, out = self.run_step(self.side, "push", "refs/tags/v1.2.3")
@@ -238,83 +269,162 @@ class VersionStep(unittest.TestCase):
         self.assertIn("is not on main", result.stdout + result.stderr)
         self.assertNotIn("stages", out)
 
-    def test_an_older_version_tagged_later_moves_nothing_users_follow(self):
-        git(self.work, "tag", "v1.2.4", self.main)
-        git(self.work, "tag", "v1.2.3", self.main)
-        _, newest = self.run_step(self.main, "push", "refs/tags/v1.2.4")
-        self.assertEqual((newest["newest"], newest["image_tag"], newest["extra_tags"]), ("true", "", "1.2.4 latest"))
-        result, older = self.run_step(self.main, "push", "refs/tags/v1.2.3")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((older["channel"], older["stages"], older["newest"]), ("stable", "all", "false"))
-        # Its images get only its version (no :latest, :release or :repaired).
-        self.assertEqual((older["image_tag"], older["extra_tags"]), ("1.2.3", "1.2.3"))
-        self.assertIn("older than v1.2.4", result.stdout)
-
     def test_a_tag_that_is_not_a_version_is_refused(self):
         result, _ = self.run_step(self.main, "push", "refs/tags/v1.2.3.4")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bad version", result.stdout + result.stderr)
 
 
+NIGHTLY_TAG = "v1.2.5-nightly.20261101000000.gabcdef0"
+
+
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
 class Publication(unittest.TestCase):
-    """The release and tap steps never move "Latest" or the formula back to an older version."""
+    """The images, release and tap jobs decide when they run whether this version
+    may move :latest, :release, :repaired, the GitHub "Latest" mark or the
+    formula. A re-run of failed jobs reuses the version job's outputs, so these
+    tests give each step the outputs of an older tag's version job (newest at
+    the time) and the repository's tags as they are now."""
 
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
-
-    def release(self, newest, draft="false"):
-        log = self.tmp / "gh.log"
-        log.write_text("")
+        self.tags = self.tmp / "tags"
+        self.gh_log = self.tmp / "gh.log"
+        self.gh_log.write_text("")
         bin_dir = self.tmp / "bin"
-        bin_dir.mkdir(exist_ok=True)
-        (bin_dir / "gh").write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{log}"\n'
-                                    '[ "$1 $2" = "release create" ]\n')
+        bin_dir.mkdir()
+        # gh: the tag listing (what --jq '.[].ref' prints) and release create.
+        (bin_dir / "gh").write_text(textwrap.dedent(f"""\
+            #!/bin/sh
+            printf '%s\\n' "$*" >> "{self.gh_log}"
+            [ -n "${{GH_TOKEN:-}}" ] || {{ echo "gh: GH_TOKEN is not set" >&2; exit 4; }}
+            case "$*" in
+              "api --paginate repos/example/marsh/git/matching-refs/tags/v --jq .[].ref")
+                sed 's#^#refs/tags/#' "{self.tags}"; exit 0 ;;
+              "release create "*) exit 0 ;;
+            esac
+            echo "unexpected gh call: $*" >&2
+            exit 99
+            """))
         (bin_dir / "gh").chmod(0o755)
-        result = run_bash(step_script("release.yml", "release", "Create the GitHub Release"), self.tmp, {
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "GITHUB_REPOSITORY": "example/marsh",
-            "VERSION": "1.2.3", "CHANNEL": "stable", "FORMULA": "marsh", "DRAFT": draft, "NEWEST": newest,
-            "SHA": "a" * 40, "GH_TOKEN": "unused"})
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        return log.read_text().split()
+        self.path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
 
-    def test_only_the_newest_version_is_marked_latest(self):
-        self.assertIn("--latest", self.release("true"))
-        args = self.release("false")
-        self.assertIn("--latest=false", args)
-        self.assertNotIn("--latest", args)
+    def workspace(self, name):
+        """A job's workspace with what its checkout provides."""
+        work = self.tmp / name
+        (work / "scripts").mkdir(parents=True)
+        shutil.copy(ROOT / "scripts/newest-release.sh", work / "scripts/newest-release.sh")
+        return work
 
-    def tap(self, version, newest):
-        dist = self.tmp / f"run-{version}" / "dist"
-        dist.mkdir(parents=True)
-        (dist / "marsh.rb").write_text(f'class Marsh < Formula\n  version "{version}"\nend\n')
-        result = run_bash(step_script("release.yml", "tap", "Update mcavage/homebrew-tap"), dist.parent, {
-            "VERSION": version, "FORMULA": "marsh", "NEWEST": newest, "TAP_TOKEN": "token",
-            "GIT_CONFIG_GLOBAL": str(self.gitconfig)})
+    def outputs(self, version):
+        """The version job's outputs for stable vVERSION, from when it ran."""
+        return {"needs.version.outputs.version": version, "needs.version.outputs.channel": "stable",
+                "needs.version.outputs.draft": "false", "needs.version.outputs.formula": "marsh",
+                "needs.version.outputs.image_tag": "", "needs.version.outputs.extra_tags": f"{version} latest",
+                "needs.version.outputs.sha": "a" * 40, "github.token": "token",
+                "secrets.GITHUB_TOKEN": "token", "secrets.HOMEBREW_TAP_TOKEN": "token"}
+
+    def run_job_step(self, job, step, version, work, **extra):
+        env = {**step_env("release.yml", job, step, self.outputs(version)), "PATH": self.path,
+               "GITHUB_REPOSITORY": "example/marsh", **extra}
+        result = run_bash(step_script("release.yml", job, step), work, env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
 
-    def test_an_older_release_finishing_last_leaves_the_newer_formula(self):
-        # The tap step itself, against a local bare repository standing in for
-        # mcavage/homebrew-tap.
-        tap = self.tmp / "tap.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(tap))
+    def images(self, version, *tags):
+        """The images job's moving tags, and the env each publishing step then gets."""
+        self.tags.write_text("".join(f"{tag}\n" for tag in tags))
+        work = self.workspace(f"images-{version}")
+        output = work / "output"
+        output.write_text("")
+        self.run_job_step("images", "fresh", version, work, GITHUB_OUTPUT=str(output))
+        fresh = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        context = {f"steps.fresh.outputs.{key}": value for key, value in fresh.items()}
+        steps = {name: step_env("release.yml", "images", name, context)
+                 for name in ("Shell VM template", "Kits", "Acceptance fixture Kit", "Tag every image with this version")}
+        return fresh, steps
+
+    def test_an_older_tag_re_run_after_a_newer_release_pushes_its_version_tag_only(self):
+        fresh, steps = self.images("1.2.3", "v1.2.2", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
+        self.assertEqual(fresh, {"image_tag": "1.2.3", "extra_tags": "1.2.3"})
+        # Every publishing step gets the narrowed tags, not the version job's.
+        for name in ("Shell VM template", "Kits", "Acceptance fixture Kit"):
+            self.assertEqual(steps[name]["IMAGE_TAG"], "1.2.3", name)
+        self.assertEqual(steps["Tag every image with this version"]["EXTRA_TAGS"], "1.2.3")
+
+    def test_the_newest_tag_moves_every_channel_whatever_the_nightly_tags(self):
+        # A nightly tag ranks above its base version under sort -V; it is not a release.
+        fresh, steps = self.images("1.2.4", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
+        self.assertEqual(fresh, {"image_tag": "", "extra_tags": "1.2.4 latest"})
+        self.assertEqual(steps["Kits"]["IMAGE_TAG"], "")
+        self.assertEqual(steps["Tag every image with this version"]["EXTRA_TAGS"], "1.2.4 latest")
+
+    def test_versions_compare_by_number(self):
+        self.assertEqual(self.images("1.2.10", "v1.2.9", "v1.2.10")[0]["extra_tags"], "1.2.10 latest")
+        self.assertEqual(self.images("1.2.9", "v1.2.9", "v1.2.10")[0]["extra_tags"], "1.2.9")
+
+    def release(self, version, *tags):
+        self.tags.write_text("".join(f"{tag}\n" for tag in tags))
+        self.gh_log.write_text("")
+        self.run_job_step("release", "Create the GitHub Release", version, self.workspace(f"release-{version}"))
+        return next(line for line in self.gh_log.read_text().splitlines() if line.startswith("release create")).split()
+
+    def test_only_the_newest_version_is_marked_latest(self):
+        self.assertIn("--latest", self.release("1.2.4", "v1.2.3", "v1.2.4", NIGHTLY_TAG))
+        args = self.release("1.2.3", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
+        self.assertIn("--latest=false", args)
+        self.assertNotIn("--latest", args)
+        self.assertIn("--latest", self.release("1.2.10", "v1.2.9", "v1.2.10"))
+
+    def tap(self, version, *tags):
+        self.tags.write_text("".join(f"{tag}\n" for tag in tags))
+        work = self.workspace(f"tap-{version}")
+        (work / "dist").mkdir()
+        (work / "dist/marsh.rb").write_text(
+            "class Marsh < Formula\n"
+            f'  url "https://github.com/mcavage/marsh/releases/download/v{version}/marsh-{version}-darwin-arm64.tar.gz"\n'
+            "end\n")
+        return self.run_job_step("tap", "Update mcavage/homebrew-tap", version, work, GIT_CONFIG_GLOBAL=str(self.gitconfig))
+
+    def tap_version(self):
+        formula = subprocess.run(["git", "--git-dir", str(self.tap_repo), "show", "main:Formula/marsh.rb"],
+                                 capture_output=True, text=True, check=True).stdout
+        return re.search(r"/download/v([^/]+)/", formula).group(1)
+
+    def make_tap(self):
+        # A local bare repository standing in for mcavage/homebrew-tap.
+        self.tap_repo = self.tmp / "tap.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(self.tap_repo))
         seed = self.tmp / "seed"
-        git(self.tmp, "clone", "-q", str(tap), str(seed))
+        git(self.tmp, "clone", "-q", str(self.tap_repo), str(seed))
         (seed / "README").write_text("tap\n")
         git(seed, "add", "README")
         git(seed, "commit", "-q", "-m", "seed")
         git(seed, "push", "-q", "origin", "HEAD:main")
         self.gitconfig = self.tmp / "gitconfig"
-        self.gitconfig.write_text(f'[url "{tap}"]\n\tinsteadOf = https://x-access-token:token@github.com/mcavage/homebrew-tap.git\n'
-                                  '[advice]\n\tdetachedHead = false\n')
-        self.tap("1.2.4", "true")
-        result = self.tap("1.2.3", "false")
+        self.gitconfig.write_text(f'[url "{self.tap_repo}"]\n'
+                                  "\tinsteadOf = https://x-access-token:token@github.com/mcavage/homebrew-tap.git\n"
+                                  "[advice]\n\tdetachedHead = false\n")
+
+    def test_an_older_release_re_run_last_leaves_the_newer_formula(self):
+        self.make_tap()
+        self.tap("1.2.4", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
+        self.assertEqual(self.tap_version(), "1.2.4")
+        result = self.tap("1.2.3", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
         self.assertIn("formula stays", result.stdout)
-        formula = subprocess.run(["git", "--git-dir", str(tap), "show", "main:Formula/marsh.rb"],
-                                 capture_output=True, text=True, check=True).stdout
-        self.assertIn('version "1.2.4"', formula)
+        self.assertEqual(self.tap_version(), "1.2.4")
+
+    def test_the_tap_never_moves_back_even_when_the_tags_disagree(self):
+        # The tag listing alone would allow 1.2.3 (say the newer tag was
+        # deleted); the tap's own formula still refuses the step back.
+        self.make_tap()
+        self.tap("1.2.10", "v1.2.9", "v1.2.10")
+        result = self.tap("1.2.9", "v1.2.9")
+        self.assertIn("newer than 1.2.9", result.stdout)
+        self.assertEqual(self.tap_version(), "1.2.10")
+        self.tap("1.2.11", "v1.2.11")
+        self.assertEqual(self.tap_version(), "1.2.11")
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")

@@ -282,10 +282,10 @@ Mac, not a release gate.
   version. The Release workflow refuses a tag that is not on `main` or not
   `X.Y.Z`, runs every CI lane on the commit, and only then publishes a GitHub
   Release, Docker Hub images tagged `:X.Y.Z` and `:latest`, and the `marsh`
-  formula. Stable releases run one at a time, in the order their tags were
-  pushed. A tag for a version older than one already tagged publishes only
-  its version: the GitHub "Latest" release, `:latest` and the formula stay on
-  the newest.
+  formula. Stable releases run one at a time. A release of a version older
+  than one already tagged, whenever it runs (out of order, or a re-run of
+  failed jobs), publishes only its version: the GitHub "Latest" release,
+  `:latest` and the formula stay on the newest, and the tap never moves back.
 
 ```sh
 git switch main && git pull --ff-only
