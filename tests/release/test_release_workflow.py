@@ -708,6 +708,20 @@ class FullRun(unittest.TestCase):
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class InstallLint(unittest.TestCase):
+    def test_the_linux_tools_lane_requires_shellcheck(self):
+        # tests/release/test_install.py skips its shellcheck lint where
+        # shellcheck is missing, unless MARSH_REQUIRE_SHELLCHECK=1.
+        steps = load("ci.yml")["jobs"]["tools"]["steps"]
+        names = [step.get("name") for step in steps]
+        tools = next(i for i, step in enumerate(steps) if "make test-tools" in str(step.get("run", "")))
+        self.assertEqual(steps[tools].get("env", {}).get("MARSH_REQUIRE_SHELLCHECK"), "1")
+        install = names.index("shellcheck")
+        self.assertLess(install, tools)
+        self.assertIn("apt-get install -y -q shellcheck", steps[install]["run"])
+
+
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
 class ModelCache(unittest.TestCase):
     """A cold TLA+ sweep can outlast the model job; its verdicts must still be kept."""
 

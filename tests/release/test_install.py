@@ -206,6 +206,16 @@ class Install(unittest.TestCase):
         result = subprocess.run([shellcheck, "--shell=sh", str(INSTALL)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, textwrap.indent(result.stdout, "  "))
 
+    def test_a_required_shellcheck_that_is_missing_fails_the_lint(self):
+        # CI sets MARSH_REQUIRE_SHELLCHECK=1, so a runner without shellcheck
+        # fails the lint rather than skipping it.
+        lint = "test_install.Install.test_shellcheck_is_clean"
+        for required, verdict in (("1", f"({lint}) ... FAIL"), ("", f"({lint}) ... skipped")):
+            result = subprocess.run([sys.executable, "-m", "unittest", "-v", lint], cwd=pathlib.Path(__file__).parent,
+                                    env={"PATH": str(self.system), "MARSH_REQUIRE_SHELLCHECK": required},
+                                    capture_output=True, text=True, timeout=60)
+            self.assertIn(verdict, result.stderr, required)
+
 
 if __name__ == "__main__":
     unittest.main()
