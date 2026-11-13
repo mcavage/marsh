@@ -113,8 +113,9 @@ CI splits `make test` into its pieces (`make lint`, `test-unit`,
 and runs them as parallel jobs; `CI passed` is the one required check. A pull
 request and a push to main run only the lanes their changed files need
 (`scripts/ci-changes.sh`). Documentation runs the docs/link checks; image inputs
-run image builds and tooling tests without compiling Rust; Rust changes run the
-Linux and macOS code lanes. Linux runs the full workspace and Bash differential
+run image builds and tooling tests, and the Kits and command tables also run
+the Rust lanes (the Rust tests read them); Rust
+changes run the Linux and macOS code lanes. Linux runs the full workspace and Bash differential
 tests (against GNU Bash 5.3). macOS PR jobs split the host tests between two
 runners; selected macOS jobs on main also run the platform-neutral workspace
 tests and tooling self-tests. Manual CI runs check everything.
