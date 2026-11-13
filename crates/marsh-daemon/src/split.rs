@@ -28,7 +28,6 @@ const MAX_BRANCHES: usize = 16;
 const MAX_DEPTH: u32 = 3;
 const POOL: usize = 16;
 const SPOOL_LIMIT: usize = 64 << 20;
-/// Split input all running and spooling splits may hold together.
 /// Split input the host's and sessions' splits may hold together.
 const HOST_SPOOL_TOTAL: usize = 256 << 20;
 /// Split input all jobs' splits may hold together, and one job's.
