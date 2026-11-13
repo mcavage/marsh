@@ -219,5 +219,34 @@ class VersionStep(unittest.TestCase):
         self.assertIn("bad version", result.stdout + result.stderr)
 
 
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class ModelCache(unittest.TestCase):
+    """A cold TLA+ sweep can outlast the model job; its verdicts must still be kept."""
+
+    def test_verdicts_are_saved_even_when_the_sweep_fails_or_times_out(self):
+        job = load("ci.yml")["jobs"]["model"]
+        steps = job["steps"]
+        uses = [str(step.get("uses", "")).split("@")[0] for step in steps]
+        check = next(i for i, step in enumerate(steps) if "make test-model" in str(step.get("run", "")))
+        restore, save = uses.index("actions/cache/restore"), uses.index("actions/cache/save")
+        self.assertNotIn("actions/cache", uses, "actions/cache saves only after a successful job")
+        self.assertLess(restore, check)
+        self.assertLess(check, save)
+        self.assertEqual(steps[save].get("if"), "always()")
+        # The sweep stops before the job's limit, so the save step still runs.
+        self.assertLess(steps[check]["timeout-minutes"], job["timeout-minutes"])
+        cache = "${{ runner.temp }}/tlc-cache"
+        self.assertEqual(steps[check]["env"]["TLC_CACHE"], cache)
+        self.assertEqual(steps[restore]["with"]["path"], cache)
+        self.assertEqual(steps[save]["with"]["path"], cache)
+        # A new key per run (caches are immutable), restored by prefix.
+        key = steps[save]["with"]["key"]
+        self.assertEqual(steps[restore]["with"]["key"], key)
+        self.assertIn("${{ github.run_id }}", key)
+        prefixes = steps[restore]["with"]["restore-keys"].splitlines()
+        self.assertTrue(all(key.startswith(prefix) for prefix in prefixes), prefixes)
+        self.assertIn("tlc-rest-java21-", prefixes)
+
+
 if __name__ == "__main__":
     unittest.main()

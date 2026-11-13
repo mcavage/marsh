@@ -478,15 +478,23 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      # check.sh keys each verdict on its spec, config, the tools jar and
+      # check.sh itself, so a change to check.sh or the jar re-checks every
+      # config, which can take longer than this job may run. The newest
+      # cache is restored, and whatever this run proved is saved even when
+      # it fails or times out, so the next run continues from there instead
+      # of starting cold again.
       - name: Verdict cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/tlc-cache
-          key: tlc-rest-java21-${{ hashFiles('docs/model/**') }}
-          # check.sh separately hashes each spec/config, tools jar and runner.
-          # Reuse unchanged verdicts when only another model or its docs moved.
-          restore-keys: tlc-rest-java21-
+          key: tlc-rest-java21-${{ hashFiles('docs/model/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            tlc-rest-java21-${{ hashFiles('docs/model/**') }}-
+            tlc-rest-java21-
       - name: Check every config but the huge ones (positive configs pass, negative controls fail as expected)
+        # Below the job's limit, so the verdicts are saved after a timeout.
+        timeout-minutes: 50
         env:
           TLC_RUNNER: java
           # /tmp can be quota-limited; TLC's disk-backed queue needs the
@@ -494,6 +502,12 @@ jobs:
           TMPDIR: ${{ runner.temp }}
           TLC_CACHE: ${{ runner.temp }}/tlc-cache
         run: make test-model MODEL_FLAGS=--no-huge MODEL_CACHE="$TLC_CACHE"
+      - name: Save the verdicts, also after a failure or timeout
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tlc-cache
+          key: tlc-rest-java21-${{ hashFiles('docs/model/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   images:
     # Builds the shell template, the services engine image and every Kit from
