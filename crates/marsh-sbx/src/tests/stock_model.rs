@@ -674,6 +674,49 @@ impl StockModel {
         .collect()
     }
 
+    /// Send `response` to the host as `vm`'s retained worker.
+    pub fn worker_says(&self, vm: &str, response: &marsh_worker::WorkerResponse) {
+        let socket = self
+            .state
+            .lock()
+            .unwrap()
+            .running
+            .iter()
+            .rev()
+            .find(|running| running.vm == vm && matches!(running.kind, ProcKind::Worker))
+            .and_then(|running| {
+                running
+                    .state
+                    .socket
+                    .lock()
+                    .unwrap()
+                    .as_ref()?
+                    .try_clone()
+                    .ok()
+            })
+            .expect("a running worker");
+        marsh_worker::write_frame(&mut &socket, response).unwrap();
+    }
+
+    /// Wait until `vm`'s worker received a request `wanted` matches.
+    pub fn wait_worker_request(
+        &self,
+        vm: &str,
+        wanted: impl Fn(&marsh_worker::WorkerRequest) -> bool,
+    ) {
+        let state = self.state.lock().unwrap();
+        let (_state, timeout) = self
+            .changed
+            .wait_timeout_while(state, WAIT_LIMIT, |state| {
+                !state
+                    .worker_requests
+                    .iter()
+                    .any(|(name, request)| name == vm && wanted(request))
+            })
+            .unwrap();
+        assert!(!timeout.timed_out(), "worker never got the request");
+    }
+
     pub fn wait_worker_starts(&self, vm: &str, count: usize) {
         let state = self.state.lock().unwrap();
         let (_state, timeout) = self

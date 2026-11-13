@@ -833,3 +833,72 @@ fn a_worker_that_fails_before_ready_is_reported_replaceable_and_its_vm_replaced(
         assert_eq!(adapter.ownership.uuid(KIT), Some(second));
     }
 }
+
+/// B-01, through a real attempt route and its reader: `cap.sock` data the
+/// consumer takes frees the budget (four budgets' worth passes uncut), and
+/// data a stalled consumer leaves past the budget cuts that channel on both
+/// sides: the worker is told to close it, and the consumer gets its close,
+/// marked as a cut.
+#[test]
+fn cap_sock_data_is_budgeted_against_what_the_consumer_has_not_taken() {
+    use marsh_worker::{WorkerRequest, WorkerResponse};
+    let model = StockModel::new();
+    let (adapter, kit, ready) = warm_kit(&model, KIT);
+    let source = directory(kit.dir.path(), "project");
+    let attempt = "attempt-cap";
+    let grants = adapter
+        .prepare_job_grants(
+            &ready,
+            "session-one",
+            attempt,
+            &[grant(
+                source,
+                "/Users/alice/project",
+                MountAccess::ReadWrite,
+            )],
+        )
+        .unwrap();
+    let launched = adapter
+        .launch_worker(&ready, &grants, attempt, job_spec())
+        .unwrap();
+    let responses = &launched.responses;
+    let next = || responses.recv_timeout(WAIT_LIMIT).unwrap();
+    model.worker_says(
+        KIT,
+        &WorkerResponse::CapOpen {
+            attempt: attempt.into(),
+            channel: 1,
+        },
+    );
+    assert!(matches!(next(), WorkerResponse::CapOpen { channel: 1, .. }));
+    let chunk = 64 * 1024;
+    let data = WorkerResponse::CapData {
+        attempt: attempt.into(),
+        channel: 1,
+        bytes: vec![7; chunk],
+    };
+    let budget = 8 << 20;
+    for _ in 0..4 * budget / chunk {
+        model.worker_says(KIT, &data);
+        assert!(matches!(next(), WorkerResponse::CapData { channel: 1, .. }));
+    }
+    assert!(!responses.take_cut(1), "a consumed stream was cut");
+    // Now nobody reads: one chunk past the budget cuts the channel.
+    for _ in 0..=budget / chunk {
+        model.worker_says(KIT, &data);
+    }
+    model.wait_worker_request(KIT, |request| {
+        matches!(request, WorkerRequest::CapClose { channel: 1, attempt: a } if a == attempt)
+    });
+    let mut taken = 0;
+    loop {
+        match next() {
+            WorkerResponse::CapData { .. } => taken += 1,
+            WorkerResponse::CapClose { channel: 1, .. } => break,
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(taken, budget / chunk);
+    assert!(responses.take_cut(1));
+    assert!(!responses.take_cut(1));
+}

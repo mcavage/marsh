@@ -354,7 +354,7 @@ fn retained_response_budget_drops_only_output_after_limit_and_keeps_terminal() {
 /// B-01: `cap.sock` data the consumer has not taken is bounded per attempt.
 /// Past the bound the channel that sent it is closed (once) and its later
 /// frames dropped; other channels, endpoint data, output and the terminal
-/// still pass, and taking the queued data frees the budget.
+/// still pass.
 #[test]
 fn retained_capability_data_is_bounded_and_closes_only_the_flooding_channel() {
     let (send, receive) = mpsc::channel();
@@ -386,14 +386,14 @@ fn retained_capability_data_is_bounded_and_closes_only_the_flooding_channel() {
             ..
         }
     ));
-    // A channel that opens past the bound is closed at once.
+    // A channel that opens past the bound is refused at once.
     route.capability_bytes = RETAINED_CAPABILITY_BUFFER_BYTES;
     assert_eq!(
         route.admit(&WorkerResponse::CapOpen {
             attempt: "attempt-1".into(),
             channel: 5,
         }),
-        Admission::Close(5)
+        Admission::Refuse(5)
     );
     // Endpoint channels have credit: their data is never counted or closed
     // here (their opening is).
@@ -432,6 +432,54 @@ fn retained_capability_data_is_bounded_and_closes_only_the_flooding_channel() {
         Admission::Drop
     );
     drop(receive);
+}
+
+/// B-01: with the consumer stalled and the budget full, a job opening and
+/// closing channels in a loop leaves nothing queued for the consumer, and
+/// the route remembers a bounded number of closed channels.
+#[test]
+fn channel_churn_past_the_budget_queues_nothing_and_stays_bounded() {
+    let (send, receive) = mpsc::channel();
+    let mut route = AttemptRoute::new(send, 1 << 20);
+    route.capability_bytes = RETAINED_CAPABILITY_BUFFER_BYTES;
+    for channel in 1..=10_000 {
+        let opened = route.admit(&WorkerResponse::CapOpen {
+            attempt: "a".into(),
+            channel,
+        });
+        assert_eq!(opened, Admission::Refuse(channel));
+        // The job hangs up before the worker hears of the refusal.
+        if channel % 2 == 0 {
+            route.admit(&WorkerResponse::CapClose {
+                attempt: "a".into(),
+                channel,
+            });
+        }
+    }
+    assert!(route.closed_channels.len() <= CLOSED_CHANNELS_KEPT);
+    assert!(receive.try_recv().is_err(), "a refused opening was queued");
+}
+
+/// B-01: an endpoint channel that ends cleanly (both sides' `ChanEof`, no
+/// `CapClose`) leaves no record on its route.
+#[test]
+fn clean_endpoint_sessions_leave_no_route_record() {
+    let (send, _receive) = mpsc::channel();
+    let mut route = AttemptRoute::new(send, 1 << 20);
+    for channel in 1..=10_000 {
+        let opened = route.admit(&WorkerResponse::ChanOpen {
+            attempt: "a".into(),
+            channel,
+            kind: marsh_contracts::process::ChannelKind::Docker,
+        });
+        assert!(matches!(opened, Admission::Deliver { .. }));
+        route.capability_bytes -= RETAINED_CHANNEL_OPEN_BYTES;
+        route.admit(&WorkerResponse::ChanEof {
+            attempt: "a".into(),
+            channel,
+        });
+    }
+    assert!(route.endpoint_channels.is_empty());
 }
 
 #[test]

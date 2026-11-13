@@ -700,6 +700,49 @@ struct RetainedWorker {
     /// Why the transport ended (reader EOF, a bad frame, an unexpected
     /// Ready, the worker's exit status and stderr tail); set once.
     loss: WorkerLoss,
+    /// Requests the reader sends the worker (cancels, closes), and whether
+    /// a thread is writing them: one writer at a time, never the reader.
+    soon: Mutex<(std::collections::VecDeque<WorkerRequest>, bool)>,
+}
+
+/// Queue `request` for the worker without blocking the caller. One writer
+/// thread at a time drains the queue. It holds at most a cancel per
+/// attempt and a close per channel the worker still counts as open, so a
+/// job is held at its channel limit while the queue waits.
+fn send_soon(worker: &Arc<RetainedWorker>, request: WorkerRequest) {
+    {
+        let mut soon = worker
+            .soon
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        soon.0.push_back(request);
+        if soon.1 {
+            return;
+        }
+        soon.1 = true;
+    }
+    let worker = Arc::clone(worker);
+    thread::spawn(move || {
+        loop {
+            let next = {
+                let mut soon = worker
+                    .soon
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let next = soon.0.pop_front();
+                soon.1 = next.is_some();
+                next
+            };
+            let Some(request) = next else { return };
+            let _ = write_frame(
+                &mut *worker
+                    .input
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                &request,
+            );
+        }
+    });
 }
 
 /// Diagnostics for a retained worker transport that ended under live
@@ -809,12 +852,21 @@ struct AttemptRoute {
     overflowing: bool,
     capability_bytes: usize,
     capability_limit: usize,
-    /// Endpoint channels (`ChanOpen`): their data is credit-limited.
+    /// Endpoint channels (`ChanOpen`) whose job side still sends: their
+    /// data is credit-limited. One leaves at its `ChanEof` or `CapClose`.
     endpoint_channels: BTreeSet<u32>,
-    /// `cap.sock` channels closed for overflow: their later frames are
-    /// dropped, and the worker's own close is not passed on twice.
+    /// Channels closed (or refused) here for the budget: their later frames
+    /// are dropped, and the worker's own close is not passed on twice. At
+    /// most [`CLOSED_CHANNELS_KEPT`], newest kept.
     closed_channels: BTreeSet<u32>,
+    /// Channels cut for the budget whose consumer has not been told yet.
+    cut_channels: BTreeSet<u32>,
 }
+
+/// Closed channels a route remembers. Channel numbers only grow, so the
+/// oldest goes first; a frame of a forgotten one reaches the consumer,
+/// which no longer knows its channel and drops it.
+const CLOSED_CHANNELS_KEPT: usize = 1024;
 
 #[derive(Debug, Eq, PartialEq)]
 enum Admission {
@@ -824,8 +876,12 @@ enum Admission {
     },
     /// Output past the budget: the attempt is cancelled once.
     Overflow,
-    /// `cap.sock` data past the budget: close this channel.
+    /// `cap.sock` data past the budget: close this channel, which the
+    /// consumer knows, on both sides.
     Close(u32),
+    /// A channel opening past the budget: the worker closes it; the consumer
+    /// never hears of it.
+    Refuse(u32),
     Drop,
 }
 
@@ -840,6 +896,14 @@ impl AttemptRoute {
             capability_limit: RETAINED_CAPABILITY_BUFFER_BYTES,
             endpoint_channels: BTreeSet::new(),
             closed_channels: BTreeSet::new(),
+            cut_channels: BTreeSet::new(),
+        }
+    }
+
+    fn close_here(&mut self, channel: u32) {
+        self.closed_channels.insert(channel);
+        while self.closed_channels.len() > CLOSED_CHANNELS_KEPT {
+            self.closed_channels.pop_first();
         }
     }
 
@@ -851,8 +915,8 @@ impl AttemptRoute {
                     .saturating_add(RETAINED_CHANNEL_OPEN_BYTES)
                     > self.capability_limit
                 {
-                    self.closed_channels.insert(*channel);
-                    return Admission::Close(*channel);
+                    self.close_here(*channel);
+                    return Admission::Refuse(*channel);
                 }
                 if matches!(response, WorkerResponse::ChanOpen { .. }) {
                     self.endpoint_channels.insert(*channel);
@@ -869,6 +933,11 @@ impl AttemptRoute {
                     return Admission::Drop;
                 }
             }
+            // The job's side of an endpoint channel is done: no more of its
+            // data follows (`ChanEof` comes after it on the transport).
+            WorkerResponse::ChanEof { channel, .. } => {
+                self.endpoint_channels.remove(channel);
+            }
             WorkerResponse::CapData { channel, bytes, .. }
                 if !self.endpoint_channels.contains(channel) =>
             {
@@ -876,7 +945,15 @@ impl AttemptRoute {
                     return Admission::Drop;
                 }
                 if self.capability_bytes.saturating_add(bytes.len()) > self.capability_limit {
-                    self.closed_channels.insert(*channel);
+                    self.close_here(*channel);
+                    // The close the consumer gets counts like an opening.
+                    self.capability_bytes = self
+                        .capability_bytes
+                        .saturating_add(RETAINED_CHANNEL_OPEN_BYTES);
+                    self.cut_channels.insert(*channel);
+                    while self.cut_channels.len() > CLOSED_CHANNELS_KEPT {
+                        self.cut_channels.pop_first();
+                    }
                     return Admission::Close(*channel);
                 }
                 self.capability_bytes += bytes.len();
@@ -944,6 +1021,18 @@ impl WorkerResponses {
     #[must_use]
     pub fn loss_reason(&self) -> Option<String> {
         self.worker.loss.describe()
+    }
+
+    /// Whether `channel` was closed because the consumer fell behind by the
+    /// attempt's `cap.sock` budget; true once.
+    #[must_use]
+    pub fn take_cut(&self, channel: u32) -> bool {
+        self.worker
+            .routes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(&self.attempt)
+            .is_some_and(|route| route.cut_channels.remove(&channel))
     }
 
     #[must_use]
@@ -6456,6 +6545,7 @@ impl StockSbx {
             alive: AtomicBool::new(true),
             active: AtomicUsize::new(0),
             loss: WorkerLoss::default(),
+            soon: Mutex::default(),
         });
         let reader_worker = Arc::clone(&retained);
         thread::spawn(move || {
@@ -6533,9 +6623,16 @@ impl StockSbx {
                                                     channel,
                                                 },
                                                 output: 0,
-                                                capability: 0,
+                                                capability: RETAINED_CHANNEL_OPEN_BYTES,
                                             },
                                         ))
+                                    }
+                                    Admission::Refuse(channel) => {
+                                        request = Some(WorkerRequest::CapClose {
+                                            attempt: route_attempt.clone(),
+                                            channel,
+                                        });
+                                        None
                                     }
                                     Admission::Drop => None,
                                 }
@@ -6545,16 +6642,7 @@ impl StockSbx {
                             let _ = route.send(routed);
                         }
                         if let Some(request) = request {
-                            let writing = Arc::clone(&reader_worker);
-                            thread::spawn(move || {
-                                let _ = write_frame(
-                                    &mut *writing
-                                        .input
-                                        .lock()
-                                        .unwrap_or_else(std::sync::PoisonError::into_inner),
-                                    &request,
-                                );
-                            });
+                            send_soon(&reader_worker, request);
                         }
                     }
                     WorkerResponse::Ready { generation } => {
