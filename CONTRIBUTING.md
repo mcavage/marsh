@@ -123,7 +123,8 @@ makes on the commit it is about to build (below). A push to `main` runs only
 the lanes its diff selects, so "CI passed" on a `main` commit does not mean
 `make test` passed on it. Stable, nightly and rehearsal builds re-run every
 lane on the commit they build (a nightly still picks its commit from push CI);
-per-commit Kit images follow the push run.
+per-commit Kit images follow the push run, and move a Kit's stable tag only
+when that run passed the Rust lanes.
 
 TLA+ checks run when specs, configs, their runner or shared build/CI inputs
 change. Normal CI excludes the huge configs; those run weekly and in
@@ -276,7 +277,8 @@ Mac, not a release gate.
   builds and publishes the Kit images (`:nightly`, and the stable `:latest`
   when the rule at the top of `release.yml` allows), so agent updates reach
   users the same day. That run follows the push CI run's image job instead of
-  a full CI run. It does not build marsh, publish a prerelease, or touch
+  a full CI run, and moves `:latest` only when that run also passed every
+  Rust lane. It does not build marsh, publish a prerelease, or touch
   Homebrew.
 - **Stable.** Push a tag `vX.Y.Z` on a commit on `main`. The tag is the
   version. The Release workflow refuses a tag that is not on `main` or not

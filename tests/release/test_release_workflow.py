@@ -209,6 +209,12 @@ class ReleaseGate(unittest.TestCase):
                 if str(step.get("uses", "")).startswith("actions/checkout@"):
                     self.assertEqual(step.get("with", {}).get("ref"), "${{ inputs.ref }}", f"ci.yml job {name}")
 
+    def test_kit_promotion_checks_every_rust_lane_by_its_ci_name(self):
+        step = next(step for step in self.jobs["version"]["steps"] if step.get("id") == "v")["run"]
+        listed = re.search(r"rust_lanes=\$'([^']*)'", step).group(1).split("\\n")
+        self.assertEqual(sorted(listed), RUST_LANES)
+        self.assertGreaterEqual(len(RUST_LANES), 6)
+
     def test_ci_passed_counts_every_lane(self):
         jobs = self.ci["jobs"]
         self.assertEqual(sorted(needs(jobs["passed"])), sorted(set(jobs) - {"changes", "passed"}))
@@ -216,6 +222,15 @@ class ReleaseGate(unittest.TestCase):
     def test_a_called_ci_run_has_its_own_concurrency_group(self):
         group = self.ci["concurrency"]["group"]
         self.assertIn("inputs.ref && format('release-{0}', github.run_id)", group)
+
+
+def rust_lanes():
+    """The ci.yml jobs that a push selects with the code or host lane: the Rust tests."""
+    return sorted(job["name"] for job in load("ci.yml")["jobs"].values()
+                  if re.search(r"needs\.changes\.outputs\.(code|host)\b", str(job.get("if", ""))))
+
+
+RUST_LANES = rust_lanes() if yaml else []
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
@@ -243,23 +258,38 @@ class VersionStep(unittest.TestCase):
         self.side = git(work, "rev-parse", "HEAD")
         git(work, "fetch", "-q", "origin")
         self.work = work
-        # The paths tested here never ask the GitHub API.
+        # Only a per-commit run asks the GitHub API, for its CI run's jobs:
+        # this gh prints what the step's --jq makes of them (name TAB
+        # conclusion), from FAKE_CI_JOBS. Any other call fails.
         bin_dir = self.tmp / "bin"
         bin_dir.mkdir()
-        (bin_dir / "gh").write_text("#!/bin/sh\necho 'unexpected gh call' >&2\nexit 99\n")
+        (bin_dir / "gh").write_text(textwrap.dedent("""\
+            #!/bin/sh
+            case "$*" in
+              *"/actions/runs/4242/jobs"*) [ -n "${FAKE_CI_JOBS:-}" ] && cat "$FAKE_CI_JOBS" && exit 0 ;;
+            esac
+            echo "unexpected gh call: $*" >&2
+            exit 99
+            """))
         (bin_dir / "gh").chmod(0o755)
         self.path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
 
-    def run_step(self, commit, event, ref, version=""):
+    def run_step(self, commit, event, ref, version="", ci_jobs=None):
         git(self.work, "checkout", "-q", "--detach", commit)
         output = self.tmp / "output"
         output.write_text("")
         context = {"github.event.inputs.version": version, "github.token": "unused"}
+        if ci_jobs is not None:
+            context["github.event.workflow_run.id"] = "4242"
         env = {"PATH": self.path, "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": os.devnull,
                "GIT_CONFIG_SYSTEM": os.devnull, "GITHUB_EVENT_NAME": event, "GITHUB_REF": ref,
                "GITHUB_REF_NAME": ref.rsplit("/", 1)[-1], "GITHUB_REPOSITORY": "example/marsh",
                "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(self.tmp / "summary"),
                "RUNNER_TEMP": str(self.tmp), **step_env("release.yml", "version", "v", context)}
+        if ci_jobs is not None:
+            jobs = self.tmp / "ci-jobs.tsv"
+            jobs.write_text("".join(f"{name}\t{conclusion}\n" for name, conclusion in ci_jobs.items()))
+            env["FAKE_CI_JOBS"] = str(jobs)
         result = subprocess.run([*shell_argv("release.yml", "version", "v"), str(self.script)],
                                 cwd=self.work, env=env, capture_output=True, text=True, timeout=60)
         outputs = dict(line.split("=", 1) for line in output.read_text().splitlines() if "=" in line)
@@ -283,6 +313,29 @@ class VersionStep(unittest.TestCase):
         result, _ = self.run_step(self.main, "push", "refs/tags/v1.2.3.4")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bad version", result.stdout + result.stderr)
+
+    def ci_run(self, **overrides):
+        """A push CI run's jobs, by name: every lane ran and passed, then overrides."""
+        jobs = {job.get("name", key): "success" for key, job in load("ci.yml")["jobs"].items()}
+        jobs.update(overrides)
+        return jobs
+
+    def per_commit(self, jobs):
+        result, out = self.run_step(self.main, "workflow_run", "refs/heads/main", ci_jobs=jobs)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result, out
+
+    def test_a_per_commit_run_moves_the_stable_kit_tag_only_after_the_rust_lanes_passed(self):
+        _, out = self.per_commit(self.ci_run())
+        self.assertEqual((out["stages"], out["channel"], out["promote_kits"]), ("images", "nightly", "true"))
+        for lane in RUST_LANES:
+            result, out = self.per_commit(self.ci_run(**{lane: "skipped"}))
+            self.assertEqual((out["stages"], out["promote_kits"]), ("images", "false"), lane)
+            self.assertIn("the stable Kit tag stays", result.stdout)
+
+    def test_a_per_commit_run_without_an_image_build_publishes_nothing(self):
+        result, out = self.per_commit(self.ci_run(**{"Kit and shell images (build, no push)": "skipped"}))
+        self.assertEqual(out, {"stages": "none"})
 
 
 NIGHTLY_TAG = "v1.2.5-nightly.20261101000000.gabcdef0"
