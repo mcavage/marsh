@@ -473,7 +473,8 @@ is 130. `split` exits with the first nonzero code in declaration order.
     of `daemon-jobs` (1371 at its maximum, 512, so about 510 nested
     children run at once). It raises its descriptor soft limit (up to
     16384, falling back to 4096) and serves no more connections than that
-    limit affords at 6 descriptors each with 512 to spare: 597 at 4096.
+    limit affords at 7 descriptors each (a split branch's) with 512 to
+    spare: 512 at 4096.
     Past the cap a connection gets a refusal frame. When descriptors still
     run out, `accept` waits and retries; the daemon never stops serving
     for it.

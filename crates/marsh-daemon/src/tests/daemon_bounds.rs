@@ -776,3 +776,74 @@ fn the_daemon_serves_on_after_running_out_of_descriptors() {
     daemon.answers();
     assert!(!daemon.task.as_ref().unwrap().is_finished());
 }
+
+/// Start a job's split of `branches` argv branches that hold until
+/// released; its create stream.
+fn held_split(daemon: &Daemon, token: &str, branches: usize) -> UnixStream {
+    let mut spec = daemon.spec(branches, daemon.session());
+    for branch in &mut spec.branches {
+        branch.argv = Some(vec![b"fixture".to_vec(), b"hold".to_vec()]);
+    }
+    let mut stream = UnixStream::connect(&daemon.client().paths.socket).unwrap();
+    stream.set_read_timeout(Some(PATIENCE)).unwrap();
+    write_frame(
+        &mut stream,
+        &Envelope {
+            protocol: PROTOCOL.into(),
+            token: token.to_owned(),
+            body: PublicRequest::SplitCreate(spec),
+        },
+    )
+    .unwrap();
+    write_frame(&mut stream, &AttachmentFrame::StdinEof).unwrap();
+    let started = read_frame::<PublicReply>(&mut stream).unwrap();
+    assert!(
+        matches!(started, PublicReply::SplitStarted { .. }),
+        "{started:?}"
+    );
+    stream
+}
+
+/// Descriptors open once the count stops changing.
+fn settled_descriptors() -> usize {
+    let mut last = open_descriptors();
+    loop {
+        thread::sleep(Duration::from_millis(200));
+        let now = open_descriptors();
+        if now == last {
+            return now;
+        }
+        last = now;
+    }
+}
+
+/// A-03: the cap's sizing of [`DESCRIPTORS_PER_CONNECTION`] per connection
+/// holds for the costliest connection, a split branch: the daemon's own
+/// `Execute` and the branch's output directory. Counted in this process,
+/// where the daemon runs, a split of ten held branches holds no more than
+/// that per extra branch than a split of two (which cancels each split's
+/// own descriptors).
+#[test]
+fn a_connection_holds_no_more_descriptors_than_the_cap_allows_for() {
+    let release = Arc::new(AtomicBool::new(false));
+    let backend = Arc::new(HoldOne(Arc::clone(&release)));
+    let daemon = Daemon::start(|server| server.with_backend(backend));
+    let (_job, token) = daemon.job();
+    // Warms whatever a first split opens once.
+    daemon.split(1);
+    let held = |count| daemon.server.store.lock().connections.held_total() == count;
+    let start = settled_descriptors();
+    let small = held_split(&daemon, &token, 2);
+    wait_until("two branches run", || held(2));
+    let two = settled_descriptors() - start;
+    let large = held_split(&daemon, &token, 10);
+    wait_until("ten more branches run", || held(12));
+    let ten = settled_descriptors() - start - two;
+    let per_branch = (ten - two).div_ceil(8);
+    assert!(
+        per_branch as u64 <= DESCRIPTORS_PER_CONNECTION,
+        "{per_branch} descriptors per branch connection"
+    );
+    release.store(true, Ordering::Release);
+    drop((small, large));
+}

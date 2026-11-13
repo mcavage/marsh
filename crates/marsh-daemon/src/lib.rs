@@ -177,11 +177,12 @@ fn busy_lifecycle_refusal(message: &str) -> bool {
         || message.starts_with(BUSY_BLOCKED)
         || message.starts_with(STOCK_SBX_REMOVED)
 }
-/// The most descriptors one connection holds in marshd. An internal
-/// `Execute` (a split branch, a child job's start) holds six: three in its
-/// `ClientExecution` and three in its `ServerAttachment`; a job's
-/// `cap.sock` connection holds three (its end and the bridge's two).
-const DESCRIPTORS_PER_CONNECTION: u64 = 6;
+/// The most descriptors one connection holds in marshd. A split branch
+/// holds seven: its internal `Execute`'s six (three in its
+/// `ClientExecution`, three in its `ServerAttachment`) and its output
+/// directory; a child job's start holds the six; a job's `cap.sock`
+/// connection holds three (its end and the bridge's two).
+const DESCRIPTORS_PER_CONNECTION: u64 = 7;
 /// Descriptors kept outside the connection budget: the listener, journals,
 /// snapshots, worker transports.
 const DESCRIPTOR_HEADROOM: u64 = 512;
@@ -189,7 +190,7 @@ const DESCRIPTOR_HEADROOM: u64 = 512;
 /// every connection at [`DESCRIPTORS_PER_CONNECTION`] still leaves
 /// [`DESCRIPTOR_HEADROOM`]. The daemon's connection cap is the smaller of
 /// this and what its job pool needs (`connection_budget::connection_cap_for`).
-/// Below a limit of 608 that cannot hold, and this stays at 16: there, and
+/// Below a limit of 624 that cannot hold, and this stays at 16: there, and
 /// whenever other descriptors (spools, worker transports) run out first, it
 /// is the accept loop's retry that keeps the daemon serving.
 fn descriptor_cap(descriptors: Option<u64>) -> usize {
