@@ -790,3 +790,24 @@ fn a_forgotten_workspace_releases_its_bind_roots() {
     h.svc.forget_scope("ws-b").unwrap();
     assert_eq!(h.svc.tracked().0, 0);
 }
+
+/// DA1-06: a bind mount in a real `containers/create` opens its root under
+/// the connection's own workspace, so forgetting that workspace releases it.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_bind_in_a_create_is_released_with_its_workspace() {
+    let h = H::new("bindroot", false, no_custom(), |_| {});
+    std::fs::create_dir_all(h.dir.join("data")).unwrap();
+    let sock = h.serve(&h.auth);
+    let body = format!(
+        r#"{{"Image":"busybox","HostConfig":{{"Binds":["{}:/data"]}}}}"#,
+        h.dir.join("data").display()
+    );
+    // Whether or not this host may mount the pin, the root was opened.
+    let _ = call(&sock, "POST", "/containers/create", Some(&body));
+    assert_eq!(h.svc.tracked().0, 1);
+    h.svc.forget_scope("another-workspace").unwrap();
+    assert_eq!(h.svc.tracked().0, 1);
+    h.svc.forget_scope(&h.auth.workspace).unwrap();
+    assert_eq!(h.svc.tracked().0, 0);
+}
