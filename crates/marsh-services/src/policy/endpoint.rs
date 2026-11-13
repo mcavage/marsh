@@ -6,7 +6,7 @@
 //! the engine itself answered `101`, or `200` with a Docker stream content
 //! type, on a route that is allowed to hijack.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -82,6 +82,9 @@ impl Default for Config {
     }
 }
 
+/// An open bind root and the workspaces that used it.
+type HeldRoot = (Arc<ProjectRoot>, HashSet<String>);
+
 #[derive(Default)]
 struct Counts {
     attempts: HashMap<String, usize>,
@@ -113,7 +116,9 @@ pub struct Services {
     pub ledger: Ledger,
     pub pins: PinManager,
     upstream: PathBuf,
-    roots: Mutex<HashMap<PathBuf, Arc<ProjectRoot>>>,
+    /// Each bind root opened, with the workspaces that used it: a root goes
+    /// when the last of them is forgotten (`forget_scope`).
+    roots: Mutex<HashMap<PathBuf, HeldRoot>>,
     counts: Mutex<Counts>,
     sockets: Mutex<HashMap<String, (PathBuf, Arc<AtomicBool>)>>,
     net_lock: Mutex<()>,
@@ -193,11 +198,18 @@ impl Drop for ConnGuard {
             .counts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A count at zero is removed: attempts and roots come and go.
         if let Some(n) = c.attempts.get_mut(&self.attempt) {
             *n -= 1;
+            if *n == 0 {
+                c.attempts.remove(&self.attempt);
+            }
         }
         if let Some(n) = c.roots.get_mut(&self.root) {
             *n -= 1;
+            if *n == 0 {
+                c.roots.remove(&self.root);
+            }
         }
         c.project -= 1;
         PROCESS_CONNS.fetch_sub(1, Ordering::SeqCst);
@@ -352,18 +364,44 @@ impl Services {
         })
     }
 
-    fn root_for(&self, project: &Path) -> Result<Arc<ProjectRoot>, PinError> {
+    fn root_for(&self, project: &Path, workspace: &str) -> Result<Arc<ProjectRoot>, PinError> {
         let mut g = self
             .roots
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(r) = g.get(project) {
+        if let Some((r, users)) = g.get_mut(project) {
+            users.insert(workspace.to_owned());
             return Ok(Arc::clone(r));
         }
         let r = Arc::new(ProjectRoot::open(project)?);
         self.note_protected(&r);
-        g.insert(project.to_path_buf(), Arc::clone(&r));
+        g.insert(
+            project.to_path_buf(),
+            (Arc::clone(&r), HashSet::from([workspace.to_owned()])),
+        );
         Ok(r)
+    }
+
+    /// Open (or reuse) `project`'s bind root for `workspace` (tests).
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn hold_root(&self, project: &Path, workspace: &str) {
+        self.root_for(project, workspace).unwrap();
+    }
+
+    /// Bind roots held open, and attempts and roots with a connection count
+    /// (tests).
+    #[cfg(test)]
+    pub(crate) fn tracked(&self) -> (usize, usize, usize) {
+        let c = self
+            .counts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
+        (roots, c.attempts.len(), c.roots.len())
     }
 
     /// Record what `.git` and `.marsh` are under this root, the first time
@@ -663,6 +701,14 @@ impl Services {
             }
         }
         let _ = std::fs::remove_dir(self.cfg.paths.socket_root.join(scope));
+        // Its bind roots' descriptors close once no other workspace uses them.
+        self.roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, (_, users)| {
+                users.remove(scope);
+                !users.is_empty()
+            });
         self.ledger.forget_scope(scope)
     }
 
@@ -809,7 +855,7 @@ impl Env for Scope {
     fn pin_bind(&self, req: &PinRequest) -> Result<PinnedBind, Refusal> {
         let root = self
             .svc
-            .root_for(&self.auth.project_root)
+            .root_for(&self.auth.project_root, &self.auth.workspace)
             .map_err(|e| Refusal {
                 status: 500,
                 msg: e.to_string(),

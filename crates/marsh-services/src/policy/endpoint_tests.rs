@@ -734,3 +734,59 @@ fn volumes_from_keeps_the_pin_alive_after_the_original_is_deleted() {
     assert_eq!(st, 204);
     assert!(h.svc.ledger.pin("p1").is_none());
 }
+
+// --- long-lived state ---------------------------------------------------------
+
+/// DA1-06: per-attempt and per-root connection counts go when their last
+/// connection does; the endpoint still serves afterwards.
+#[test]
+fn ended_attempts_leave_no_connection_counts_behind() {
+    let h = H::new("state", false, no_custom(), |_| {});
+    let socks = (0..8)
+        .map(|n| {
+            h.serve(&Authority {
+                project_root: scratch(&format!("state-root-{n}")),
+                workspace: format!("ws{n}"),
+                attempt: format!("att{n}"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let clients = socks
+        .iter()
+        .map(|sock| UnixStream::connect(sock).unwrap())
+        .collect::<Vec<_>>();
+    assert!(wait_for(Duration::from_secs(5), || h.svc.tracked().1 == 8));
+    drop(clients);
+    assert!(
+        wait_for(Duration::from_secs(5), || {
+            let (_, attempts, roots) = h.svc.tracked();
+            (attempts, roots) == (0, 0)
+        }),
+        "{:?}",
+        h.svc.tracked()
+    );
+    let (status, body) = call(
+        &h.serve(&h.auth),
+        "POST",
+        "/containers/create",
+        Some(CREATE),
+    );
+    assert_eq!(status, 201, "{body}");
+}
+
+/// DA1-06: a bind root's descriptor goes with the last workspace that used
+/// it (bind roots open only on Linux).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_forgotten_workspace_releases_its_bind_roots() {
+    let h = H::new("roots", false, no_custom(), |_| {});
+    let shared = scratch("roots-shared");
+    h.svc.hold_root(&shared, "ws-a");
+    h.svc.hold_root(&shared, "ws-b");
+    h.svc.hold_root(&scratch("roots-own"), "ws-a");
+    assert_eq!(h.svc.tracked().0, 2);
+    h.svc.forget_scope("ws-a").unwrap();
+    assert_eq!(h.svc.tracked().0, 1, "a root another workspace uses stays");
+    h.svc.forget_scope("ws-b").unwrap();
+    assert_eq!(h.svc.tracked().0, 0);
+}
