@@ -327,6 +327,14 @@ class VersionStep(unittest.TestCase):
             self.assertIn("on main only", result.stdout + result.stderr)
             self.assertNotIn("stages", out)
 
+    def test_a_rehearsal_of_a_commit_no_longer_on_main_is_refused(self):
+        # The ref is main, but the checked-out commit is not on it (main was
+        # force-pushed after the run started).
+        result, out = self.run_step(self.side, "workflow_dispatch", "refs/heads/main", "1.3.0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not on main", result.stdout + result.stderr)
+        self.assertNotIn("stages", out)
+
     def test_a_manual_run_on_main_rehearses_or_publishes_a_nightly(self):
         result, out = self.run_step(self.main, "workflow_dispatch", "refs/heads/main", "1.3.0")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
