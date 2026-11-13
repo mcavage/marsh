@@ -90,6 +90,9 @@ struct Counts {
     attempts: HashMap<String, usize>,
     /// Per bind root: only the `project-cap-per-root` defect uses it.
     roots: HashMap<PathBuf, usize>,
+    /// Per workspace: its last connection's end releases the bind roots of
+    /// a workspace no longer served.
+    workspaces: HashMap<String, usize>,
     /// Connections of this project (this `Services` is one project's engine),
     /// whatever workspace root each one is bound to.
     project: usize,
@@ -189,6 +192,7 @@ struct ConnGuard {
     svc: Arc<Services>,
     attempt: String,
     root: PathBuf,
+    workspace: String,
 }
 
 impl Drop for ConnGuard {
@@ -211,9 +215,23 @@ impl Drop for ConnGuard {
                 c.roots.remove(&self.root);
             }
         }
+        let last = c.workspaces.get_mut(&self.workspace).is_some_and(|n| {
+            *n -= 1;
+            *n == 0
+        });
+        if last {
+            c.workspaces.remove(&self.workspace);
+        }
         c.project -= 1;
         PROCESS_CONNS.fetch_sub(1, Ordering::SeqCst);
         self.svc.open_connections.fetch_sub(1, Ordering::Relaxed);
+        drop(c);
+        // A workspace no longer served (forgotten, or served one stream at a
+        // time by the relay) keeps no bind root past its last connection,
+        // even one a late request on that connection opened again.
+        if last && !self.svc.serving(&self.workspace) {
+            self.svc.release_roots(&self.workspace);
+        }
     }
 }
 
@@ -354,6 +372,7 @@ impl Services {
         }
         *c.attempts.entry(key.clone()).or_default() += 1;
         *c.roots.entry(a.project_root.clone()).or_default() += 1;
+        *c.workspaces.entry(a.workspace.clone()).or_default() += 1;
         c.project += 1;
         PROCESS_CONNS.fetch_add(1, Ordering::SeqCst);
         self.open_connections.fetch_add(1, Ordering::Relaxed);
@@ -361,7 +380,30 @@ impl Services {
             svc: Arc::clone(self),
             attempt: key,
             root: a.project_root.clone(),
+            workspace: a.workspace.clone(),
         })
+    }
+
+    /// Whether `workspace` has a substituted socket being served.
+    fn serving(&self, workspace: &str) -> bool {
+        let prefix = format!("{workspace}/");
+        self.sockets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .any(|key| key.starts_with(&prefix))
+    }
+
+    /// `workspace` no longer uses its bind roots: a root goes once no other
+    /// workspace that used it remains.
+    fn release_roots(&self, workspace: &str) {
+        self.roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, (_, users)| {
+                users.remove(workspace);
+                !users.is_empty()
+            });
     }
 
     fn root_for(&self, project: &Path, workspace: &str) -> Result<Arc<ProjectRoot>, PinError> {
@@ -702,13 +744,7 @@ impl Services {
         }
         let _ = std::fs::remove_dir(self.cfg.paths.socket_root.join(scope));
         // Its bind roots' descriptors close once no other workspace uses them.
-        self.roots
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .retain(|_, (_, users)| {
-                users.remove(scope);
-                !users.is_empty()
-            });
+        self.release_roots(scope);
         self.ledger.forget_scope(scope)
     }
 
