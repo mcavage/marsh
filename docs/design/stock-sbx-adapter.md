@@ -42,12 +42,15 @@ CLI) in the session's launch directory or workspace.
 Before it leaves its launch directory, marshd makes its path settings
 absolute against it (`--home`, `MARSH_HOME`, `MARSH_GUEST_ARTIFACTS`,
 `MARSH_KIT_IMAGE_CACHE`, `MARSH_OWNERSHIP_MIRROR`, `MARSH_DEV_CACHE_ROOT`),
-and resolves its program settings (`MARSH_SBX`, `MARSH_DOCKER`,
-`MARSH_OPEN_COMMAND`): a value with a `/` is a path, made absolute the same
-way; a bare name is looked up on the fixed `PATH` host commands run with
-(`/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`), never in the launch
-directory. An upgrade's successor starts in `/` and is handed these resolved
-values in place of the ones it would inherit.
+and resolves its program settings. A value with a `/` is a path, made
+absolute the same way. A bare name is never looked up in the launch
+directory: `MARSH_SBX` (also when unset, as `sbx`) and `MARSH_OPEN_COMMAND`
+on the absolute entries of the inherited `PATH`, skipping empty and relative
+entries such as `.`, as the client does for `MARSH_SBX`; `MARSH_DOCKER` on
+the fixed `PATH` Docker commands run with
+(`/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`). An upgrade's successor
+starts in `/` and is handed these resolved values in place of the ones it
+would inherit.
 
 ## Ownership map and names
 

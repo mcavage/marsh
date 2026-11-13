@@ -31,6 +31,12 @@ const PATIENCE: Duration = Duration::from_secs(60);
 struct Daemon {
     child: Child,
     successors: Vec<u32>,
+    /// Once an upgrade is installed the launched daemon exits by design
+    /// (before its successor binds), so its exit is no failure.
+    handing_over: bool,
+    /// The lab's private root: any marshd still running from it (a successor
+    /// that never got to serve) is killed too.
+    root: PathBuf,
 }
 
 impl Drop for Daemon {
@@ -40,6 +46,10 @@ impl Drop for Daemon {
         for pid in &self.successors {
             signal(*pid, rustix::process::Signal::KILL);
         }
+        let _ = Command::new("pkill")
+            .args(["-KILL", "-f"])
+            .arg(self.root.join("install/bin/marshd"))
+            .status();
     }
 }
 
@@ -88,6 +98,19 @@ impl Lab {
         fs::create_dir_all(&guest).unwrap();
         fs::write(guest.join("commands.json"), format!(r#"{{"kit":"{KIT}"}}"#)).unwrap();
         fs::write(guest.join("shell-image"), SHELL).unwrap();
+        // Recorders for the program settings: they log their cwd and parent.
+        for name in ["docker", "opener"] {
+            let path = project.join("tools").join(name);
+            fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\t%s\\t%s\\n' \"$(pwd -P)\" \"$PPID\" \"$*\" >> '{}'\n",
+                    root.join(format!("{name}.log")).display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let lab = Self {
             _temp: temp,
             log: root.join("calls.log"),
@@ -154,7 +177,8 @@ esac
             .env("HOME", &account.dir)
             .env("USER", &account.name)
             .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-            .env("MARSH_SBX", "tools/sbx")
+            // Always the absolute path of the fake: never a real stock.
+            .env("MARSH_SBX", self.project.join("tools/sbx"))
             .env(
                 "MARSH_CONTROL_HOME",
                 self.root.join("control-parent/control"),
@@ -177,6 +201,8 @@ esac
         Daemon {
             child: command.spawn().unwrap(),
             successors: Vec::new(),
+            handing_over: false,
+            root: self.root.clone(),
         }
     }
 
@@ -214,6 +240,15 @@ esac
             PublicReply::Error { message, .. } => Some(message),
             _ => None,
         }
+    }
+
+    /// The daemons that ran the `MARSH_DOCKER` recorder.
+    fn docker_parents(&self) -> Vec<u32> {
+        fs::read_to_string(self.root.join("docker.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.split('\t').nth(1)?.parse().ok())
+            .collect()
     }
 
     fn calls(&self) -> Vec<Call> {
@@ -307,8 +342,8 @@ fn wait_for<T>(what: &str, daemon: &mut Daemon, mut ready: impl FnMut() -> Optio
         if let Some(value) = ready() {
             return value;
         }
-        if let Some(status) = daemon.child.try_wait().unwrap()
-            && daemon.successors.is_empty()
+        if !daemon.handing_over
+            && let Some(status) = daemon.child.try_wait().unwrap()
         {
             panic!("marshd exited ({status}) before {what}");
         }
@@ -391,11 +426,20 @@ fn an_upgrade_successor_keeps_the_launch_settings() {
     }
     let marshd = bin.join("marshd");
     fs::copy(env!("CARGO_BIN_EXE_marshd"), &marshd).unwrap();
-    // No Kit update pass: the control registry stays empty, so a successor
-    // that misread MARSH_GUEST_ARTIFACTS finds no commands and fails.
-    let mut daemon = lab.start(&marshd, &[("MARSH_AUTO_UPDATE", "0")]);
+    // Program settings given as paths relative to the project: each daemon's
+    // start-up Kit update check runs MARSH_DOCKER for the newer image.
+    let mut daemon = lab.start(
+        &marshd,
+        &[
+            ("MARSH_DOCKER", "tools/docker"),
+            ("MARSH_OPEN_COMMAND", "tools/opener"),
+        ],
+    );
     let first = daemon.child.id();
     wait_for("the daemon to serve", &mut daemon, || lab.serving());
+    wait_for("the daemon's Docker read", &mut daemon, || {
+        lab.docker_parents().contains(&first).then_some(())
+    });
     lab.check_settings_landed();
     // The successor must make these again, where the settings name them.
     fs::remove_dir(lab.root.join("kit-images")).unwrap();
@@ -408,6 +452,7 @@ fn an_upgrade_successor_keeps_the_launch_settings() {
     bytes.push(0);
     fs::write(&staged, bytes).unwrap();
     fs::rename(&staged, &marshd).unwrap();
+    daemon.handing_over = true;
 
     let successor = wait_for("the successor to serve", &mut daemon, || {
         lab.serving().filter(|pid| *pid != first)
@@ -425,5 +470,23 @@ fn an_upgrade_successor_keeps_the_launch_settings() {
         "the successor ran its stock checks"
     );
     lab.check_calls(&control);
+    // The successor started in `/` and still ran the Docker the relative
+    // setting named, so it was handed the resolved program.
+    wait_for("the successor's Docker read", &mut daemon, || {
+        lab.docker_parents().contains(&successor).then_some(())
+    });
+    if cfg!(target_os = "linux") {
+        let environment = fs::read(format!("/proc/{successor}/environ")).unwrap();
+        let expected = format!(
+            "MARSH_OPEN_COMMAND={}",
+            lab.project.join("tools/opener").display()
+        );
+        assert!(
+            environment
+                .split(|byte| *byte == 0)
+                .any(|entry| entry == expected.as_bytes()),
+            "the successor's opener setting"
+        );
+    }
     stop(&mut daemon, successor);
 }

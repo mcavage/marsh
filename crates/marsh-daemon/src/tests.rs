@@ -3271,7 +3271,7 @@ fn install_marshd(path: &Path, version: &str, successor: StandIn) {
     let handover = match successor {
         StandIn::Waits => {
             format!(
-                "pwd -P > \"$0.cwd\"; touch \"$0.started\"; {ready}; cat >/dev/null; touch \"$0.ran\""
+                "pwd -P > \"$0.cwd\"; printf '%s' \"$MARSH_DOCKER\" > \"$0.docker\"; touch \"$0.started\"; {ready}; cat >/dev/null; touch \"$0.ran\""
             )
         }
         StandIn::Fails => "touch \"$0.started\"; exit 1".to_owned(),
@@ -3312,7 +3312,8 @@ impl Upgrading {
         let mut server = Server::bind_with_stock_sbx(home.path(), sbx.path())
             .unwrap()
             .with_upgrade_executable(home.path(), &marshd)
-            .with_stock_sbx_probe_interval(Duration::from_millis(10));
+            .with_stock_sbx_probe_interval(Duration::from_millis(10))
+            .with_successor_environment(vec![("MARSH_DOCKER".into(), "/resolved/docker".into())]);
         if let Some(backend) = backend {
             server = server.with_backend(backend);
         }
@@ -3443,10 +3444,15 @@ fn a_replaced_daemon_restarts_on_the_new_build_only_once_idle() {
         assert!(Instant::now() < deadline, "the successor never went on");
         thread::sleep(Duration::from_millis(10));
     }
-    // Not this daemon's cwd: the successor is handed none.
+    // Not this daemon's cwd: the successor is handed none, but it is handed
+    // the settings this daemon resolved.
     assert_eq!(
         fs::read_to_string(next.with_extension("cwd")).unwrap(),
         "/\n"
+    );
+    assert_eq!(
+        fs::read_to_string(next.with_extension("docker")).unwrap(),
+        "/resolved/docker"
     );
 }
 

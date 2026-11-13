@@ -32,8 +32,8 @@ For skills, dotfiles, MCP connections, and extra directories, see
 |---|---|
 | `MARSH_HOME` | Absolute scope root. Default `~/.marsh`. The guest home is `$MARSH_HOME/home`. |
 | `MARSH_SHELL` | Shell to run: `marsh` (Brush, the default), `bash`, or `zsh`. See [Choosing your shell](shells.md). |
-| `MARSH_SBX` | Path to `sbx`. Default: `sbx` on `PATH`. |
-| `MARSH_DOCKER` | Path to the Docker CLI the daemon reads Kit images from registries and builds local Kits with. Default: `docker`. |
+| `MARSH_SBX` | Path to `sbx`. Default: `sbx` on `PATH`. A bare name (no `/`), like the default, is looked up only on the absolute entries of `PATH`: empty and relative entries such as `.` are skipped, so a file in the current directory is never used. A relative path is taken against the directory marsh starts in. |
+| `MARSH_DOCKER` | Path to the Docker CLI the daemon reads Kit images from registries and builds local Kits with. Default: `docker`. Docker runs with the `PATH` `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`, so a bare name is looked up only there, not on your shell's `PATH`, and the daemon does not start if it is not found; give the absolute path of a Docker CLI installed elsewhere (such as `~/.docker/bin/docker`). |
 | `MARSH_CONTROL_HOME` | Host-only state root. See [Control home](#control-home). |
 | `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. See [spawn restrictions and refusal statuses](agents.md#limits-and-messages). |
 | `MARSH_PLACE` | Where registered commands run. Only `local` is accepted; any other value is an error (`MARSH_PLACE must be local`). |
@@ -47,7 +47,7 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_CLOUD_CHILDREN` | The most agent sandboxes one [detached cloud run](cloud.md#agents-calling-agents-with-the-lid-closed) may start with `marsh config cloud-delegate on`: 1 to 64. Default 8. Read when the daemon starts. |
 | `MARSH_OPEN_URLS` | `0` (or `off`) stops [`xdg-open` in a shell or job](agents.md#opening-links) from opening links on your Mac, as `marsh config open-urls off` does; links are printed instead. Read when the daemon starts. |
 | `MARSH_SERVICES_IDLE_SECONDS` | How long a [services VM](design/services.md#lease-holders-and-idle-stop) with no lease holder keeps running before it is stopped, in seconds, instead of `marsh config services-idle-seconds` (default 900). Read when the daemon starts; tests use a short value. |
-| `MARSH_OPEN_COMMAND` | The program the daemon runs as `PROGRAM URL` to open a link. Default `/usr/bin/open`. Read when the daemon starts; tests point it at a recorder. |
+| `MARSH_OPEN_COMMAND` | The program the daemon runs as `PROGRAM URL` to open a link. Default `/usr/bin/open`. A bare name is looked up on the absolute entries of your `PATH` (never `.` or other relative entries); if it is not found there, links are not opened. Read when the daemon starts; tests point it at a recorder. |
 
 ### Job limits
 
