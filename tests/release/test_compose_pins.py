@@ -32,9 +32,21 @@ COPIES = {
 }
 # The two fetches of Compose's release binary: the same asset, the same digests.
 FETCHES = ("packaging/image-base/docker-compose.sh", "kits/marsh-docker-cli/marsh-docker-cli.dockerfile")
-# Text that names a Compose version to install; a new file with one must be added to COPIES.
-MENTIONS = re.compile(r"docker-compose-plugin[=@]|COMPOSE_VERSION=|docker/compose/releases/download/")
-SKIP = ("vendor/", "crates/marsh-services/e3/corpus/", "tests/release/test_compose_pins.py")
+# Text that names a Compose version: a pin's shape, or a dotted version near the
+# word "compose". A new file with one must be added to COPIES (or to RECORDS).
+MENTIONS = re.compile(
+    r"docker-compose-plugin[=@]|COMPOSE_VERSION=|docker/compose/releases/download/"
+    r"|compose.{0,32}\bv?\d+\.\d+\.\d+\b|\bv?\d+\.\d+\.\d+\b.{0,32}compose", re.IGNORECASE)
+SKIP = ("vendor/", "tests/release/test_compose_pins.py")
+# Files that mention a Compose version without pinning ours.
+RECORDS = {
+    # Requests recorded from a Compose client (User-Agent compose/vX.Y.Z).
+    "crates/marsh-services/e3/corpus/",
+    # The acceptance fixture image's own tool versions, observed.
+    "tests/acceptance/services/fixtures/nfx-kit/versions.json",
+    # The npm package `docker-compose`, a testcontainers dependency.
+    "tests/acceptance/services/fixtures/tc/package-lock.json",
+}
 
 
 def read(path):
@@ -54,6 +66,18 @@ def upstream(deb_version):
     return version.rpartition("-")[0] or version
 
 
+def compose_digests(text):
+    """{TARGETARCH: SHA-256 of Compose's release binary} of one fetch script."""
+    arms = re.findall(r"(?ms)^\s*(arm64|amd64)\)(.*?);;", text)
+    digests = {}
+    for arch, body in arms:
+        found = re.findall(r"(?<![a-z_])(?:compose_)?sha=([0-9a-f]{64})", body)
+        if len(found) != 1:
+            raise AssertionError(f"{arch}: expected one Compose digest, found {found}")
+        digests[arch] = found[0]
+    return digests
+
+
 def engine_check():
     """The Compose commands of the engine's RUN, as the build's shell runs them."""
     text = read(ENGINE)
@@ -61,8 +85,11 @@ def engine_check():
     assert run, f"{ENGINE} has no RUN"
     script = re.sub(r"\\\n", " ", run.group(1))
     steps = [step.strip() for step in script.split("&&")]
-    # The install and `test -x` of the plugin's path need the image; the checks run anywhere.
-    return " && ".join(s for s in steps if "compose" in s and not s.startswith(("apt-get", "test -x")))
+    # Everything after `test -x` of the plugin's path, but dockerd's own check,
+    # runs anywhere; what comes before needs the image.
+    plugin = "test -x /usr/libexec/docker/cli-plugins/docker-compose"
+    assert plugin in steps, f"{ENGINE}: no `{plugin}`"
+    return " && ".join(s for s in steps[steps.index(plugin) + 1:] if not s.startswith("dockerd "))
 
 
 class ComposePins(unittest.TestCase):
@@ -79,17 +106,26 @@ class ComposePins(unittest.TestCase):
         self.assertEqual(text.count(f'"{expected}"'), 1, "restore.rs: use COMPOSE_FALLBACK_VERSION")
 
     def test_both_release_binary_fetches_pin_the_same_digests(self):
-        digests = {path: sorted(re.findall(r"\b[0-9a-f]{64}\b", read(path))) for path in FETCHES}
+        digests = {path: compose_digests(read(path)) for path in FETCHES}
         first, second = digests.values()
-        self.assertEqual(len(first), 2, f"{FETCHES[0]}: one Compose digest per architecture")
-        self.assertTrue(set(first) <= set(second), digests)
+        self.assertEqual(sorted(first), ["amd64", "arm64"], f"{FETCHES[0]}: one Compose digest per architecture")
+        self.assertEqual(first, second, digests)
+
+    def test_swapped_architecture_digests_disagree(self):
+        for path in FETCHES:
+            text = read(path)
+            digests = compose_digests(text)
+            swapped = (text.replace(digests["arm64"], "ARM").replace(digests["amd64"], digests["arm64"])
+                       .replace("ARM", digests["amd64"]))
+            self.assertNotEqual(compose_digests(swapped), digests, path)
+            self.assertEqual(compose_digests(swapped)["arm64"], digests["amd64"], path)
 
     def test_no_other_file_pins_compose(self):
         listed = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True)
         known = {ENGINE, *COPIES}
         strays = []
         for name in listed.stdout.decode().split("\0"):
-            if not name or name in known or name.startswith(SKIP):
+            if not name or name in known or name.startswith(SKIP) or name.startswith(tuple(RECORDS)):
                 continue
             try:
                 text = (ROOT / name).read_text()
@@ -119,7 +155,9 @@ class ComposePins(unittest.TestCase):
         for tool in ("dpkg-query", "docker"):
             (tmp / tool).chmod(0o755)
         env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"}
-        return subprocess.run(["sh", "-c", engine_check()], env=env, capture_output=True, timeout=30).returncode
+        # Debian's /bin/sh is dash; use it where it exists.
+        shell = "dash" if shutil.which("dash") else "sh"
+        return subprocess.run([shell, "-c", engine_check()], env=env, capture_output=True, timeout=30).returncode
 
     def test_engine_check_accepts_the_pinned_package(self):
         pin = engine_pin()
@@ -128,6 +166,13 @@ class ComposePins(unittest.TestCase):
         self.assertEqual(self.run_check(pin, upstream(pin)), 0)
         # A rebuilt package (new revision) or an epoch changes nothing upstream.
         self.assertEqual(self.run_check("1:" + upstream(pin) + "-9", upstream(pin)), 0)
+
+    def test_engine_check_refuses_an_empty_version(self):
+        pin = engine_pin()
+        self.assertNotEqual(self.run_check("", ""), 0)
+        self.assertNotEqual(self.run_check("", "v"), 0)
+        self.assertNotEqual(self.run_check(pin, ""), 0)
+        self.assertNotEqual(self.run_check("", upstream(pin)), 0)
 
     def test_engine_check_refuses_a_binary_of_another_version(self):
         pin = engine_pin()
