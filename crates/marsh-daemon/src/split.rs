@@ -1025,7 +1025,19 @@ impl SplitEngine {
     fn expire_leases(&self) {
         let mut expired = Vec::new();
         {
-            let inner = self.lock();
+            let mut inner = self.lock();
+            // A finished split's runtime is kept only while its lease is
+            // read (`await`); `run` covers the moment between its finish and
+            // that update.
+            let Inner {
+                records, runtime, ..
+            } = &mut *inner;
+            runtime.retain(|id, runtime| {
+                !runtime.finished.load(Ordering::Acquire)
+                    || records.get(id).is_some_and(|record| {
+                        matches!(record.state, SplitState::Run | SplitState::Await)
+                    })
+            });
             for (id, record) in &inner.records {
                 let runtime = inner.runtime.get(id);
                 let unheld = runtime.and_then(|r| {
@@ -1075,6 +1087,12 @@ impl SplitEngine {
         for record in old {
             Self::remove_files(&record);
         }
+    }
+
+    /// Splits whose runtime is still held (tests).
+    #[cfg(test)]
+    pub(crate) fn runtimes(&self) -> usize {
+        self.lock().runtime.len()
     }
 
     /// `marsh workers reset`: uncertain branch slots are released.
@@ -2825,12 +2843,25 @@ impl SplitEngine {
         output: &Arc<AtomicUsize>,
         job: &dyn Fn(&Self, String),
     ) -> Result<(i32, Vec<u8>, Vec<u8>), BranchError> {
+        // A cancel signals the executions still listed; one that ended is
+        // dropped from the list, so its sockets close with the branch.
+        struct Listed<'a>(&'a Runtime, &'a ClientExecution);
+        impl Drop for Listed<'_> {
+            fn drop(&mut self) {
+                self.0
+                    .executions
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .retain(|listed| !listed.same(self.1));
+            }
+        }
         let mut started = false;
         runtime
             .executions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(execution.clone());
+        let _listed = Listed(runtime, execution);
         if runtime.cancelled.load(Ordering::Acquire) {
             let _ = execution.send(&AttachmentFrame::Signal {
                 signal: "INT".into(),
@@ -3299,7 +3330,7 @@ fn shell_script(environment: &marsh_contracts::ExportedEnvironment) -> String {
     )
 }
 
-fn session_spec(session_id: &str, authority: &SessionAuthority) -> SessionSpec {
+pub(crate) fn session_spec(session_id: &str, authority: &SessionAuthority) -> SessionSpec {
     SessionSpec {
         session_id: session_id.into(),
         username: authority.username.clone(),

@@ -1,4 +1,5 @@
 mod client_liveness;
+mod daemon_bounds;
 mod execution_cwd;
 mod shell_admission;
 

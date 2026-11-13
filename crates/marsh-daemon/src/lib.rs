@@ -9782,6 +9782,11 @@ impl StdinWindow {
 }
 
 impl ClientExecution {
+    /// Whether `other` is a clone of this execution (the same sockets).
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.writer_shutdown, &other.writer_shutdown)
+    }
+
     fn stdin_closed(&self) -> bool {
         self.stdin_window.as_ref().is_some_and(|window| {
             window
