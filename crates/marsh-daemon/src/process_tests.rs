@@ -206,6 +206,56 @@ fn elapse(store: &DaemonStore, ms: u64) {
             *at = at.saturating_sub(ms);
         }
     }
+    for times in state.process.launched_roots.values_mut() {
+        for at in times {
+            *at = at.saturating_sub(ms);
+        }
+    }
+}
+
+/// RC1-02: a raised rate is enforced even when the tree's receipts were
+/// trimmed (over 1000 terminal receipts keep the newest 900), and the
+/// times it keeps are forgotten with the window.
+#[test]
+fn a_raised_launch_rate_is_enforced_past_receipt_trimming() {
+    let home = tempfile::tempdir().unwrap();
+    let store = reopen(home.path()).unwrap();
+    store.lock().job_defaults = Some(crate::JobDefaults {
+        tree_launch_rate: marsh_contracts::process::LaunchRate {
+            launches: 1500,
+            window_seconds: 600,
+        },
+        ..crate::JobDefaults::default()
+    });
+    let session = session(&store, home.path());
+    let root = launch(&store, &session, None, "claude", view(), false).unwrap();
+    let mut launched = 1;
+    let refused = loop {
+        match child(&store, &session, &root, "shell") {
+            Ok(call) => {
+                end(&store, &call, CleanupState::Verified);
+                launched += 1;
+            }
+            Err(error) => break refusal(Err(error)),
+        }
+        assert!(launched <= 1500, "the rate was never enforced");
+    };
+    assert_eq!(launched, 1500);
+    assert!(store.jobs().jobs.len() < 1500, "receipts were not trimmed");
+    assert!(
+        refused.starts_with("rate limit: 1500 launches in the last 600 s"),
+        "{refused}"
+    );
+    // The store still answers, and the window's end frees the tree.
+    let _ = store.status(None);
+    elapse(&store, 600_001);
+    child(&store, &session, &root, "shell").unwrap();
+    // Trees whose window passed leave nothing behind.
+    end(&store, &root, CleanupState::Verified);
+    elapse(&store, 600_001);
+    let other = launch(&store, &session, None, "claude", view(), false).unwrap();
+    assert_eq!(store.lock().process.rate_roots(), 1);
+    end(&store, &other, CleanupState::Verified);
 }
 
 #[test]

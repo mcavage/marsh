@@ -4138,7 +4138,9 @@ impl DaemonStore {
         state.next_cursor = cursor
             .checked_add(1)
             .ok_or_else(|| DaemonError::InvalidState("receipt cursor exhausted".into()))?;
+        let created = receipt.created_unix_ms;
         state.jobs.insert(job_id.clone(), receipt);
+        process::launched(&mut state, &lineage.root, created);
         if state.journal.exceeds_size_limit() {
             let receipts = state.jobs.clone();
             state.journal.compact(&receipts)?;
