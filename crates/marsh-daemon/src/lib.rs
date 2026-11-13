@@ -177,10 +177,6 @@ fn busy_lifecycle_refusal(message: &str) -> bool {
         || message.starts_with(BUSY_BLOCKED)
         || message.starts_with(STOCK_SBX_REMOVED)
 }
-/// Connections the daemon serves at once, at most. Job capability
-/// connections, and the daemon's own connections on a job's behalf, may
-/// hold only [`connection_budget::capability_share`] of it.
-const MAX_DAEMON_CONNECTIONS: usize = 1024;
 const DAEMON_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // Publication replies may legitimately wait behind one cold Kit preparation
 // (stock sbx 5 + build 20 + load 10 + docker 2 minutes) and the five-minute
@@ -237,10 +233,17 @@ fn raise_descriptor_limit() {
     }
 }
 
-fn acquire_daemon_connection(active: &Arc<AtomicUsize>) -> Option<DaemonConnectionPermit> {
+/// A permit for one more connection, at most `cap` at once. The cap grows
+/// with the job pool (`connection_budget::connection_cap_for`); job
+/// connections, and the daemon's own on a job's behalf, may hold only
+/// [`connection_budget::capability_share`] of it.
+fn acquire_daemon_connection(
+    active: &Arc<AtomicUsize>,
+    cap: usize,
+) -> Option<DaemonConnectionPermit> {
     active
         .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-            (count < MAX_DAEMON_CONNECTIONS).then_some(count + 1)
+            (count < cap).then_some(count + 1)
         })
         .ok()?;
     Some(DaemonConnectionPermit(Arc::clone(active)))
@@ -3016,7 +3019,7 @@ impl DaemonStore {
             journal,
             authentication_tokens,
             capability_tokens: BTreeMap::new(),
-            connections: connection_budget::Budget::new(MAX_DAEMON_CONNECTIONS),
+            connections: connection_budget::Budget::new(),
             process: process::ProcessTable::load(journal_home),
             reservations: BTreeMap::new(),
             ordinary_requests: BTreeMap::new(),
@@ -3073,16 +3076,22 @@ impl DaemonStore {
         &self,
         job_id: &str,
     ) -> Result<connection_budget::CapabilityConnection, String> {
-        let (budget, job_children) = {
+        let (budget, limits) = {
             let state = self.lock();
-            (Arc::clone(&state.connections), state.limits().job_children)
+            (Arc::clone(&state.connections), state.limits())
         };
-        budget.acquire(job_id, job_children)
+        budget.acquire(job_id, limits.job_children, limits.daemon_jobs)
+    }
+
+    /// The daemon's connection cap now: it grows with `daemon-jobs`.
+    pub(crate) fn connection_cap(&self) -> usize {
+        let state = self.lock();
+        state.connections.cap(state.limits().daemon_jobs)
     }
 
     #[cfg(test)]
     fn set_connection_cap(&self, cap: usize) {
-        self.lock().connections.set_cap(cap);
+        self.lock().connections.set_limit(cap);
     }
 
     /// The session spec a job's split requests run under.
@@ -5174,7 +5183,7 @@ impl Server {
         })
     }
 
-    /// Size the jobs' share as if the daemon served `cap` connections
+    /// Serve at most `cap` connections at once, whatever the job pool
     /// (tests).
     #[cfg(test)]
     #[must_use]
@@ -5448,7 +5457,9 @@ impl Server {
             }
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
                 Ok(stream) => {
-                    let Some(permit) = acquire_daemon_connection(&active_connections) else {
+                    let Some(permit) =
+                        acquire_daemon_connection(&active_connections, self.store.connection_cap())
+                    else {
                         drop(stream);
                         continue;
                     };

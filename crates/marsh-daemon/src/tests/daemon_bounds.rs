@@ -537,3 +537,74 @@ fn a_jobs_split_branches_take_the_jobs_slots() {
         daemon.server.store.lock().connections.held_total() == 0
     });
 }
+
+/// Take slots for distinct jobs (each up to its per-job limit) until the
+/// jobs' share refuses; how many were taken.
+fn fill_jobs_share(daemon: &Daemon) -> (Vec<CapabilityConnection>, String) {
+    let mut slots = Vec::new();
+    loop {
+        let (job, _) = daemon.job();
+        loop {
+            match daemon.server.store.capability_connection(&job) {
+                Ok(slot) => slots.push(slot),
+                Err(message) if message.starts_with("marsh: jobs hold") => {
+                    return (slots, message);
+                }
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+fn set_daemon_jobs(daemon: &Daemon, daemon_jobs: usize) {
+    daemon.server.store.lock().job_defaults = Some(crate::JobDefaults {
+        daemon_jobs,
+        ..crate::JobDefaults::default()
+    });
+}
+
+/// A-03: the connection cap grows with `daemon-jobs`, so a full pool of
+/// nested children (two connections each) fits in the jobs' share, and the
+/// host keeps its quarter: 1024 (share 768) at the default 64, 1371 (share
+/// 1029, room for 510 children) at the most, 512.
+#[test]
+fn the_connection_cap_grows_with_the_job_pool() {
+    assert_eq!(connection_budget::connection_cap_for(64), 1024);
+    assert_eq!(connection_budget::connection_cap_for(512), 1371);
+    let daemon = Daemon::start(|server| server);
+    assert_eq!(daemon.server.store.connection_cap(), 1024);
+    let (slots, refused) = fill_jobs_share(&daemon);
+    assert_eq!(slots.len(), 768, "{refused}");
+    drop(slots);
+    set_daemon_jobs(&daemon, 512);
+    assert_eq!(daemon.server.store.connection_cap(), 1371);
+    let (slots, refused) = fill_jobs_share(&daemon);
+    assert_eq!(slots.len(), 1029, "{refused}");
+    assert!(slots.len() >= 2 * 510);
+    drop(slots);
+    daemon.answers();
+}
+
+/// A-03: at `daemon-jobs` 512, more `ProcessRun` children run at once than
+/// a fixed 1024 cap allowed (384), and the host is still served.
+#[test]
+fn a_large_job_pool_runs_its_children_and_the_host_is_served() {
+    let release = Arc::new(AtomicBool::new(false));
+    let backend = Arc::new(HoldOne(Arc::clone(&release)));
+    let daemon = Daemon::start(|server| server.with_backend(backend));
+    set_daemon_jobs(&daemon, 512);
+    let mut holding = Vec::new();
+    while holding.len() < 400 {
+        let (job, token) = daemon.job();
+        for _ in 0..16 {
+            holding.push(held_run(&daemon, &job, &token).unwrap());
+        }
+    }
+    assert!(daemon.server.store.lock().connections.held_total() >= 800);
+    daemon.answers();
+    release.store(true, Ordering::Release);
+    drop(holding);
+    wait_until("every slot is released", || {
+        daemon.server.store.lock().connections.held_total() == 0
+    });
+}

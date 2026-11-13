@@ -13,6 +13,21 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
+/// The daemon's connection cap at the smallest job pools.
+pub const BASE_CAP: usize = 1024;
+
+/// The connection cap a job pool of `daemon_jobs` needs: at least
+/// [`BASE_CAP`], and enough that the jobs' share holds two connections
+/// for every job of the pool (each child's request and the daemon's
+/// connection that starts it), so a full pool of nested children fits.
+/// `daemon-jobs` 64 keeps 1024; 512 needs 1371.
+#[must_use]
+pub const fn connection_cap_for(daemon_jobs: usize) -> usize {
+    let jobs_side = daemon_jobs.saturating_mul(2).saturating_add(4);
+    let cap = jobs_side.saturating_mul(4).div_ceil(3);
+    if cap > BASE_CAP { cap } else { BASE_CAP }
+}
+
 /// Of a daemon connection cap, what job capability connections may hold
 /// together: three quarters, so a quarter is always left for the host.
 #[must_use]
@@ -36,24 +51,35 @@ struct Held {
 
 #[derive(Debug)]
 pub(crate) struct Budget {
-    cap: Mutex<usize>,
+    /// The most connections the daemon may serve whatever its job pool
+    /// (tests lower it).
+    limit: Mutex<usize>,
     held: Mutex<Held>,
 }
 
 impl Budget {
-    pub(crate) fn new(cap: usize) -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
-            cap: Mutex::new(cap),
+            limit: Mutex::new(usize::MAX),
             held: Mutex::default(),
         })
     }
 
     #[cfg(test)]
-    pub(crate) fn set_cap(&self, cap: usize) {
+    pub(crate) fn set_limit(&self, limit: usize) {
         *self
-            .cap
+            .limit
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = cap;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = limit;
+    }
+
+    /// The connection cap now, for a job pool of `daemon_jobs`.
+    pub(crate) fn cap(&self, daemon_jobs: usize) -> usize {
+        let limit = *self
+            .limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        connection_cap_for(daemon_jobs).min(limit)
     }
 
     fn held(&self) -> std::sync::MutexGuard<'_, Held> {
@@ -67,13 +93,9 @@ impl Budget {
         self: &Arc<Self>,
         job: &str,
         job_children: usize,
+        daemon_jobs: usize,
     ) -> Result<CapabilityConnection, String> {
-        let share = capability_share(
-            *self
-                .cap
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let share = capability_share(self.cap(daemon_jobs));
         let limit = per_job(job_children);
         let mut held = self.held();
         let mine = held.by_job.get(job).copied().unwrap_or(0);

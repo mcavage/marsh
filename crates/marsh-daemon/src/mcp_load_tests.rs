@@ -578,7 +578,7 @@ fn load_needs_no_second_daemon_connection() {
     // More than the listen backlog: a refused connect waits for the accept
     // loop to catch up.
     crate::raise_descriptor_limit();
-    let occupied = (0..MAX_DAEMON_CONNECTIONS - 1)
+    let occupied = (0..crate::connection_budget::BASE_CAP - 1)
         .map(|_| {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {

@@ -464,8 +464,11 @@ is 130. `split` exits with the first nonzero code in declaration order.
   - So jobs cannot take the last quarter of the cap. It is left to host
     `marsh` commands, relays, shells, and host and session splits with
     their branches; only the host's own load can fill it.
-  - The daemon raises its descriptor soft limit (up to 4096) for its 1024
-    connections.
+  - The daemon serves at most 1024 connections, or more for a larger job
+    pool: enough that the jobs' share holds two connections for every job
+    of `daemon-jobs` (1371 at its maximum, 512, so about 510 nested
+    children run at once). It raises its descriptor soft limit (up to
+    4096) for them.
 - **Nested splits from a shell branch.** `marsh split` run inside a shell
   branch arrives on that branch's session relay. The daemon maps the
   session to the branch, so the split is a child: argv-only, depth + 1,
