@@ -1924,6 +1924,9 @@ impl SplitEngine {
             Err(message) => return error(&mut stream, message),
         };
         let hold = plan.hold.take();
+        // The create stream's clone for the reader thread is made before
+        // anything is: a failure here leaves no fork files or record behind.
+        let mut reader = stream.try_clone()?;
         let facts = plan.checkpoint.take();
         // Spool stdin to EOF before the snapshot.
         stream.set_read_timeout(None)?;
@@ -1997,7 +2000,6 @@ impl SplitEngine {
                 },
             );
         }
-        let mut reader = stream.try_clone()?;
         let runtime = Arc::new(Runtime::default());
         {
             let mut inner = self.lock();
