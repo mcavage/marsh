@@ -426,10 +426,13 @@ is 130. `split` exits with the first nonzero code in declaration order.
   256 levels deep; a directory is listed only while its entries fit, every
   name listed counts (an ignored one too, as it stays in memory while the
   walk is below it), and the plain walk holds one directory descriptor at
-  a time. Each refusal names the limit and what to do: list generated
-  trees in `.gitignore` in a Git project, or have the branch change fewer
-  files. A fork with
-  more new entries than the change bound is refused while it is walked;
+  a time. Each refusal names the limit and what to do, for the kind of
+  project: list the directories that hold generated files in
+  `.gitignore` (a plain project is told to make itself a Git project
+  first), or have the branch change fewer files (or, in a Git project,
+  ignore what it generates). A fork with more new entries, not counting
+  the ones a Git project ignores, than the change bound is refused while
+  it is walked; ignored names count only toward the tree's bounds;
   edits are refused at the change bound. Paths in
   `files` are C-quoted when they contain control characters, `"`, or `\`.
 - **Writers before capture.** After a shell branch exits, capture waits
