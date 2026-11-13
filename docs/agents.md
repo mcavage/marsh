@@ -164,7 +164,9 @@ reports one. In `tree_usage`, `jobs` counts the jobs that reported usage,
 `cost_usd` sums the reported costs, and `uncosted_jobs` counts jobs that
 reported tokens without a cost. A job whose usage could not all be read (the
 daemon reads lines of at most 1 MiB; a longer result line is skipped) has
-`unavailable` in its `usage`, saying why, and counts in `incomplete_jobs`. `models` breaks the totals down by model so
+`unavailable` in its `usage`, saying why, and counts in `incomplete_jobs`.
+Such a job still counts in `jobs` (and, with no cost read, in
+`uncosted_jobs`), with the tokens that could be read, possibly none. `models` breaks the totals down by model so
 a mixed tree can be priced. Each entry has the same token counts, its own
 `cost_usd` (when its jobs reported one), and `jobs`, and the entries sum to
 the totals. Jobs without a known model are under `"unknown"`. Past 32 models,
