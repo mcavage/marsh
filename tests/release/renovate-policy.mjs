@@ -68,4 +68,19 @@ for (const dep of packages) {
   const packagePolicy = await applyPackageRules({ ...dep, packageName: dep.packageName ?? dep.depName, manager: 'custom.regex', packageFile: dockerfile, packageRules: config.packageRules });
   assert.equal(packagePolicy.groupName, imagePolicy.groupName, `${dep.depName} must update with the DHI base`);
 }
+// The services engine's Compose pin is the one Compose version; its copies
+// are finished by hand (tests/release/test_compose_pins.py), so it must not
+// hold back the DHI group. Its other apt pins stay with the DHI base.
+const engineDockerfile = 'packaging/svc-engine/Dockerfile';
+const enginePackages = extractRegex(readFileSync(engineDockerfile, 'utf8'), engineDockerfile, aptManager).deps;
+const compose = enginePackages.filter(dep => dep.depName === 'docker-compose-plugin');
+assert.equal(compose.length, 1, 'Renovate must discover the engine\'s one Compose pin');
+for (const dep of enginePackages) {
+  const packagePolicy = await applyPackageRules({ ...dep, packageName: dep.packageName ?? dep.depName, manager: 'custom.regex', packageFile: engineDockerfile, packageRules: config.packageRules });
+  if (dep.depName === 'docker-compose-plugin') {
+    assert.equal(packagePolicy.groupName, 'Docker Compose', 'The Compose pin must update in its own PR');
+  } else {
+    assert.equal(packagePolicy.groupName, imagePolicy.groupName, `${dep.depName} must update with the DHI base`);
+  }
+}
 console.log('Renovate dependency policy passed');

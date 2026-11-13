@@ -173,6 +173,23 @@
       schedule: ["at any time"],
     },
     {
+      // The engine's pin is the one Compose version. The Kits fetch the same
+      // version as Compose's release binary, pinned by SHA-256
+      // (packaging/image-base/docker-compose.sh, kits/marsh-docker-cli), which
+      // no manager here can update, and tests/release/test_compose_pins.py
+      // fails until they match. Kept out of "DHI inputs" so a new Compose
+      // release waiting for those copies does not hold back the DHI base and
+      // the other apt pins; a new package revision of the same version passes
+      // and merges on its own.
+      description: "The services engine's Compose plugin: one PR, finished by hand when the version moves",
+      matchDatasources: ["deb"],
+      matchPackageNames: ["docker-compose-plugin"],
+      groupName: "Docker Compose",
+      prBodyNotes: [
+        "If the upstream version moved, CI fails until every copy follows it: set `COMPOSE_VERSION` and both SHA-256 digests (from the release's `docker-compose-linux-{aarch64,x86_64}.sha256`) in `packaging/image-base/docker-compose.sh` and `kits/marsh-docker-cli/marsh-docker-cli.dockerfile`, then the version in `kits/marsh-docker-cli/marsh-docker-cli.yaml`, `kits/README.md` and `COMPOSE_FALLBACK_VERSION` in `crates/marsh-services/src/restore.rs` (`python3 tests/release/test_compose_pins.py`).",
+      ],
+    },
+    {
       description: "Agent CLI releases",
       matchPackageNames: ["@anthropic-ai/claude-code", "openai/codex"],
       // Fast follow: agent CLIs release several times a day, and a merged bump

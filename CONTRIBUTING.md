@@ -199,7 +199,11 @@ TLC checks the model. Review and test the corresponding Rust code too.
 
 Managed inputs use explicit versions, package lockfiles and immutable image
 digests. Update those inputs and run the relevant builds/tests. Renovate sends
-updates through normal CI and merges passing PRs automatically. There is no
+updates through normal CI and merges passing PRs automatically. A new Docker
+Compose version is the exception: Renovate moves the services engine's
+`docker-compose-plugin` pin in its own PR, which fails
+`tests/release/test_compose_pins.py` until you move the SHA-256-pinned copies
+the Kits fetch (the PR's note lists them). There is no
 checksum/notice-record refresh or generated license-delta approval step.
 See [build inputs](docs/design/supply-chain.md).
 
