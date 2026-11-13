@@ -200,6 +200,12 @@ class ReleaseGate(unittest.TestCase):
             self.assertEqual(checkout.get("ref"), "${{ needs.version.outputs.sha }}", name)
             self.assertIn(checkout.get("sparse-checkout", "scripts/newest-release.sh"), ("scripts/newest-release.sh",), name)
 
+    def test_a_rehearsal_makes_no_github_release(self):
+        for name in ("release", "tap"):
+            condition = self.jobs[name]["if"]
+            self.assertTrue(evaluate(condition, {"needs.version.outputs.draft": "false"}))
+            self.assertFalse(evaluate(condition, {"needs.version.outputs.draft": "true"}))
+
     def test_a_call_checks_out_the_requested_commit_in_every_ci_job(self):
         call = self.ci["on"]["workflow_call"]["inputs"]
         self.assertEqual(call["all"]["type"], "boolean")
@@ -313,6 +319,23 @@ class VersionStep(unittest.TestCase):
         result, _ = self.run_step(self.main, "push", "refs/tags/v1.2.3.4")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bad version", result.stdout + result.stderr)
+
+    def test_a_manual_run_off_main_is_refused(self):
+        for version in ("", "1.3.0"):
+            result, out = self.run_step(self.side, "workflow_dispatch", "refs/heads/side", version)
+            self.assertNotEqual(result.returncode, 0, version)
+            self.assertIn("on main only", result.stdout + result.stderr)
+            self.assertNotIn("stages", out)
+
+    def test_a_manual_run_on_main_rehearses_or_publishes_a_nightly(self):
+        result, out = self.run_step(self.main, "workflow_dispatch", "refs/heads/main", "1.3.0")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((out["channel"], out["version"], out["draft"], out["image_tag"], out["extra_tags"]),
+                         ("stable", "1.3.0", "true", "draft", ""))
+        result, out = self.run_step(self.main, "workflow_dispatch", "refs/heads/main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((out["channel"], out["draft"], out["stages"]), ("nightly", "false", "all"))
+        self.assertRegex(out["version"], rf"^1\.2\.3-nightly\.\d{{14}}\.g{self.main[:7]}$")
 
     def ci_run(self, **overrides):
         """A push CI run's jobs, by name: every lane ran and passed, then overrides."""

@@ -20,17 +20,20 @@ name: Release
 #            0.1.3-nightly.20261009171916.gb1f7e8b. Publishes a GitHub
 #            prerelease (the newest 10 are kept), Docker Hub images (:nightly
 #            and :<version>; prune-nightlies.yml trims them the same way) and
-#            the Homebrew formula `marsh-nightly`. A manual run without a
-#            version publishes a nightly from the selected ref any time.
+#            the Homebrew formula `marsh-nightly`. A manual run on main without
+#            a version publishes a nightly from main's tip any time.
 #   per commit  image-input changes on main whose CI passed run only the version
 #            and images stages: the Kit images are built, :nightly moves, and
 #            the stable Kit tag may move (below). No version tags are made, so
 #            the 10 kept nightly image tags stay the daily builds. The guest,
 #            host, release and tap stages (the macOS build and the Homebrew
 #            nightly) do not run.
-#   manual   workflow_dispatch with a version builds a DRAFT stable release
-#            (nothing announced; its images get only the moving tag :draft);
-#            without a version it publishes a nightly from the selected ref.
+#   manual   workflow_dispatch, on main only. With a version it rehearses a
+#            stable release: everything up to the host build, with the
+#            tarball and formula kept as the run's dist artifact. Its images
+#            get only the moving tag :draft, and it makes no GitHub Release
+#            (not even a draft one, which anyone could publish from the UI).
+#            Without a version it publishes a nightly from main's tip.
 #
 # Kit images move to stable without a marsh release. Stable marsh follows each
 # packaged Kit's :latest tag (automatic updates at each daemon start and
@@ -78,7 +81,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'X.Y.Z: build a draft stable release. Empty: publish a nightly from this ref.'
+        description: 'X.Y.Z: rehearse a stable release (dist artifact, no GitHub Release). Empty: publish a nightly from main. Main only.'
         required: false
 permissions:
   contents: read
@@ -168,6 +171,10 @@ jobs:
           case $GITHUB_EVENT_NAME in
             push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
             workflow_dispatch)
+              # A manual run publishes images (a nightly, or a rehearsal's
+              # :draft) and gets the release environment: main only.
+              [ "$GITHUB_REF" = refs/heads/main ] || {
+                echo "::error::run the Release workflow by hand on main only (this is $GITHUB_REF)"; exit 1; }
               if [ -n "$INPUT" ]; then channel=stable; version=${INPUT#v}; draft=true
               else channel=nightly; draft=false; fi ;;
             schedule)
@@ -191,9 +198,7 @@ jobs:
             # The ci job below runs every CI lane on this commit before
             # anything is built.
             echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "bad version: $version"; exit 1; }
-            if [ "$draft" = false ]; then
-              git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${sha:0:7} is not on main"; exit 1; }
-            fi
+            git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${sha:0:7} is not on main"; exit 1; }
             # The images job narrows these to the version tag alone when a
             # higher version is tagged by the time it runs.
             formula=marsh; image_tag=; extra_tags="$version latest"
@@ -470,8 +475,11 @@ jobs:
           path: target/dist
           if-no-files-found: error
 
+  # A rehearsal (draft) stops at the dist artifact: a GitHub draft release
+  # becomes a public, ungated release when someone publishes it.
   release:
     needs: [version, host]
+    if: needs.version.outputs.draft == 'false'
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -481,7 +489,6 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       CHANNEL: ${{ needs.version.outputs.channel }}
       FORMULA: ${{ needs.version.outputs.formula }}
-      DRAFT: ${{ needs.version.outputs.draft }}
       SHA: ${{ needs.version.outputs.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -521,26 +528,15 @@ jobs:
                    --notes "Nightly build of ${SHA:0:7}. Install: brew install mcavage/tap/marsh-nightly")
           else
             args+=(--title "marsh $VERSION" --generate-notes)
-            if [ "$DRAFT" = true ]; then args+=(--draft)
-            else
-              # Decided now (see the concurrency comment): an older version
-              # never takes the "Latest" mark. A failed or partial listing
-              # fails this step before any release is created.
-              newest=$(sh scripts/newest-release.sh --github "$VERSION")
-              if [ "$newest" = true ]; then args+=(--latest); else args+=(--latest=false); fi
-            fi
+            # Decided now (see the concurrency comment): an older version
+            # never takes the "Latest" mark. A failed or partial listing
+            # fails this step before any release is created.
+            newest=$(sh scripts/newest-release.sh --github "$VERSION")
+            if [ "$newest" = true ]; then args+=(--latest); else args+=(--latest=false); fi
           fi
           files=("dist/marsh-$VERSION-darwin-arm64.tar.gz"
                  "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256"
                  dist/fixture-ref.txt "dist/$FORMULA.rb")
-          # GitHub allows several drafts with one tag, so each rehearsal would add
-          # one. A rehearsal replaces the earlier drafts of its version. Drafts
-          # only: a published release is never touched.
-          if [ "$DRAFT" = true ]; then
-            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-              --jq ".[] | select(.draft and .tag_name == \"v$VERSION\") | .id" |
-              while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
-          fi
           for attempt in 1 2 3; do
             if [ "$attempt" -gt 1 ] && made=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json createdAt --jq .createdAt 2>/dev/null); then
               made=$(python3 -c 'import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp()))' "$made")
