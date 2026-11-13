@@ -445,6 +445,11 @@ impl Supervisor {
     fn read_loop(&self, stdout: &mut dyn Read) {
         let mut reader = io::BufReader::with_capacity(2 * CHUNK, stdout);
         while let Ok((frame, payload)) = read_frame::<Up>(&mut reader) {
+            #[cfg(test)]
+            assert!(
+                !tests::PANIC_IN_READER.load(Ordering::Acquire),
+                "a reader panic (tests)"
+            );
             *lock(&self.last_frame) = Instant::now();
             if let Up::Pong { generation, nonce } = frame {
                 if let Some(send) = lock(&self.pongs).remove(&nonce) {
@@ -1012,6 +1017,30 @@ mod tests {
         drop(child);
         let _ = std::panic::take_hook();
         assert_eq!(PANICS.load(Ordering::SeqCst), 0, "the reader panicked");
+    }
+
+    /// Set to make the reader panic at its next frame.
+    pub(super) static PANIC_IN_READER: AtomicBool = AtomicBool::new(false);
+
+    /// B-04: however the reader ends, a panic included, the transport is
+    /// lost, so the attempts waiting on it wake up.
+    #[test]
+    fn a_reader_that_panics_still_loses_the_transport() {
+        std::panic::set_hook(Box::new(|_| {}));
+        let (supervisor, mut guest, child, attempt) = started();
+        PANIC_IN_READER.store(true, Ordering::Release);
+        write_frame(
+            &mut guest,
+            &Up::OutputEof {
+                attempt,
+                stream: STDOUT,
+            },
+            &[],
+        )
+        .unwrap();
+        lost_within(&supervisor);
+        let _ = std::panic::take_hook();
+        drop(child);
     }
 
     #[test]
