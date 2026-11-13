@@ -16,12 +16,12 @@ use super::{DaemonError, artifact_identity, canonical_executable, runtime_identi
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     io::{self, BufRead, Read},
     os::unix::process::CommandExt,
     path::{Component, Path, PathBuf},
     process::{Child, ChildStdout, Command, Stdio},
-    sync::{Mutex, mpsc},
+    sync::{Mutex, OnceLock, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -60,6 +60,9 @@ pub(crate) struct UpgradeWatch {
     own_artifact: String,
     watched: PathBuf,
     stock_sbx: PathBuf,
+    /// Settings as this daemon resolved them at its start, for a successor
+    /// that starts elsewhere (`/`) than this daemon was launched.
+    environment: OnceLock<Vec<(OsString, OsString)>>,
     candidate: Mutex<Option<Candidate>>,
     /// One probe at a time: a second one (status, the serve loop) waits and
     /// reuses the first's check instead of racing it with a staler result.
@@ -100,11 +103,18 @@ impl UpgradeWatch {
             watched: watched_path(&own),
             own,
             stock_sbx: stock_sbx.to_owned(),
+            environment: OnceLock::new(),
             candidate: Mutex::new(None),
             probing: Mutex::new(()),
             #[cfg(test)]
             before_launch: Mutex::new(None),
         })
+    }
+
+    /// The resolved settings a successor gets in place of the ones this
+    /// daemon inherited; set once, at startup.
+    pub(crate) fn set_successor_environment(&self, environment: Vec<(OsString, OsString)>) {
+        let _ = self.environment.set(environment);
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Candidate>> {
@@ -264,11 +274,16 @@ impl UpgradeWatch {
         }
         let (reader, writer) = io::pipe().map_err(|error| failed(&error.to_string()))?;
         let mut command = Command::new(&pending.executable);
+        // Never this daemon's cwd: the successor enters its own control
+        // directory before any stock call, and is handed this daemon's
+        // settings already made absolute (`set_successor_environment`).
         command
+            .current_dir("/")
             .arg("--home")
             .arg(&self.home)
             .arg(HANDOVER_FLAG)
             .env("MARSH_SBX", &self.stock_sbx)
+            .envs(self.environment.get().into_iter().flatten().cloned())
             .env_remove(super::daemon_startup::CAPTURE_ENV)
             .stdin(Stdio::from(reader))
             .stdout(Stdio::piped())

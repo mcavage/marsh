@@ -12,7 +12,9 @@ use marsh_sbx::{ShellUser, ShellVmSpec, StockSbx, VmPurpose};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
+    ffi::{OsStr, OsString},
+    fs,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -78,7 +80,7 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     let real_home =
         marsh_backend::account_home::trusted_account_home(env::var_os("HOME").as_deref())?;
     let defaults = JobDefaults::from_environment(|name| env::var_os(name))?;
-    let home = daemon_home(arguments)?;
+    let home = std::path::absolute(daemon_home(arguments)?)?;
     let control_home = host_control_home(
         &real_home,
         &home,
@@ -94,8 +96,21 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         .parent()
         .ok_or("marshd has no parent directory")?;
     let install_prefix = host_bin.parent().ok_or("marshd has no install prefix")?;
-    let guest_artifacts = env::var_os("MARSH_GUEST_ARTIFACTS")
-        .map_or_else(|| install_prefix.join("libexec/marsh"), PathBuf::from);
+    // Path settings are made absolute against the launch directory before
+    // marshd leaves it; an upgrade's successor is handed the absolute values.
+    let mut successor_environment = Vec::new();
+    let mut absolute_setting = |name: &str, path: PathBuf| -> std::io::Result<PathBuf> {
+        let path = std::path::absolute(path)?;
+        if env::var_os(name).is_some() {
+            successor_environment.push((OsString::from(name), path.clone().into_os_string()));
+        }
+        Ok(path)
+    };
+    let guest_artifacts = absolute_setting(
+        "MARSH_GUEST_ARTIFACTS",
+        env::var_os("MARSH_GUEST_ARTIFACTS")
+            .map_or_else(|| install_prefix.join("libexec/marsh"), PathBuf::from),
+    )?;
     let commands = load_commands(
         &guest_artifacts.join("commands.json"),
         &control_home.join("commands.json"),
@@ -119,7 +134,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         home.join("sbxenvs"),
         home.join("sbxenv.d"),
     ]);
-    let kit_image_cache = kit_image_cache_root(&real_home);
+    let kit_image_cache =
+        absolute_setting("MARSH_KIT_IMAGE_CACHE", kit_image_cache_root(&real_home))?;
     // Superseded per-daemon cache (archives beside the lifecycle workspaces).
     let _ = fs::remove_dir_all(control_home.join("kit-lifecycle/.marsh-kit-image-cache"));
     protected_guest_roots.push(kit_image_cache.clone());
@@ -158,7 +174,24 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     let username = env::var("USER").map_err(|_| "USER is required")?;
     let uid = rustix::process::getuid().as_raw();
     let gid = rustix::process::getgid().as_raw();
+    let ownership_mirror = env::var_os("MARSH_OWNERSHIP_MIRROR")
+        .map(|mirror| absolute_setting("MARSH_OWNERSHIP_MIRROR", mirror.into()))
+        .transpose()?;
+    let dev_cache = absolute_setting("MARSH_DEV_CACHE_ROOT", dev_cache_root(&real_home))?;
     let stock_sbx = resolve_sbx()?;
+    let mut program_setting = |name: &str| {
+        let Some(value) = env::var_os(name).filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        let program = resolve_program_setting(name, &value)?;
+        successor_environment.push((OsString::from(name), program.clone().into_os_string()));
+        Ok::<_, Box<dyn std::error::Error>>(Some(program))
+    };
+    let docker = program_setting("MARSH_DOCKER")?;
+    let open_command = program_setting("MARSH_OPEN_COMMAND")?;
+    // Every path and program above is absolute now; leave the launch
+    // directory before the first stock call.
+    enter_daemon_directory(&control_home)?;
     let runner: Arc<dyn CommandRunner> = Arc::new(SystemCommandRunner::new(
         real_home.as_os_str().to_os_string(),
     ));
@@ -166,8 +199,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         return Err("MARSH_LOCAL_SHELL_AUTHORITY was removed; pass a local shell image tag via the normal shell image setting".into());
     }
     let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner);
-    if let Some(docker) = env::var_os("MARSH_DOCKER") {
-        stock_adapter = stock_adapter.with_docker(PathBuf::from(docker));
+    if let Some(docker) = docker {
+        stock_adapter = stock_adapter.with_docker(docker);
     }
     let mut stock_adapter = stock_adapter
         .with_kit_image_cache(kit_image_cache)
@@ -177,8 +210,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     // Test harnesses (`make check`) keep a copy of the map in a per-user scope
     // registry outside the scope, so `make check-gc` can still retire its VMs
     // after the scope directory is deleted.
-    if let Some(mirror) = env::var_os("MARSH_OWNERSHIP_MIRROR") {
-        stock_adapter = stock_adapter.with_vm_ownership_mirror(PathBuf::from(mirror))?;
+    if let Some(mirror) = ownership_mirror {
+        stock_adapter = stock_adapter.with_vm_ownership_mirror(mirror)?;
     }
     let shell_name = stock_adapter.vm_name(VmPurpose::Shell, "shell")?;
     let shell = ShellVmSpec {
@@ -197,7 +230,7 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     let dev_broker = Arc::new(marsh_daemon::DevBroker::new(
         Arc::clone(&stock),
         dev_enabled,
-        dev_cache_root(&real_home),
+        dev_cache,
         templates,
     ));
     let config = BackendConfig {
@@ -254,8 +287,9 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         .with_protected_guest_roots(protected_guest_roots)
         .with_job_defaults(defaults)
         .with_limits_config(home.join("config.json"))
+        .with_successor_environment(successor_environment)
         .with_url_opener(marsh_daemon::open_url::Opener::from_environment(
-            env::var_os("MARSH_OPEN_COMMAND").as_deref(),
+            open_command.as_deref().map(Path::as_os_str),
             env::var_os("MARSH_OPEN_URLS").as_deref(),
             &home,
         ))
@@ -428,8 +462,28 @@ fn dev_cache_root(real_home: &Path) -> PathBuf {
     }
 }
 
+/// Stock SBX resolves an unprefixed Kit reference against its working
+/// directory, which it inherits from marshd, and marshd inherits the cwd of
+/// whoever started it: often a project jobs can write. The daemon therefore
+/// runs in its private control directory, which is never mounted into a guest.
+fn enter_daemon_directory(control_home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    env::set_current_dir(control_home).map_err(|error| {
+        format!(
+            "cannot enter the control directory {}: {error}",
+            control_home.display()
+        )
+        .into()
+    })
+}
+
 fn resolve_sbx() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    resolve_program("MARSH_SBX", "sbx").map_err(|error| {
+    resolve_program(
+        "MARSH_SBX",
+        "sbx",
+        env::var_os("MARSH_SBX").as_deref(),
+        env::var_os("PATH").as_deref(),
+    )
+    .map_err(|error| {
         format!(
             "{error}. marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`"
         )
@@ -437,19 +491,54 @@ fn resolve_sbx() -> Result<PathBuf, Box<dyn std::error::Error>> {
     })
 }
 
-fn resolve_program(variable: &str, program: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Some(path) = env::var_os(variable) {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(format!("{variable} does not name a file: {}", path.display()).into());
+/// The absolute path of stock: `MARSH_SBX` as [`resolve_program_setting`]
+/// reads it, else `program` on `PATH`. Stock also runs with a project as its
+/// cwd (`sbx mount`), where a relative path would name another file.
+fn resolve_program(
+    variable: &str,
+    program: &str,
+    configured: Option<&OsStr>,
+    search: Option<&OsStr>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let candidate = if let Some(value) = configured {
+        resolve_program_setting(variable, value)?
+    } else {
+        let search = search.ok_or("PATH is required to locate stock sbx")?;
+        std::path::absolute(
+            env::split_paths(search)
+                .map(|directory| directory.join(program))
+                .find(|candidate| candidate.is_file())
+                .ok_or_else(|| format!("{program} was not found on PATH; set {variable}"))?,
+        )?
+    };
+    if !candidate.is_file() {
+        return Err(format!("{variable} does not name a file: {}", candidate.display()).into());
     }
-    let path = env::var_os("PATH").ok_or("PATH is required to locate stock sbx")?;
-    env::split_paths(&path)
-        .map(|directory| directory.join(program))
+    Ok(candidate)
+}
+
+/// A program a setting names, as an absolute path. A bare name is looked up
+/// on the fixed `PATH` host commands run with (`HOST_COMMAND_PATH`), never in
+/// the launch directory, which is often a project a job can write; a path is
+/// taken relative to the launch directory, as its user wrote it.
+fn resolve_program_setting(
+    variable: &str,
+    value: &OsStr,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if value.as_encoded_bytes().contains(&b'/') {
+        return Ok(std::path::absolute(value)?);
+    }
+    env::split_paths(marsh_runtime::HOST_COMMAND_PATH)
+        .map(|directory| directory.join(value))
         .find(|candidate| candidate.is_file())
-        .ok_or_else(|| format!("{program} was not found on PATH; set {variable}").into())
+        .ok_or_else(|| {
+            format!(
+                "{variable}={} was not found on {}; give its path",
+                Path::new(value).display(),
+                marsh_runtime::HOST_COMMAND_PATH
+            )
+            .into()
+        })
 }
 
 fn daemon_home(arguments: &[std::ffi::OsString]) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -608,6 +697,38 @@ fn release_channel(version: &str, local: bool) -> Option<String> {
 mod tests {
     use super::*;
     use std::{ffi::OsString, os::unix::fs::PermissionsExt};
+
+    /// A bare program name in a setting is found on the fixed host command
+    /// `PATH`, never in the launch directory; a path is taken relative to the
+    /// launch directory and made absolute.
+    #[test]
+    fn program_settings_resolve_bare_names_on_the_host_command_path() {
+        let expected = env::split_paths(marsh_runtime::HOST_COMMAND_PATH)
+            .map(|directory| directory.join("sh"))
+            .find(|candidate| candidate.is_file())
+            .unwrap();
+        assert_eq!(
+            resolve_program_setting("MARSH_DOCKER", OsStr::new("sh")).unwrap(),
+            expected
+        );
+        let missing = resolve_program_setting("MARSH_OPEN_COMMAND", OsStr::new("marsh-no-such"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            missing.contains(marsh_runtime::HOST_COMMAND_PATH),
+            "{missing}"
+        );
+        // The test's cwd is this crate.
+        let relative = resolve_program_setting("MARSH_DOCKER", OsStr::new("src/lib.rs")).unwrap();
+        assert!(relative.is_absolute());
+        assert_eq!(relative, env::current_dir().unwrap().join("src/lib.rs"));
+        // MARSH_SBX follows the same rule, and must name a file.
+        assert_eq!(
+            resolve_program("MARSH_SBX", "sbx", Some(OsStr::new("sh")), None).unwrap(),
+            expected
+        );
+        assert!(resolve_program("MARSH_SBX", "sbx", Some(OsStr::new("src/")), None).is_err());
+    }
 
     #[test]
     fn control_registry_is_scoped_outside_guest_home_and_ignores_legacy_files() {

@@ -5167,6 +5167,20 @@ impl Server {
         self
     }
 
+    /// Settings this daemon resolved at its start (absolute paths and
+    /// programs), passed to an upgrade's successor in place of the inherited
+    /// ones, which may be relative to a directory it does not start in.
+    #[must_use]
+    pub fn with_successor_environment(
+        self,
+        environment: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    ) -> Self {
+        if let Some(watch) = &self.upgrade {
+            watch.set_successor_environment(environment);
+        }
+        self
+    }
+
     /// How `xdg-open` in a shell or job opens links on the Mac (`open_url`).
     #[must_use]
     pub fn with_url_opener(self, opener: Option<open_url::Opener>) -> Self {
