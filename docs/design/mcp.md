@@ -394,6 +394,11 @@ project and selected home. The authenticated shell session sends a typed request
 to the host daemon; Kit jobs have no publication token. The host owns the registration
 and declaration, and pins the attached project's path and file identity.
 
+An export server (`export-serve`, and `acp-export-serve` for a published ACP
+session) runs at most 4 tool calls at once, as the development server does;
+one more is answered at once with a "capacity is busy" tool error, before any
+host process, daemon connection, or job starts.
+
 With neither `--kit` nor `--sandbox` the publication is a *default*: after the
 publish commits, the daemon records the stock server name, declaration path,
 and generation in its control directory (`mcp-defaults.json`,

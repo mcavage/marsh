@@ -102,11 +102,16 @@ impl AcpDeclaration {
     }
 }
 
+// The busy message names this bound.
+const _: () = assert!(crate::MAX_OPERATIONS == 4);
+
 #[derive(Clone)]
 pub struct AcpExportMcp {
     home: PathBuf,
     declaration_path: PathBuf,
     declaration: AcpDeclaration,
+    /// Calls running at once, at most [`crate::MAX_OPERATIONS`].
+    permits: Arc<tokio::sync::Semaphore>,
 }
 
 impl AcpExportMcp {
@@ -130,6 +135,7 @@ impl AcpExportMcp {
             home,
             declaration_path,
             declaration,
+            permits: Arc::new(tokio::sync::Semaphore::new(crate::MAX_OPERATIONS)),
         })
     }
 
@@ -358,6 +364,12 @@ impl ServerHandler for AcpExportMcp {
         if request.name != self.declaration.tool_name {
             return Ok(tool_error("unknown ACP tool"));
         }
+        // Each call takes a blocking thread and a daemon connection.
+        let Ok(_permit) = self.permits.try_acquire() else {
+            return Ok(tool_error(
+                "ACP tool capacity is busy: at most 4 calls run at once; retry after one completes",
+            ));
+        };
         let args = request.arguments.unwrap_or_default();
         let server = self.clone();
         let result = tokio::task::spawn_blocking(move || server.invoke(&args))
@@ -401,6 +413,7 @@ fn tool_error(error: &str) -> CallToolResponse {
         "Cursor is outside",
         "Turn receipt",
         "ACP daemon is",
+        "ACP tool capacity is busy",
     ]
     .iter()
     .any(|prefix| error.starts_with(prefix))
