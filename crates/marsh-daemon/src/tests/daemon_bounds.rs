@@ -585,6 +585,45 @@ fn the_connection_cap_grows_with_the_job_pool() {
     daemon.answers();
 }
 
+/// A-03: the accept loop serves the grown cap, not 1024: at `daemon-jobs`
+/// 512, with 1100 idle connections held, a host request (accepted after
+/// them) is still served.
+#[test]
+fn the_accept_loop_serves_past_1024_connections_for_a_large_pool() {
+    let daemon = Daemon::start(|server| server);
+    set_daemon_jobs(&daemon, 512);
+    let socket = daemon.client().paths.socket;
+    let deadline = std::time::Instant::now() + PATIENCE;
+    let idle = (0..1100)
+        .map(|_| {
+            loop {
+                // Past the listen backlog a connect is refused until the accept
+                // loop catches up.
+                match UnixStream::connect(&socket) {
+                    Ok(stream) => break stream,
+                    Err(error)
+                        if error.kind() == io::ErrorKind::ConnectionRefused
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    daemon.answers();
+    // Each was still held (not timed out) while the host was served.
+    for stream in &idle {
+        stream.set_nonblocking(true).unwrap();
+        let read = (&*stream).read(&mut [0; 1]);
+        assert!(
+            matches!(&read, Err(error) if error.kind() == io::ErrorKind::WouldBlock),
+            "{read:?}"
+        );
+    }
+}
+
 /// A-03: at `daemon-jobs` 512, more `ProcessRun` children run at once than
 /// a fixed 1024 cap allowed (384), and the host is still served.
 #[test]
