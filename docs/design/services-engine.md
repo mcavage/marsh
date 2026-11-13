@@ -13,7 +13,7 @@ an XFS (`reflink=1`) pool that the container mounts before dockerd starts.
 | Piece | Where |
 |---|---|
 | Image recipe | `packaging/svc-engine/Dockerfile`: dockerd and containerd at the shell image's pinned versions, the Compose plugin (`docker-compose-plugin`, pinned; restore runs the compose client here, `docs/design/services-restore.md`), `xfsprogs`, `util-linux`; the entrypoint is `/marsh/marsh --internal-services engine-up` |
-| Build | `scripts/prepare-svc-engine-image.py` (`make prepare-svc-engine-image`, part of `make build-linux` and `make dev`): writes `svc-engine.tar` (an unnamed OCI archive) and `svc-engine-image.json` (the pin: image id, config id, archive sha256 and size) into the guest artifacts. It refuses when the dockerd/containerd pins differ from `packaging/shell/Dockerfile` |
+| Build | `scripts/prepare-svc-engine-image.py` (`make prepare-svc-engine-image`, part of `make build-linux` and `make dev`): writes `svc-engine.tar` (an unnamed OCI archive) and `svc-engine-image.json` (the pin: image id, config id, archive sha256 and size) into the guest artifacts. It refuses when the dockerd/containerd pins differ from `packaging/shell/Dockerfile`. CI's image job (`.github/workflows/ci.yml`, "Kit and shell images (build, no push)") runs the same build, without pushing, whenever the Dockerfile, this script or the shell image's pins change (`scripts/ci-changes.sh`) |
 | Shipping | `make install`, `make dist` and `make dev` copy both files to `libexec/marsh/` beside `shell-image` |
 | In-engine setup | `crates/marsh-services/src/engine.rs`, `engine-up` |
 | Egress firewall | `crates/marsh-services/src/firewall.rs` (rules, canonical verification, the `ready` report) |

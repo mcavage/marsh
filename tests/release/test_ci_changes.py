@@ -1,5 +1,6 @@
 """File selection for CI builds, model checking and image publication."""
 import pathlib
+import re
 import subprocess
 import unittest
 
@@ -39,6 +40,15 @@ class CiChanges(unittest.TestCase):
                     "tests/acceptance/acp-fixture/acp-fixture.dockerfile"], "tools", "images")
         self.check(["scripts/publish-kits.py"], "tools", "images")
         self.check(["scripts/third-party-notices.py"], "tools")
+
+    def test_services_engine_inputs_build_the_engine_image(self):
+        for path in ("packaging/svc-engine/Dockerfile", "scripts/prepare-svc-engine-image.py"):
+            self.check([path], "tools", "images")
+        workflow = (SCRIPT.parents[1] / ".github/workflows/ci.yml").read_text()
+        job = re.search(r"(?ms)^  images:\n(.*?)(?=^  \S)", workflow)
+        self.assertIsNotNone(job, "ci.yml has no images job")
+        self.assertRegex(job.group(1), r"run: python3 scripts/prepare-svc-engine-image\.py --docker docker --output ")
+        self.assertNotRegex(job.group(1), r"--push\b|docker push|kit-publish|--repository")
 
     def test_rust_and_real_binary_callers_run_both_platforms(self):
         for path in ("crates/marsh-sbx/src/lib.rs", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml",
