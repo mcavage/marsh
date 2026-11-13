@@ -297,11 +297,15 @@ jobs:
           DRAFT: ${{ needs.version.outputs.draft }}
           IMAGE_TAG: ${{ needs.version.outputs.image_tag }}
           EXTRA_TAGS: ${{ needs.version.outputs.extra_tags }}
+        shell: bash
         run: |
+          set -euo pipefail
           image_tag=$IMAGE_TAG; extra_tags=$EXTRA_TAGS
           if [ "$CHANNEL" = stable ] && [ "$DRAFT" = false ]; then
-            newest=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' |
-              sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
+            # A failed or partial listing, or one without this version's tag,
+            # fails this step, so the job pushes nothing.
+            tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref')
+            newest=$(printf '%s\n' "$tags" | sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
             if [ "$newest" != true ]; then
               echo "::notice::a version above $VERSION is tagged: publishing its version tags only"
               image_tag=$VERSION; extra_tags=$VERSION
@@ -488,7 +492,9 @@ jobs:
       # but only when the release was created after this step started. A release
       # that already existed is never overwritten.
       - name: Create the GitHub Release
+        shell: bash
         run: |
+          set -euo pipefail
           started=$(date -u +%s)
           args=(--repo "$GITHUB_REPOSITORY" --target "$SHA")
           if [ "$CHANNEL" = nightly ]; then
@@ -497,11 +503,14 @@ jobs:
           else
             args+=(--title "marsh $VERSION" --generate-notes)
             if [ "$DRAFT" = true ]; then args+=(--draft)
-            # Decided now (see the concurrency comment): an older version
-            # never takes the "Latest" mark.
-            elif [ "$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' |
-                      sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")" = true ]; then args+=(--latest)
-            else args+=(--latest=false); fi
+            else
+              # Decided now (see the concurrency comment): an older version
+              # never takes the "Latest" mark. A failed or partial listing
+              # fails this step before any release is created.
+              tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref')
+              newest=$(printf '%s\n' "$tags" | sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
+              if [ "$newest" = true ]; then args+=(--latest); else args+=(--latest=false); fi
+            fi
           fi
           files=("dist/marsh-$VERSION-darwin-arm64.tar.gz"
                  "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256"
@@ -568,10 +577,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then echo "HOMEBREW_TAP_TOKEN not set; skipping the tap"; exit 0; fi
-          # Decided now (see the concurrency comment).
-          if [ "$FORMULA" = marsh ] && [ "$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' |
-                  sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")" != true ]; then
-            echo "a version above $VERSION is tagged; the $FORMULA formula stays"; exit 0
+          # Decided now (see the concurrency comment). A failed or partial
+          # listing fails this step before the tap is touched.
+          if [ "$FORMULA" = marsh ]; then
+            tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref')
+            newest=$(printf '%s\n' "$tags" | sed 's#^refs/tags/##' | sh scripts/newest-release.sh "$VERSION")
+            if [ "$newest" != true ]; then echo "a version above $VERSION is tagged; the $FORMULA formula stays"; exit 0; fi
           fi
           case $FORMULA in marsh) class=Marsh;; marsh-nightly) class=MarshNightly;; *) echo "unknown formula $FORMULA" >&2; exit 1;; esac
           file="Formula/$FORMULA.rb"

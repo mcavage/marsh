@@ -295,6 +295,26 @@ git tag v0.1.3 && git push origin v0.1.3
 Anyone who can create a `v*` tag can start a stable release. Restrict that
 with a tag ruleset in the repository settings.
 
+**Withdrawing a stable release.** Nothing moves a channel back on its own:
+each publishing job checks the version tags when it runs, and the tap job
+never writes a lower version than the tap has. Prefer releasing a fixed,
+higher version, which moves everything forward. To withdraw `vX.Y.Z` in
+favor of an earlier `vW.V.U` by hand:
+
+1. Delete the release and its tag: `gh release delete vX.Y.Z --cleanup-tag`.
+2. Mark the earlier release Latest: `gh release edit vW.V.U --latest`.
+3. Point the moving image tags back. For each image in `vW.V.U`'s run summary
+   ("Published images"): `docker buildx imagetools create --tag REPO:latest
+   REPO:W.V.U`, and the same for `:release` (Kits and the fixture) or
+   `:repaired` (the shell template).
+4. Edit `Formula/marsh.rb` in mcavage/homebrew-tap back to `vW.V.U`'s
+   formula (the `marsh.rb` asset of its release). No release run will do
+   this: the tap never moves back.
+
+Until all four are done the channels disagree. Once the tag is gone, a
+re-run or a new tag of a lower version counts as the newest for the images
+and the "Latest" mark, but the formula still names `vX.Y.Z`.
+
 To rehearse a release, run the Release workflow by hand with a version: it
 runs the same CI, builds a draft and announces nothing. Its images get only
 the moving tag `:draft`, so no tag a user reads moves, and it replaces any

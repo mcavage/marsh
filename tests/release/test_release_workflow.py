@@ -88,11 +88,21 @@ def step_env(workflow, job, name, context):
     return env
 
 
-def run_bash(script, cwd, env):
-    """Run a step script the way GitHub runs a bash step."""
+def shell_argv(workflow, job, name):
+    """How Actions runs a step's script on Linux: an explicit `shell: bash` is
+    bash --noprofile --norc -eo pipefail; no shell is bash -e (no pipefail)."""
+    shell = find_step(workflow, job, name).get("shell")
+    if shell is None:
+        return ["bash", "-e"]
+    assert shell == "bash", f"{workflow} {job} {name}: shell {shell}"
+    return ["bash", "--noprofile", "--norc", "-eo", "pipefail"]
+
+
+def run_step_script(workflow, job, name, cwd, env):
+    """Run a step's script the way Actions runs it, with the given env."""
     path = pathlib.Path(cwd) / ".step.sh"
-    path.write_text(script)
-    return subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(path)], cwd=cwd,
+    path.write_text(step_script(workflow, job, name))
+    return subprocess.run([*shell_argv(workflow, job, name), str(path)], cwd=cwd,
                           env={"PATH": os.environ["PATH"], "HOME": str(cwd), "GIT_CONFIG_SYSTEM": os.devnull,
                                "GIT_CONFIG_GLOBAL": os.devnull, **env},
                           capture_output=True, text=True, timeout=60)
@@ -250,7 +260,7 @@ class VersionStep(unittest.TestCase):
                "GITHUB_REF_NAME": ref.rsplit("/", 1)[-1], "GITHUB_REPOSITORY": "example/marsh",
                "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(self.tmp / "summary"),
                "RUNNER_TEMP": str(self.tmp), **step_env("release.yml", "version", "v", context)}
-        result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(self.script)],
+        result = subprocess.run([*shell_argv("release.yml", "version", "v"), str(self.script)],
                                 cwd=self.work, env=env, capture_output=True, text=True, timeout=60)
         outputs = dict(line.split("=", 1) for line in output.read_text().splitlines() if "=" in line)
         return result, outputs
@@ -290,6 +300,11 @@ class Publication(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
         self.tags = self.tmp / "tags"
+        # The tag listing's failure mode: "" (works), "fail" (an API error
+        # before any output) or "partial" (a later page fails after the
+        # first lines were printed, as gh --paginate does).
+        self.gh_mode = self.tmp / "gh-mode"
+        self.gh_mode.write_text("")
         self.gh_log = self.tmp / "gh.log"
         self.gh_log.write_text("")
         bin_dir = self.tmp / "bin"
@@ -301,6 +316,10 @@ class Publication(unittest.TestCase):
             [ -n "${{GH_TOKEN:-}}" ] || {{ echo "gh: GH_TOKEN is not set" >&2; exit 4; }}
             case "$*" in
               "api --paginate repos/example/marsh/git/matching-refs/tags/v --jq .[].ref")
+                case "$(cat "{self.gh_mode}")" in
+                  fail) echo "gh: HTTP 503: rate limited" >&2; exit 1 ;;
+                  partial) sed '$d; s#^#refs/tags/#' "{self.tags}"; echo "gh: HTTP 502 on page 2" >&2; exit 1 ;;
+                esac
                 sed 's#^#refs/tags/#' "{self.tags}"; exit 0 ;;
               "release create "*) exit 0 ;;
             esac
@@ -312,8 +331,8 @@ class Publication(unittest.TestCase):
 
     def workspace(self, name):
         """A job's workspace with what its checkout provides."""
-        work = self.tmp / name
-        (work / "scripts").mkdir(parents=True)
+        work = pathlib.Path(tempfile.mkdtemp(prefix=f"{name}-", dir=self.tmp))
+        (work / "scripts").mkdir()
         shutil.copy(ROOT / "scripts/newest-release.sh", work / "scripts/newest-release.sh")
         return work
 
@@ -325,11 +344,12 @@ class Publication(unittest.TestCase):
                 "needs.version.outputs.sha": "a" * 40, "github.token": "token",
                 "secrets.GITHUB_TOKEN": "token", "secrets.HOMEBREW_TAP_TOKEN": "token"}
 
-    def run_job_step(self, job, step, version, work, **extra):
+    def run_job_step(self, job, step, version, work, ok=True, **extra):
         env = {**step_env("release.yml", job, step, self.outputs(version)), "PATH": self.path,
                "GITHUB_REPOSITORY": "example/marsh", **extra}
-        result = run_bash(step_script("release.yml", job, step), work, env)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = run_step_script("release.yml", job, step, work, env)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
 
     def images(self, version, *tags):
@@ -370,6 +390,44 @@ class Publication(unittest.TestCase):
         self.run_job_step("release", "Create the GitHub Release", version, self.workspace(f"release-{version}"))
         return next(line for line in self.gh_log.read_text().splitlines() if line.startswith("release create")).split()
 
+    # The older 1.2.3 re-run after 1.2.4, with the listing broken three ways.
+    # Each must fail its step and move nothing: answering "newest" here would
+    # put 1.2.3 back on every channel.
+    BROKEN_LISTINGS = (("fail", ("v1.2.2", "v1.2.3", "v1.2.4")),
+                       ("partial", ("v1.2.2", "v1.2.3", "v1.2.4")),  # the page with v1.2.4 fails
+                       ("", ("v1.2.2", "v1.2.4")))  # lists no v1.2.3: truncated, or the tag was deleted
+
+    def test_a_broken_tag_listing_fails_the_images_step_and_pushes_nothing(self):
+        for mode, tags in self.BROKEN_LISTINGS:
+            self.gh_mode.write_text(mode)
+            self.tags.write_text("".join(f"{tag}\n" for tag in tags))
+            work = self.workspace(f"images-broken-{mode or 'missing'}")
+            output = work / "output"
+            output.write_text("")
+            result = self.run_job_step("images", "fresh", "1.2.3", work, ok=False, GITHUB_OUTPUT=str(output))
+            self.assertNotEqual(result.returncode, 0, (mode, result.stdout))
+            self.assertEqual(output.read_text(), "", mode)
+
+    def test_a_broken_tag_listing_fails_the_release_step_before_any_release(self):
+        for mode, tags in self.BROKEN_LISTINGS:
+            self.gh_mode.write_text(mode)
+            self.tags.write_text("".join(f"{tag}\n" for tag in tags))
+            self.gh_log.write_text("")
+            result = self.run_job_step("release", "Create the GitHub Release", "1.2.3",
+                                       self.workspace(f"release-broken-{mode or 'missing'}"), ok=False)
+            self.assertNotEqual(result.returncode, 0, (mode, result.stdout))
+            self.assertNotIn("release create", self.gh_log.read_text(), mode)
+
+    def test_a_broken_tag_listing_fails_the_tap_step_before_the_tap(self):
+        self.make_tap()
+        for mode, tags in self.BROKEN_LISTINGS:
+            self.gh_mode.write_text(mode)
+            result = self.tap("1.2.3", *tags, ok=False)
+            self.assertNotEqual(result.returncode, 0, (mode, result.stdout))
+            listing = subprocess.run(["git", "--git-dir", str(self.tap_repo), "ls-tree", "-r", "--name-only", "main"],
+                                     capture_output=True, text=True, check=True).stdout
+            self.assertNotIn("Formula/marsh.rb", listing, mode)
+
     def test_only_the_newest_version_is_marked_latest(self):
         self.assertIn("--latest", self.release("1.2.4", "v1.2.3", "v1.2.4", NIGHTLY_TAG))
         args = self.release("1.2.3", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
@@ -377,7 +435,7 @@ class Publication(unittest.TestCase):
         self.assertNotIn("--latest", args)
         self.assertIn("--latest", self.release("1.2.10", "v1.2.9", "v1.2.10"))
 
-    def tap(self, version, *tags):
+    def tap(self, version, *tags, ok=True):
         self.tags.write_text("".join(f"{tag}\n" for tag in tags))
         work = self.workspace(f"tap-{version}")
         (work / "dist").mkdir()
@@ -385,7 +443,8 @@ class Publication(unittest.TestCase):
             "class Marsh < Formula\n"
             f'  url "https://github.com/mcavage/marsh/releases/download/v{version}/marsh-{version}-darwin-arm64.tar.gz"\n'
             "end\n")
-        return self.run_job_step("tap", "Update mcavage/homebrew-tap", version, work, GIT_CONFIG_GLOBAL=str(self.gitconfig))
+        return self.run_job_step("tap", "Update mcavage/homebrew-tap", version, work, ok=ok,
+                                 GIT_CONFIG_GLOBAL=str(self.gitconfig))
 
     def tap_version(self):
         formula = subprocess.run(["git", "--git-dir", str(self.tap_repo), "show", "main:Formula/marsh.rb"],
@@ -450,7 +509,7 @@ class FullRun(unittest.TestCase):
         git(repo, "commit", "-q", "-m", "docs only")
         output = self.tmp / f"output-{all_lanes}"
         output.write_text("")
-        result = run_bash(step_script("ci.yml", "changes", "classify"), repo, {
+        result = run_step_script("ci.yml", "changes", "classify", repo, {
             "GITHUB_EVENT_NAME": "push", "GITHUB_OUTPUT": str(output), "BEFORE": before, "BASE_REF": "",
             "ALL": all_lanes})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -463,7 +522,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(self.classify("")["code"], "false")
 
     def passed(self, results, all_lanes):
-        return run_bash(step_script("ci.yml", "passed", "Every lane passed or was skipped"), self.tmp,
+        return run_step_script("ci.yml", "passed", "Every lane passed or was skipped", self.tmp,
                         {"RESULTS": results, "ALL": all_lanes}).returncode
 
     def test_a_skipped_lane_fails_only_a_full_run(self):
