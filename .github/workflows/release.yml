@@ -134,6 +134,7 @@ jobs:
         env:
           INPUT: ${{ github.event.inputs.version }}
           CI_RUN_ID: ${{ github.event.workflow_run.id }}
+          CI_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -149,7 +150,8 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
             # Follow CI's image selection, including its conservative fallback.
             # Unrelated commits must not rebuild or publish the Kit images.
-            ci_jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" \
+            # The attempt that completed, not a re-run started since.
+            ci_jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/attempts/$CI_RUN_ATTEMPT/jobs?per_page=100" \
               --jq '.jobs[] | [.name, (.conclusion // "")] | @tsv')
             conclusion() { printf '%s\n' "$ci_jobs" | awk -F '\t' -v name="$1" '$1 == name { print $2 }'; }
             image_result=$(conclusion "Kit and shell images (build, no push)")

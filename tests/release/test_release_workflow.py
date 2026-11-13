@@ -266,7 +266,7 @@ class VersionStep(unittest.TestCase):
         (bin_dir / "gh").write_text(textwrap.dedent("""\
             #!/bin/sh
             case "$*" in
-              *"/actions/runs/4242/jobs"*) [ -n "${FAKE_CI_JOBS:-}" ] && cat "$FAKE_CI_JOBS" && exit 0 ;;
+              *"/actions/runs/4242/attempts/3/jobs"*) [ -n "${FAKE_CI_JOBS:-}" ] && cat "$FAKE_CI_JOBS" && exit 0 ;;
             esac
             echo "unexpected gh call: $*" >&2
             exit 99
@@ -280,7 +280,7 @@ class VersionStep(unittest.TestCase):
         output.write_text("")
         context = {"github.event.inputs.version": version, "github.token": "unused"}
         if ci_jobs is not None:
-            context["github.event.workflow_run.id"] = "4242"
+            context.update({"github.event.workflow_run.id": "4242", "github.event.workflow_run.run_attempt": "3"})
         env = {"PATH": self.path, "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": os.devnull,
                "GIT_CONFIG_SYSTEM": os.devnull, "GITHUB_EVENT_NAME": event, "GITHUB_REF": ref,
                "GITHUB_REF_NAME": ref.rsplit("/", 1)[-1], "GITHUB_REPOSITORY": "example/marsh",
@@ -329,9 +329,15 @@ class VersionStep(unittest.TestCase):
         _, out = self.per_commit(self.ci_run())
         self.assertEqual((out["stages"], out["channel"], out["promote_kits"]), ("images", "nightly", "true"))
         for lane in RUST_LANES:
-            result, out = self.per_commit(self.ci_run(**{lane: "skipped"}))
-            self.assertEqual((out["stages"], out["promote_kits"]), ("images", "false"), lane)
-            self.assertIn("the stable Kit tag stays", result.stdout)
+            # Only success counts: skipped, failed, cancelled, still running
+            # (no conclusion yet) or missing from the listing all keep :latest.
+            for conclusion in ("skipped", "failure", "cancelled", "", None):
+                jobs = self.ci_run(**{lane: conclusion})
+                if conclusion is None:
+                    del jobs[lane]
+                result, out = self.per_commit(jobs)
+                self.assertEqual((out["stages"], out["promote_kits"]), ("images", "false"), (lane, conclusion))
+                self.assertIn("the stable Kit tag stays", result.stdout)
 
     def test_a_per_commit_run_without_an_image_build_publishes_nothing(self):
         result, out = self.per_commit(self.ci_run(**{"Kit and shell images (build, no push)": "skipped"}))
