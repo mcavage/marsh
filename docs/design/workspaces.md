@@ -448,12 +448,19 @@ is 130. `split` exits with the first nonzero code in declaration order.
    through would sit in an agent's VM. Host-only values (`TMPDIR`, `PWD`,
    `SHELL`, ...) name Mac paths and are wrong in a VM.
 - **Capability socket.**
-  - It admits at most 12 open connections per attempt, including idle ones;
-    an excess connection receives a refusal frame.
+  - The worker admits at most 132 open connections per attempt
+    (`FAN_OUT_MAX + 4`), including idle ones; an excess connection
+    receives a refusal frame.
   - Each connection's queue is bounded in both directions (64 chunks), so
     a job that stops reading is disconnected instead of stalling the
     worker transport.
-  - The daemon raises its descriptor soft limit (up to 4096) for its 128
+  - A connection reaches the daemon only once its first request arrived,
+    and only with a slot from the daemon's connection budget: at most the
+    job's live `job-children` + 4 at once, and for all jobs together three
+    quarters of the daemon's connection cap. The last quarter is the
+    host's, so `marsh` commands (cancel and stop included) still get
+    through. A refused connection gets a refusal frame.
+  - The daemon raises its descriptor soft limit (up to 4096) for its 1024
     connections.
 - **Nested splits from a shell branch.** `marsh split` run inside a shell
   branch arrives on that branch's session relay. The daemon maps the

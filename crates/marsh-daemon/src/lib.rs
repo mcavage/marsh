@@ -45,6 +45,7 @@ use uuid::Uuid;
 mod acp_bridge;
 pub mod checkpoint;
 mod client_liveness;
+mod connection_budget;
 mod daemon_startup;
 pub mod events;
 pub mod lane_services;
@@ -68,6 +69,7 @@ pub mod split_confinement;
 pub mod split_fs;
 mod upgrade;
 pub use acp_bridge::{AcpAttachmentBridge, AcpAttachmentStatus};
+pub use connection_budget::CapabilityConnection;
 pub use upgrade::{HANDOVER_FLAG, Successor, UpdatePending, handover_ready, is_handover_flag};
 mod acp_session;
 pub use acp_session::{
@@ -175,13 +177,9 @@ fn busy_lifecycle_refusal(message: &str) -> bool {
         || message.starts_with(BUSY_BLOCKED)
         || message.starts_with(STOCK_SBX_REMOVED)
 }
-// Leave descriptor headroom for relay socket clones, active attachments,
-// worker transports, and the listener on macOS's default soft FD limit.
-/// Each connection holds one descriptor plus at most two transient ones.
-/// Every running job holds about two (its caller's and its children's
-/// relays), so 1024 leaves room for the largest job pool (`daemon-jobs`, 512)
-/// beside shells and splits. The server raises its descriptor soft limit at
-/// bind (`raise_descriptor_limit`) so they fit.
+/// Connections the daemon serves at once, at most. Job capability
+/// connections, and the daemon's own connections on a job's behalf, may
+/// hold only [`connection_budget::capability_share`] of it.
 const MAX_DAEMON_CONNECTIONS: usize = 1024;
 const DAEMON_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // Publication replies may legitimately wait behind one cold Kit preparation
@@ -2668,6 +2666,8 @@ struct State {
     journal: receipt_journal::ReceiptJournal,
     authentication_tokens: BTreeMap<String, Option<String>>,
     capability_tokens: BTreeMap<String, String>,
+    /// Slots of job capability connections (`connection_budget.rs`).
+    connections: Arc<connection_budget::Budget>,
     reservations: BTreeMap<String, String>,
     /// Requests and daemon-initiated work in flight, by admission, each with
     /// what it is (for a busy refusal).
@@ -3016,6 +3016,7 @@ impl DaemonStore {
             journal,
             authentication_tokens,
             capability_tokens: BTreeMap::new(),
+            connections: connection_budget::Budget::new(MAX_DAEMON_CONNECTIONS),
             process: process::ProcessTable::load(journal_home),
             reservations: BTreeMap::new(),
             ordinary_requests: BTreeMap::new(),
@@ -3060,6 +3061,28 @@ impl DaemonStore {
 
     pub fn revoke_capability_token(&self, token: &str) {
         self.lock().capability_tokens.remove(token);
+    }
+
+    /// A slot for one of `job_id`'s capability connections, taken before its
+    /// bridge connects to the daemon and held until that connection ends.
+    ///
+    /// # Errors
+    /// The job, or jobs together, hold all they may (`connection_budget.rs`);
+    /// the message is the job's reply.
+    pub fn capability_connection(
+        &self,
+        job_id: &str,
+    ) -> Result<connection_budget::CapabilityConnection, String> {
+        let (budget, job_children) = {
+            let state = self.lock();
+            (Arc::clone(&state.connections), state.limits().job_children)
+        };
+        budget.acquire(job_id, job_children)
+    }
+
+    #[cfg(test)]
+    fn set_connection_cap(&self, cap: usize) {
+        self.lock().connections.set_cap(cap);
     }
 
     /// The session spec a job's split requests run under.
@@ -5149,6 +5172,15 @@ impl Server {
             upgrade: None,
             handover: Mutex::new(None),
         })
+    }
+
+    /// Size the jobs' share as if the daemon served `cap` connections
+    /// (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_connection_cap(self, cap: usize) -> Self {
+        self.store.set_connection_cap(cap);
+        self
     }
 
     #[must_use]
