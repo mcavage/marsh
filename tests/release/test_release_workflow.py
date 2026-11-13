@@ -318,6 +318,55 @@ class Publication(unittest.TestCase):
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class FullRun(unittest.TestCase):
+    """ci.yml's own scripts: with all, every lane is selected and a skipped lane fails the run."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def classify(self, all_lanes):
+        repo = self.tmp / f"repo-{all_lanes}"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts/ci-changes.sh", repo / "scripts/ci-changes.sh")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "one")
+        before = git(repo, "rev-parse", "HEAD")
+        (repo / "docs").mkdir()
+        (repo / "docs/guide.md").write_text("docs\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "docs only")
+        output = self.tmp / f"output-{all_lanes}"
+        output.write_text("")
+        result = run_bash(step_script("ci.yml", "changes", "classify"), repo, {
+            "GITHUB_EVENT_NAME": "push", "GITHUB_OUTPUT": str(output), "BEFORE": before, "BASE_REF": "",
+            "ALL": all_lanes})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return dict(line.split("=", 1) for line in output.read_text().split())
+
+    def test_a_full_run_selects_every_lane_whatever_the_diff(self):
+        lanes = self.classify("true")
+        self.assertEqual(set(lanes.values()), {"true"}, lanes)
+        # The same docs-only push without all selects no build lane.
+        self.assertEqual(self.classify("")["code"], "false")
+
+    def passed(self, results, all_lanes):
+        return run_bash(step_script("ci.yml", "passed", "Every lane passed or was skipped"), self.tmp,
+                        {"RESULTS": results, "ALL": all_lanes}).returncode
+
+    def test_a_skipped_lane_fails_only_a_full_run(self):
+        self.assertEqual(self.passed("success success", "true"), 0)
+        self.assertNotEqual(self.passed("success skipped", "true"), 0)
+        self.assertEqual(self.passed("success skipped", ""), 0)
+        self.assertEqual(self.passed("success skipped", "false"), 0)
+        for bad in ("failure", "cancelled"):
+            for all_lanes in ("true", ""):
+                self.assertNotEqual(self.passed(f"success {bad}", all_lanes), 0, (bad, all_lanes))
+
+
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
 class ModelCache(unittest.TestCase):
     """A cold TLA+ sweep can outlast the model job; its verdicts must still be kept."""
 
