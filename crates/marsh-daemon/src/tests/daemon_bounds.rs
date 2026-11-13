@@ -1003,3 +1003,31 @@ fn a_branch_past_the_change_bound_fails_its_capture_and_the_daemon_serves_on() {
     );
     daemon.answers();
 }
+
+/// A-09: detached sessions (one per host split, per shell branch) are not
+/// kept forever: past the newest 256, those no receipt names are forgotten
+/// with their project identity and home backing. The daemon still answers.
+#[test]
+fn detached_sessions_are_forgotten_past_the_newest() {
+    let daemon = Daemon::start(|server| server);
+    let store = &daemon.server.store;
+    let (job, _) = daemon.job();
+    let with_job = store.job(&job).unwrap().session_id;
+    store.detach_shell(&with_job).unwrap();
+    for _ in 0..400 {
+        let session = daemon.session();
+        store.detach_shell(&session.session_id).unwrap();
+    }
+    {
+        let state = store.lock();
+        assert!(state.shells.len() <= 257, "{}", state.shells.len());
+        assert!(state.session_home_backings.len() <= 257);
+        assert!(state.session_project_identities.len() <= 257);
+        assert!(state.detached_sessions.len() <= 257);
+        assert!(
+            state.shells.contains_key(&with_job),
+            "a session a receipt names is kept"
+        );
+    }
+    daemon.answers();
+}

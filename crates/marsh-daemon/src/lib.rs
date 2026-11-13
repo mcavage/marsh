@@ -2700,6 +2700,8 @@ struct State {
     session_authorities: BTreeMap<String, SessionAuthority>,
     session_project_identities: BTreeMap<String, Option<(u64, u64)>>,
     session_home_backings: BTreeMap<String, PathBuf>,
+    /// Detached sessions, oldest first (`shell_admission::note_detached`).
+    detached_sessions: std::collections::VecDeque<String>,
     ephemeral_home_tokens: BTreeMap<String, marsh_sbx::EphemeralHomeToken>,
     // Host-only cleanup ownership, retained when development authority is revoked.
     shell_cleanup_vms: BTreeMap<String, String>,
@@ -3051,6 +3053,7 @@ impl DaemonStore {
             session_authorities: BTreeMap::new(),
             session_project_identities: BTreeMap::new(),
             session_home_backings: BTreeMap::new(),
+            detached_sessions: std::collections::VecDeque::new(),
             ephemeral_home_tokens: BTreeMap::new(),
             shell_cleanup_vms: BTreeMap::new(),
             shell_attachments: BTreeMap::new(),
@@ -3635,6 +3638,7 @@ impl DaemonStore {
             }
             state.session_authorities.remove(&session);
             state.shell_cleanup_vms.remove(&session);
+            shell_admission::note_detached(&mut state, &session);
             state
                 .authentication_tokens
                 .retain(|_, owner| owner.as_ref() != Some(&session));
