@@ -5,9 +5,10 @@ name: Prune nightlies
 # ever deleted (scripts/prune-nightlies.py). This is its own workflow, so a
 # failure here is a red run to look at and never blocks CI or a release.
 #
-# DOCKERHUB_TOKEN must be an access token with delete permission (the push-only
-# token that publishes can list tags but not delete them). Run it by hand first
-# with apply=false to see what it would delete.
+# DOCKERHUB_PRUNE_TOKEN, a secret of the `release` environment, must be an
+# access token with delete permission (the push-only token that publishes can
+# list tags but not delete them). Run it by hand first with apply=false to see
+# what it would delete.
 on:
   workflow_run:
     workflows: [Release]
@@ -29,6 +30,7 @@ concurrency:
 jobs:
   prune:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    environment: release
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
@@ -36,7 +38,7 @@ jobs:
       - name: Prune
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_PRUNE_TOKEN || secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_PRUNE_TOKEN }}
           APPLY: ${{ github.event_name != 'workflow_dispatch' || inputs.apply }}
         shell: bash
         run: |

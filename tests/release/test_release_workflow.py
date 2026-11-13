@@ -239,6 +239,37 @@ def rust_lanes():
 RUST_LANES = rust_lanes() if yaml else []
 
 
+PUBLISHING_SECRETS = ("DOCKERHUB_TOKEN", "HOMEBREW_TAP_TOKEN", "DOCKERHUB_PRUNE_TOKEN")
+
+
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class PublishingSecrets(unittest.TestCase):
+    def test_only_release_environment_jobs_name_a_publishing_secret(self):
+        seen = 0
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            data = load(path.name)
+            self.assertNotRegex(yaml.safe_dump(data.get("env", {})), r"secrets\.", path.name)
+            for name, job in data["jobs"].items():
+                text = yaml.safe_dump(job)
+                used = [secret for secret in PUBLISHING_SECRETS if re.search(rf"secrets\.{secret}\b", text)]
+                if not used:
+                    continue
+                seen += 1
+                environment = job.get("environment")
+                self.assertIsNotNone(environment, f"{path.name} job {name} reads {used} outside an environment")
+                self.assertIn("'release'" if "${{" in str(environment) else "release", str(environment),
+                              f"{path.name} job {name}")
+                if "pull_request" in data["on"]:
+                    # A pull request run must not get the environment.
+                    self.assertIn("github.event_name != 'pull_request'", str(environment), f"{path.name} job {name}")
+        self.assertGreaterEqual(seen, 6)
+
+    def test_ci_never_reads_a_publishing_secret(self):
+        text = (WORKFLOWS / "ci.yml").read_text()
+        for secret in PUBLISHING_SECRETS:
+            self.assertIsNone(re.search(rf"secrets\.{secret}\b", text), f"ci.yml reads {secret}")
+
+
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
 class VersionStep(unittest.TestCase):
     """Runs release.yml's version step against a scratch repository."""

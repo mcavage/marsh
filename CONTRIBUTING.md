@@ -295,7 +295,9 @@ git tag v0.1.3 && git push origin v0.1.3
 ```
 
 Anyone who can create a `v*` tag can start a stable release. Restrict that
-with a tag ruleset in the repository settings.
+with a tag ruleset in the repository settings. The publishing tokens are
+secrets of the `release` environment, whose settings should admit only `main`
+and `v*` tags; only the publishing jobs name it.
 
 **Withdrawing a stable release.** Nothing moves a channel back on its own:
 each publishing job checks the version tags when it runs, and the tap job
