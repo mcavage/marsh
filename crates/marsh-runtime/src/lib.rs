@@ -289,6 +289,9 @@ impl std::fmt::Debug for SystemCommandRunner {
     }
 }
 
+/// The fixed `PATH` host commands (stock SBX, Docker) run with.
+pub const HOST_COMMAND_PATH: &str = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin";
+
 /// Host environment that selects which stock SBX instance and approval
 /// configuration a host command talks to. A host process that clears its
 /// environment must forward these, or a command started for an isolated
@@ -857,7 +860,7 @@ impl CommandRunner for SystemCommandRunner {
         command
             .args(&invocation.arguments)
             .env_clear()
-            .env("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
+            .env("PATH", HOST_COMMAND_PATH)
             .env("HOME", &self.home)
             .envs(self.stock_environment.iter().cloned())
             .envs(invocation.environment.iter().cloned())
@@ -884,7 +887,7 @@ impl CommandRunner for SystemCommandRunner {
         command
             .args(&invocation.arguments)
             .env_clear()
-            .env("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
+            .env("PATH", HOST_COMMAND_PATH)
             .env("HOME", &self.home)
             .envs(self.stock_environment.iter().cloned())
             .envs(invocation.environment.iter().cloned())
@@ -975,7 +978,7 @@ impl CommandRunner for SystemCommandRunner {
         command
             .args(&invocation.arguments)
             .env_clear()
-            .env("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
+            .env("PATH", HOST_COMMAND_PATH)
             .env("HOME", &self.home)
             .envs(self.stock_environment.iter().cloned())
             .envs(invocation.environment.iter().cloned())

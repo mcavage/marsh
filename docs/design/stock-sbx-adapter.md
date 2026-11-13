@@ -26,6 +26,32 @@ nothing is attached, starting, running, or in flight it stops on its own so the
 next call starts a daemon that passes the startup checks with the new SBX.
 MCP registrations keep their stored path; rerun them after an upgrade.
 
+Stock resolves an unprefixed Kit reference by first looking for a file or
+directory of that name in its working directory, so a directory a job writes
+in a project, named like `docker.io/org/kit:tag`, could stand in for a
+registry Kit. marshd therefore enters its private control directory (never
+mounted into a guest) before its first stock call, whatever directory it was
+started from. Every Kit or tag reference marsh hands stock (`create`,
+`--cloud create`, `kit inspect`) carries `oci://` (`registry_kit_reference`);
+local Kit sources are absolute directories. Stock calls that name no Kit may
+still run elsewhere: `sbx mount` and `sbx umount` in the grant's source (to
+name the mount relative to it) or `/`, and the MCP publication and load calls
+(`sbx mcp ...`, from the daemon, the host `marsh` it starts, and the `marsh`
+CLI) in the session's launch directory or workspace.
+
+Before it leaves its launch directory, marshd makes its path settings
+absolute against it (`--home`, `MARSH_HOME`, `MARSH_GUEST_ARTIFACTS`,
+`MARSH_KIT_IMAGE_CACHE`, `MARSH_OWNERSHIP_MIRROR`, `MARSH_DEV_CACHE_ROOT`),
+and resolves its program settings. A value with a `/` is a path, made
+absolute the same way. A bare name is never looked up in the launch
+directory: `MARSH_SBX` (also when unset, as `sbx`) and `MARSH_OPEN_COMMAND`
+on the absolute entries of the inherited `PATH`, skipping empty and relative
+entries such as `.`, as the client does for `MARSH_SBX`; `MARSH_DOCKER` on
+the fixed `PATH` Docker commands run with
+(`/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`). An upgrade's successor
+starts in `/` and is handed these resolved values in place of the ones it
+would inherit.
+
 ## Ownership map and names
 
 Every VM marsh creates has a random name: `marsh-k-` plus 8 base36 characters

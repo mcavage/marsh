@@ -12,7 +12,9 @@ use marsh_sbx::{ShellUser, ShellVmSpec, StockSbx, VmPurpose};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
+    ffi::{OsStr, OsString},
+    fs,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -78,7 +80,7 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     let real_home =
         marsh_backend::account_home::trusted_account_home(env::var_os("HOME").as_deref())?;
     let defaults = JobDefaults::from_environment(|name| env::var_os(name))?;
-    let home = daemon_home(arguments)?;
+    let home = std::path::absolute(daemon_home(arguments)?)?;
     let control_home = host_control_home(
         &real_home,
         &home,
@@ -94,8 +96,21 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         .parent()
         .ok_or("marshd has no parent directory")?;
     let install_prefix = host_bin.parent().ok_or("marshd has no install prefix")?;
-    let guest_artifacts = env::var_os("MARSH_GUEST_ARTIFACTS")
-        .map_or_else(|| install_prefix.join("libexec/marsh"), PathBuf::from);
+    // Path settings are made absolute against the launch directory before
+    // marshd leaves it; an upgrade's successor is handed the absolute values.
+    let mut successor_environment = Vec::new();
+    let mut absolute_setting = |name: &str, path: PathBuf| -> std::io::Result<PathBuf> {
+        let path = std::path::absolute(path)?;
+        if env::var_os(name).is_some() {
+            successor_environment.push((OsString::from(name), path.clone().into_os_string()));
+        }
+        Ok(path)
+    };
+    let guest_artifacts = absolute_setting(
+        "MARSH_GUEST_ARTIFACTS",
+        env::var_os("MARSH_GUEST_ARTIFACTS")
+            .map_or_else(|| install_prefix.join("libexec/marsh"), PathBuf::from),
+    )?;
     let commands = load_commands(
         &guest_artifacts.join("commands.json"),
         &control_home.join("commands.json"),
@@ -119,7 +134,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         home.join("sbxenvs"),
         home.join("sbxenv.d"),
     ]);
-    let kit_image_cache = kit_image_cache_root(&real_home);
+    let kit_image_cache =
+        absolute_setting("MARSH_KIT_IMAGE_CACHE", kit_image_cache_root(&real_home))?;
     // Superseded per-daemon cache (archives beside the lifecycle workspaces).
     let _ = fs::remove_dir_all(control_home.join("kit-lifecycle/.marsh-kit-image-cache"));
     protected_guest_roots.push(kit_image_cache.clone());
@@ -158,7 +174,16 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     let username = env::var("USER").map_err(|_| "USER is required")?;
     let uid = rustix::process::getuid().as_raw();
     let gid = rustix::process::getgid().as_raw();
+    let ownership_mirror = env::var_os("MARSH_OWNERSHIP_MIRROR")
+        .map(|mirror| absolute_setting("MARSH_OWNERSHIP_MIRROR", mirror.into()))
+        .transpose()?;
+    let dev_cache = absolute_setting("MARSH_DEV_CACHE_ROOT", dev_cache_root(&real_home))?;
     let stock_sbx = resolve_sbx()?;
+    let programs = ProgramSettings::read(|name| env::var_os(name))?;
+    successor_environment.extend(programs.successor_environment.iter().cloned());
+    // Every path and program above is absolute now; leave the launch
+    // directory before the first stock call.
+    enter_daemon_directory(&control_home)?;
     let runner: Arc<dyn CommandRunner> = Arc::new(SystemCommandRunner::new(
         real_home.as_os_str().to_os_string(),
     ));
@@ -166,8 +191,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         return Err("MARSH_LOCAL_SHELL_AUTHORITY was removed; pass a local shell image tag via the normal shell image setting".into());
     }
     let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner);
-    if let Some(docker) = env::var_os("MARSH_DOCKER") {
-        stock_adapter = stock_adapter.with_docker(PathBuf::from(docker));
+    if let Some(docker) = programs.docker.clone() {
+        stock_adapter = stock_adapter.with_docker(docker);
     }
     let mut stock_adapter = stock_adapter
         .with_kit_image_cache(kit_image_cache)
@@ -177,8 +202,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     // Test harnesses (`make check`) keep a copy of the map in a per-user scope
     // registry outside the scope, so `make check-gc` can still retire its VMs
     // after the scope directory is deleted.
-    if let Some(mirror) = env::var_os("MARSH_OWNERSHIP_MIRROR") {
-        stock_adapter = stock_adapter.with_vm_ownership_mirror(PathBuf::from(mirror))?;
+    if let Some(mirror) = ownership_mirror {
+        stock_adapter = stock_adapter.with_vm_ownership_mirror(mirror)?;
     }
     let shell_name = stock_adapter.vm_name(VmPurpose::Shell, "shell")?;
     let shell = ShellVmSpec {
@@ -197,7 +222,7 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     let dev_broker = Arc::new(marsh_daemon::DevBroker::new(
         Arc::clone(&stock),
         dev_enabled,
-        dev_cache_root(&real_home),
+        dev_cache,
         templates,
     ));
     let config = BackendConfig {
@@ -254,11 +279,8 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         .with_protected_guest_roots(protected_guest_roots)
         .with_job_defaults(defaults)
         .with_limits_config(home.join("config.json"))
-        .with_url_opener(marsh_daemon::open_url::Opener::from_environment(
-            env::var_os("MARSH_OPEN_COMMAND").as_deref(),
-            env::var_os("MARSH_OPEN_URLS").as_deref(),
-            &home,
-        ))
+        .with_successor_environment(successor_environment)
+        .with_url_opener(programs.opener(env::var_os("MARSH_OPEN_URLS").as_deref(), &home))
         .with_backend(backend)
         .with_dev_broker(dev_broker);
     let stopping = Arc::new(AtomicBool::new(false));
@@ -428,28 +450,160 @@ fn dev_cache_root(real_home: &Path) -> PathBuf {
     }
 }
 
-fn resolve_sbx() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    resolve_program("MARSH_SBX", "sbx").map_err(|error| {
+/// Stock SBX resolves an unprefixed Kit reference against its working
+/// directory, which it inherits from marshd, and marshd inherits the cwd of
+/// whoever started it: often a project jobs can write. The daemon therefore
+/// runs in its private control directory, which is never mounted into a guest.
+fn enter_daemon_directory(control_home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    env::set_current_dir(control_home).map_err(|error| {
         format!(
-            "{error}. marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`"
+            "cannot enter the control directory {}: {error}",
+            control_home.display()
         )
         .into()
     })
 }
 
-fn resolve_program(variable: &str, program: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Some(path) = env::var_os(variable) {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
+fn resolve_sbx() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    resolve_program(
+        "MARSH_SBX",
+        "sbx",
+        env::var_os("MARSH_SBX").as_deref(),
+        env::var_os("PATH").as_deref(),
+    )
+}
+
+/// The absolute path of stock: `MARSH_SBX` if set (a path is taken relative
+/// to the launch directory; a bare name is looked up on the absolute entries
+/// of `PATH`, as the client does), else `program` on those entries. Stock
+/// also runs with a project as its cwd (`sbx mount`), where a relative path
+/// would name another file.
+fn resolve_program(
+    variable: &str,
+    program: &str,
+    configured: Option<&OsStr>,
+    search: Option<&OsStr>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let candidate = match configured {
+        Some(value) if marsh_daemon::names_a_path(value) => std::path::absolute(value)?,
+        Some(value) => marsh_daemon::find_on_absolute_path(value, search).ok_or_else(|| {
+            format!(
+                "{variable}={} was not found on the absolute entries of PATH (relative entries \
+                 such as `.` are not searched); set {variable} to the absolute path of {program}",
+                Path::new(value).display()
+            )
+        })?,
+        None => {
+            marsh_daemon::find_on_absolute_path(OsStr::new(program), search).ok_or_else(|| {
+                format!(
+                    "{program} was not found on PATH; set {variable} to its absolute path. \
+                 marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`"
+                )
+            })?
         }
-        return Err(format!("{variable} does not name a file: {}", path.display()).into());
+    };
+    if !candidate.is_file() {
+        return Err(format!(
+            "{variable}={} does not name a file (a relative path is taken against the \
+             directory marshd started in); set it to the absolute path of {program}",
+            candidate.display()
+        )
+        .into());
     }
-    let path = env::var_os("PATH").ok_or("PATH is required to locate stock sbx")?;
-    env::split_paths(&path)
-        .map(|directory| directory.join(program))
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| format!("{program} was not found on PATH; set {variable}").into())
+    Ok(candidate)
+}
+
+/// The programs marshd's settings name, resolved before it leaves its launch
+/// directory: a value with a `/` is a path, made absolute against it; a bare
+/// name is looked up on a search path, never in the launch directory, which
+/// is often a project a job can write.
+struct ProgramSettings {
+    /// `MARSH_DOCKER`: Docker runs with the fixed host command `PATH`
+    /// (`HOST_COMMAND_PATH`), so a bare name is looked up there.
+    docker: Option<PathBuf>,
+    /// `MARSH_OPEN_COMMAND`: the opener runs as the user, so a bare name is
+    /// looked up on the absolute entries of the user's own `PATH`.
+    open_command: Option<PathBuf>,
+    /// A bare `MARSH_OPEN_COMMAND` that was not found: no link is opened.
+    opener_missing: bool,
+    /// The resolved values, for an upgrade's successor.
+    successor_environment: Vec<(OsString, OsString)>,
+}
+
+impl ProgramSettings {
+    fn read(
+        setting: impl Fn(&str) -> Option<OsString>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let value = |name: &str| setting(name).filter(|value| !value.is_empty());
+        let mut settings = Self {
+            docker: None,
+            open_command: None,
+            opener_missing: false,
+            successor_environment: Vec::new(),
+        };
+        if let Some(docker) = value("MARSH_DOCKER") {
+            settings.docker = Some(if marsh_daemon::names_a_path(&docker) {
+                std::path::absolute(&docker)?
+            } else {
+                marsh_daemon::find_on_absolute_path(
+                    &docker,
+                    Some(OsStr::new(marsh_runtime::HOST_COMMAND_PATH)),
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "MARSH_DOCKER={} was not found on {}, the PATH Docker commands run \
+                         with (your shell's PATH is not searched); set MARSH_DOCKER to an \
+                         absolute path",
+                        Path::new(&docker).display(),
+                        marsh_runtime::HOST_COMMAND_PATH
+                    )
+                })?
+            });
+        }
+        if let Some(opener) = value("MARSH_OPEN_COMMAND") {
+            settings.open_command = if marsh_daemon::names_a_path(&opener) {
+                Some(std::path::absolute(&opener)?)
+            } else {
+                marsh_daemon::find_on_absolute_path(&opener, setting("PATH").as_deref())
+            };
+            if settings.open_command.is_none() {
+                settings.opener_missing = true;
+                eprintln!(
+                    "marshd: MARSH_OPEN_COMMAND={} was not found on the absolute entries of PATH; \
+                     links are not opened. Set it to an absolute path",
+                    Path::new(&opener).display()
+                );
+            }
+        }
+        for (name, program) in [
+            ("MARSH_DOCKER", &settings.docker),
+            ("MARSH_OPEN_COMMAND", &settings.open_command),
+        ] {
+            if let Some(program) = program {
+                settings
+                    .successor_environment
+                    .push((name.into(), program.clone().into_os_string()));
+            }
+        }
+        Ok(settings)
+    }
+
+    /// How links are opened: the resolved `MARSH_OPEN_COMMAND`, else the
+    /// default opener; none when the configured one was not found.
+    fn opener(
+        &self,
+        switch: Option<&OsStr>,
+        scope_root: &Path,
+    ) -> Option<marsh_daemon::open_url::Opener> {
+        if self.opener_missing {
+            return None;
+        }
+        marsh_daemon::open_url::Opener::from_environment(
+            self.open_command.as_deref().map(Path::as_os_str),
+            switch,
+            scope_root,
+        )
+    }
 }
 
 fn daemon_home(arguments: &[std::ffi::OsString]) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -608,6 +762,111 @@ fn release_channel(version: &str, local: bool) -> Option<String> {
 mod tests {
     use super::*;
     use std::{ffi::OsString, os::unix::fs::PermissionsExt};
+
+    fn program(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Program settings never name a file in the launch directory by a bare
+    /// name: Docker's is looked up on the fixed host command PATH, the
+    /// opener's and stock's on the absolute entries of the user's PATH. A path
+    /// is taken relative to the launch directory. The opener and an upgrade's
+    /// successor get the resolved values.
+    #[test]
+    fn program_settings_resolve_bare_names_on_their_search_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let user_bin = root.path().join("home/.local/bin");
+        program(&user_bin.join("my-opener"));
+        program(&user_bin.join("sbx"));
+        let search =
+            env::join_paths([Path::new(""), Path::new("."), Path::new("src"), &user_bin]).unwrap();
+        let host_sh = env::split_paths(marsh_runtime::HOST_COMMAND_PATH)
+            .map(|directory| directory.join("sh"))
+            .find(|candidate| candidate.is_file())
+            .unwrap();
+        let settings = |values: &[(&str, &str)]| {
+            let values = values
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), OsString::from(value)))
+                .chain([("PATH".to_owned(), search.clone())])
+                .collect::<BTreeMap<_, _>>();
+            ProgramSettings::read(|name| values.get(name).cloned())
+        };
+        let bare =
+            settings(&[("MARSH_DOCKER", "sh"), ("MARSH_OPEN_COMMAND", "my-opener")]).unwrap();
+        assert_eq!(bare.docker.as_deref(), Some(host_sh.as_path()));
+        let opener = bare.opener(None, root.path()).unwrap();
+        assert_eq!(opener.program, user_bin.join("my-opener"));
+        assert_eq!(
+            bare.successor_environment,
+            [
+                ("MARSH_DOCKER".into(), host_sh.clone().into_os_string()),
+                (
+                    "MARSH_OPEN_COMMAND".into(),
+                    user_bin.join("my-opener").into_os_string()
+                ),
+            ]
+        );
+        // The test's cwd is this crate: paths are made absolute against it.
+        let paths = settings(&[
+            ("MARSH_DOCKER", "src/lib.rs"),
+            ("MARSH_OPEN_COMMAND", "./src"),
+        ])
+        .unwrap();
+        let cwd = env::current_dir().unwrap();
+        assert_eq!(paths.docker, Some(cwd.join("src/lib.rs")));
+        assert_eq!(
+            paths.opener(None, root.path()).unwrap().program,
+            cwd.join("src")
+        );
+        assert_eq!(
+            paths.successor_environment[1],
+            (
+                "MARSH_OPEN_COMMAND".into(),
+                cwd.join("src").into_os_string()
+            )
+        );
+        // A bare Docker name off the host command PATH stops startup and
+        // says why; a missing opener only turns link opening off.
+        let docker = settings(&[("MARSH_DOCKER", "marsh-no-such")])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            docker.contains("your shell's PATH is not searched"),
+            "{docker}"
+        );
+        assert!(docker.contains("absolute path"), "{docker}");
+        let missing = settings(&[("MARSH_OPEN_COMMAND", "marsh-no-such")]).unwrap();
+        assert!(missing.opener(None, root.path()).is_none());
+        assert_eq!(missing.successor_environment, []);
+        // Stock follows the client's rule, and only a missing default
+        // suggests installing it.
+        assert_eq!(
+            resolve_program("MARSH_SBX", "sbx", Some(OsStr::new("sbx")), Some(&search)).unwrap(),
+            user_bin.join("sbx")
+        );
+        let bare_missing = resolve_program(
+            "MARSH_SBX",
+            "sbx",
+            Some(OsStr::new("sbx")),
+            Some(OsStr::new(".")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            bare_missing.contains("absolute path of sbx"),
+            "{bare_missing}"
+        );
+        assert!(!bare_missing.contains("brew install"), "{bare_missing}");
+        let unset = resolve_program("MARSH_SBX", "sbx", None, Some(OsStr::new(".")))
+            .unwrap_err()
+            .to_string();
+        assert!(unset.contains("brew install"), "{unset}");
+        assert!(resolve_program("MARSH_SBX", "sbx", Some(OsStr::new("src/")), None).is_err());
+    }
 
     #[test]
     fn control_registry_is_scoped_outside_guest_home_and_ignores_legacy_files() {

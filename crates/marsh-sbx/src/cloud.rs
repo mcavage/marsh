@@ -135,7 +135,7 @@ impl CloudImageSpec {
     fn create_args(&self, name: &str) -> Vec<OsString> {
         let source: Vec<OsString> = match &self.kit {
             Some(kit) => {
-                let mut source: Vec<OsString> = vec![self.image.as_str().into()];
+                let mut source = vec![crate::registry_kit_reference(self.image.as_str())];
                 for mixin in &kit.mixins {
                     source.push("--kit".into());
                     source.push(mixin.as_os_str().to_owned());
@@ -564,7 +564,7 @@ impl CloudSbx {
                 "kit".into(),
                 "inspect".into(),
                 "--json".into(),
-                kit.as_str().into(),
+                crate::registry_kit_reference(kit.as_str()),
             ],
             working_directory: None,
             environment: Vec::new(),
@@ -1454,6 +1454,53 @@ mod tests {
             adapter.spawn(&id, "/bin/true", &[]),
             Err(CloudError::NotReady(_))
         ));
+    }
+
+    /// Stock stats an unprefixed Kit reference against its cwd before trying
+    /// the registry; both cloud Kit calls force the registry.
+    #[test]
+    fn cloud_kit_references_reach_stock_with_oci_prefix() {
+        let kit =
+            OciImage::parse(format!("docker.io/docker/codex@sha256:{}", "c".repeat(64))).unwrap();
+        let spec = CloudImageSpec {
+            image: kit.clone(),
+            kit: Some(CloudKit {
+                name: "codex".into(),
+                mixins: vec![PathBuf::from("/mixin")],
+                env: Vec::new(),
+            }),
+            cpus: 2,
+            memory_mib: 4096,
+            ttl: Duration::from_secs(60),
+            stop_on_timeout: false,
+        };
+        let args = spec.create_args("marsh-s-aaaaaaaa");
+        assert_eq!(args[3], OsString::from(format!("oci://{}", kit.as_str())));
+        assert_eq!(args[4..6], [OsString::from("--kit"), "/mixin".into()]);
+        assert!(!args.iter().any(|arg| arg == kit.as_str()), "{args:?}");
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("control")).unwrap();
+        let directory = dir.path().join("control").canonicalize().unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let log = dir.path().join("arguments");
+        let stock = dir.path().join("sbx");
+        fs::write(
+            &stock,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho '{{\"name\":\"codex\",\"sandbox\":{{\"entrypoint\":[\"codex\"]}}}}'\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&stock, fs::Permissions::from_mode(0o755)).unwrap();
+        let runner = marsh_runtime::SystemCommandRunner::new(dir.path());
+        let adapter = CloudSbx::open(stock, Arc::new(runner), directory).unwrap();
+        assert_eq!(adapter.kit_manifest(&kit).unwrap().name, "codex");
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            format!("kit\ninspect\n--json\noci://{}\n", kit.as_str())
+        );
     }
 
     /// An unresolved create is forgotten only on the operator's word, by its

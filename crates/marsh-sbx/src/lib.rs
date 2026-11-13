@@ -154,6 +154,16 @@ fn create_may_land(error: &SbxError) -> bool {
     matches!(error, SbxError::PreparationTimeout { .. } | SbxError::Io(_))
 }
 
+/// A registry Kit reference as stock must read it. Stock's `ResolveReference`
+/// stats an unprefixed argument (relative to its cwd) before its OCI
+/// heuristic, so a directory named like `registry/repo@sha256:...` or
+/// `repo:tag` would be loaded as a local Kit. `oci://` forces the registry.
+/// Every Kit or tag reference marsh passes to stock goes through here; local
+/// Kit sources are absolute directories and never do.
+pub(crate) fn registry_kit_reference(reference: &str) -> OsString {
+    OsString::from(format!("oci://{reference}"))
+}
+
 fn unix_millis_now() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1681,11 +1691,11 @@ impl StockSbx {
             "resolve Kit tag",
             KIT_RESOLUTION_TIMEOUT,
             [
-                "kit".to_owned(),
-                "inspect".to_owned(),
-                tag.to_string(),
-                "--format".to_owned(),
-                "json".to_owned(),
+                OsString::from("kit"),
+                OsString::from("inspect"),
+                registry_kit_reference(&tag.to_string()),
+                OsString::from("--format"),
+                OsString::from("json"),
             ],
         )?;
         Self::require_success("resolve Kit tag", output.clone())?;
@@ -5478,10 +5488,7 @@ impl StockSbx {
                 arguments.extend([
                     OsString::from("-e"),
                     selected_home_environment.clone(),
-                    // Stock ResolveReference stats an unprefixed argument before its
-                    // OCI heuristic. Force immutable Kit authority despite a hostile
-                    // cwd containing a directory named like registry/repo@sha256:...
-                    OsString::from(format!("oci://{}", spec.workload_kit.identity())),
+                    registry_kit_reference(spec.workload_kit.identity()),
                     spec.lifecycle_workspace.as_os_str().to_os_string(),
                 ]);
                 self.run_bounded_os("create kit VM", self.preparation_timeouts.create, arguments)
@@ -9005,7 +9012,7 @@ mod kit_resolution_tests {
             [
                 "kit",
                 "inspect",
-                "docker.io/mcavage/marsh-pix:stable",
+                "oci://docker.io/mcavage/marsh-pix:stable",
                 "--format",
                 "json"
             ]

@@ -8147,7 +8147,10 @@ mod kit_lifecycle_callers {
                 })
             };
             if argv[1..3] == ["kit", "inspect"] {
-                match self.tags.lock().unwrap().get(&argv[3]) {
+                let tag = argv[3]
+                    .strip_prefix("oci://")
+                    .expect("a Kit reference reaches stock with oci://");
+                match self.tags.lock().unwrap().get(tag) {
                     Some(Some(image)) => {
                         return ok(format!(r#"{{"sandbox":{{"image":"{image}"}}}}"#));
                     }
@@ -8329,14 +8332,10 @@ mod kit_lifecycle_callers {
             unlabelled.contains("org.marsh.kit.contract"),
             "{unlabelled}"
         );
-        assert!(
-            registry
-                .runs
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|argv| argv.iter().any(|a| a == "docker.io/example/pi:latest"))
-        );
+        assert!(registry.runs.lock().unwrap().iter().any(|argv| {
+            argv.iter()
+                .any(|a| a == "oci://docker.io/example/pi:latest")
+        }));
         *registry.contract.lock().unwrap() = Some(1);
         assert!(matches!(
             release.check_upgrade("pi", None),
@@ -8728,7 +8727,7 @@ mod kit_lifecycle_callers {
         assert!(
             registry.runs.lock().unwrap().iter().any(|argv| argv
                 .iter()
-                .any(|a| a == "docker.io/mcavage/marsh-tools:stable")),
+                .any(|a| a == "oci://docker.io/mcavage/marsh-tools:stable")),
             "marsh-tools:stable is resolved"
         );
         assert!(registry.calls("sbx") > 0, "its VM is prepared first");

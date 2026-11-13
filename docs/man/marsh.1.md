@@ -534,9 +534,21 @@ See https://runmar.sh/docs/acp.html.
 : The shell to run (**bash**, **zsh**, or **marsh**). **--shell** overrides it.
 
 **MARSH_SBX**
-: Path to the stock **sbx** executable. Default: **sbx** on **PATH**. If
-  there is none, install Docker Sandboxes with
-  **brew install docker/tap/sbx**, then run **sbx login**.
+: Path to the stock **sbx** executable. Default: **sbx** on **PATH**. A bare
+  name (no **/**), like the default, is looked up only on the absolute
+  entries of **PATH**; empty and relative entries such as **.** are skipped,
+  so a file in the current directory is never used. A relative path is taken
+  against the directory marsh starts in. If there is no **sbx**, install
+  Docker Sandboxes with **brew install docker/tap/sbx**, then run
+  **sbx login**.
+
+**MARSH_DOCKER**
+: The Docker CLI the daemon reads Kit images and builds local Kits with.
+  Default: **docker**. Docker runs with the **PATH**
+  */usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin*, so a bare name is looked
+  up only there, not on your shell's **PATH**, and the daemon does not start
+  if it is not found; give the absolute path of a Docker CLI installed
+  elsewhere.
 
 **MARSH_SPAWN**
 : Comma-separated registered names that jobs started from this shell may
@@ -575,7 +587,9 @@ See https://runmar.sh/docs/acp.html.
 
 **MARSH_OPEN_COMMAND**
 : The program the daemon runs as *PROGRAM* *URL* to open a link, read when
-  the daemon starts. Default */usr/bin/open*.
+  the daemon starts. Default */usr/bin/open*. A bare name is looked up on the
+  absolute entries of your **PATH** (never **.** or other relative entries);
+  if it is not found there, links are not opened.
 
 # FILES
 
