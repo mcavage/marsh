@@ -26,7 +26,7 @@
 #   --cores N   core budget (TLC_CORES; default min(CPUs of the runner, 8))
 #   TLC_CACHE=DIR  skip a config whose spec, config, jar and this script are byte-identical to
 #               one that already gave its expected verdict (CI and make test keep DIR between
-#               runs; the release run `make regress` does not set it)
+#               runs; the full sweep, `make regress` with MODEL_FLAGS=, does not set it)
 #   --workers N TLC workers per config (TLC_WORKERS; default 1, 2 for hinted, half the
 #               budget for huge, shared evenly when few configs; "auto" = the default)
 set -u

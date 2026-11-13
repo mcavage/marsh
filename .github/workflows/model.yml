@@ -2,8 +2,8 @@ name: TLA+ model (huge)
 # The huge TLA+ configs (Workspace_depth3_pass: 237M distinct states, about
 # 35 min on 12 cores and hours on a 4-core runner) run here, weekly (Sunday) and on
 # demand, never in CI: in CI's concurrency group they held every run on main
-# behind them. CI checks every other config (ci.yml, job `model`); `make
-# regress` checks all of them before a release.
+# behind them. CI checks every other config (ci.yml, job `model`); a manual
+# `make regress` checks all of them. No release waits for this workflow.
 on:
   schedule:
     - cron: '17 7 * * 0'
