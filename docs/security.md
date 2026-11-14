@@ -9,7 +9,8 @@ and development shells have the explicit grants described below.
 | Can a job ... | Answer | What enforces it |
 |---|---|---|
 | Run a command directly on your Mac | Not through ordinary job execution | The VM boundary; jobs receive no host-command relay, no containerd or `sbx` control socket, and no Kit VM's Docker engine |
-| Read your real home directory | Not implicitly | Only the project, guest home, and explicitly configured extra directories are mounted |
+| Read your real home directory | Not implicitly, except your skills | Only the project, guest home, explicitly configured extra directories, and a copy of your skills folders are mounted; the [skills mirror](#skills) copies `~/.claude/skills` and the other skills folders into the store every job reads |
+| Change a skill other jobs read | Yes, when the skill's folder is in a project the job can write | The skills mirror carries the edit into the store every later job reads, in every project and scope; each change is kept with a diff ([Skills](#skills)) |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
 | Read other jobs' logins and history | Yes, when they use the same guest home, unless the job's Kit takes no home | The persistent guest home is shared within a scope; `org.marsh/home@1` keeps it out of a Kit's VM ([Mounts](kits.md#mounts)) |
@@ -87,6 +88,8 @@ VM for its Kit. A job sees:
   namespace, so that reaches nothing else
 - placeholders for proxy-managed credentials; the provider keys stay with the
   `sbx` proxy. Saved agent logins live in the shared guest home.
+- every skill in the Docker Sandboxes skills store, read-only: its Kit's own
+  skills, and what the [skills mirror](#skills) copied there from your Mac
 
 A job has no containerd or `sbx` socket and never a Kit VM's Docker engine.
 **Jobs of a services-enabled project get a filtered endpoint for that project's
@@ -315,6 +318,44 @@ executable, but does not discover every file that executable may load.
 Removing a declaration or stopping marsh does not remove its Docker Sandboxes
 registration or OAuth grant. Manage those with `sbx mcp` on the Mac.
 
+### Skills
+
+With the skills mirror on (the default; `marsh config skills-mirror off`), the
+daemon copies every skill in the folders `sbx skills import` scans
+(`~/.agents/skills`, `~/.claude/skills`, and the others) into the Docker
+Sandboxes skills store. That store belongs to your Mac account, not to a marsh
+scope, and every job of every Kit, project and scope reads it. So any job can
+read every mirrored skill, including scripts or other files kept in a skill's
+folder; a separate `MARSH_HOME` does not hide them. Keep secrets out of skill
+folders. `marsh config skills-mirror off` is set per marsh home: it stops
+that home's mirror, but the mirror of any other marsh home you run keeps
+copying into the same store. Turn it off in each home. Turning the mirror
+off leaves the skills already in the store; remove those with `sbx skills rm`.
+
+The mirror copies only regular files from inside each skill's folder. A link
+in the folder that leads out of it, or a file with other hard links, keeps the
+whole skill out of the store ([Skills mirror](configuration.md#skills-mirror)).
+
+A skill is not frozen. When a skill's folder is in a project (for example a
+link `~/.claude/skills/my-skill -> ~/dev/tools/my-skill`), a job in that
+project can edit it, and the mirror carries the edit into the store within
+seconds: **every later job, in every project and scope, reads the edited
+skill**, and agents follow skills as instructions. Each change is kept in the
+host control directory (`CONTROL/skills-mirror/`, readable only by your
+account, as the control directory is) with the copy it replaced and a diff,
+and `marsh status`
+lists the newest changes. To roll a skill back, replace the skill's real
+folder (for a linked-in skill, the link's target) with the kept `before/`
+folder; to undo a skill a change added, which has no `before/`, delete its
+folder ([Skills mirror](configuration.md#skills-mirror) has the commands).
+Review those changes, or keep the skills you rely on outside every project.
+After marsh stops in the middle of updating or removing a skill, a skill
+you add with `sbx skills add` that has exactly the content the mirror was
+installing (or the content it replaced) cannot be told from the mirror's own
+copy, and may
+be replaced or removed by it later
+([Skills mirror](configuration.md#skills-mirror)).
+
 ## What is not isolated
 
 The project
@@ -327,6 +368,11 @@ The guest home
   `sbx secret` stay behind the proxy. An agent's own login flow can instead save
   credentials here as ordinary files, readable by other jobs. A Kit that
   declares [`mount: none`](kits.md#mounts) never gets it.
+
+Skills
+: Every job can read every skill the skills mirror copied from your Mac, in
+  every project and scope, and a job that can write a skill's folder changes
+  what every later job reads ([Skills](#skills)).
 
 Agents' own sandboxes
 : The packaged Kits turn off Claude Code's and Codex's own sandboxes and
