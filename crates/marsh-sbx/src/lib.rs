@@ -1422,11 +1422,6 @@ impl StockSbx {
         self.stock_view(refresh)
     }
 
-    /// Drop the cached inventory after a lifecycle change made elsewhere.
-    pub fn invalidate_stock_inventory(&self) {
-        self.ownership.invalidate();
-    }
-
     /// The stock executable and runner.
     #[must_use]
     pub fn stock_command(&self) -> (PathBuf, Arc<dyn CommandRunner>) {
