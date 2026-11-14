@@ -2143,6 +2143,20 @@ pub struct SkillsMirrorStatus {
     /// `NAME (bundled by KIT)`: a registered Kit bundles it, so it is not
     /// imported (the Kit's copy wins).
     pub clashes: Vec<String>,
+    /// The newest changes the mirror made to the store, newest first.
+    #[serde(default)]
+    pub history: Vec<SkillChange>,
+}
+
+/// One change the skills mirror made to the store: `added`, `updated` or
+/// `removed`, when (unix ms), and the diff, kept with the copy it replaced
+/// in the control home (`docs/configuration.md#skills-mirror`).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SkillChange {
+    pub name: String,
+    pub change: String,
+    pub at: u64,
+    pub diff: String,
 }
 
 /// One registered command: its Kit reference, whether the Kit declares an ACP
