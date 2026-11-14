@@ -5167,7 +5167,7 @@ impl Server {
             .with_defaults_home(journal_home.to_path_buf()),
         );
         server.stock_sbx = Some(stock_sbx.to_path_buf());
-        server.upgrade = upgrade::UpgradeWatch::new(home, &executable, stock_sbx)
+        server.upgrade = upgrade::UpgradeWatch::new(home, journal_home, &executable, stock_sbx)
             .ok()
             .map(Arc::new);
         Ok(server)
@@ -5336,7 +5336,7 @@ impl Server {
     fn with_upgrade_executable(mut self, home: &Path, executable: &Path) -> Self {
         let stock = self.stock_sbx.clone().expect("a stock SBX is pinned");
         self.upgrade = Some(Arc::new(
-            upgrade::UpgradeWatch::new(home, executable, &stock).unwrap(),
+            upgrade::UpgradeWatch::new(home, home, executable, &stock).unwrap(),
         ));
         self
     }
