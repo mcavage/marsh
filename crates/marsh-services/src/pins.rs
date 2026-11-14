@@ -371,6 +371,7 @@ mod imp {
     pub(super) struct Restoring {
         pub(super) root: ProjectRoot,
         pub(super) fd: OwnedFd,
+        pub(super) is_dir: bool,
         pub(super) read_only: bool,
         pub(super) subs: Vec<String>,
     }
@@ -405,6 +406,7 @@ mod imp {
         Ok(Restoring {
             root,
             fd,
+            is_dir: rec.is_dir,
             read_only,
             subs,
         })
@@ -732,11 +734,16 @@ mod imp {
             if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
                 let _ = std::fs::remove_file(&path);
             }
+            self.attach_plan(&plan, &path)
+        }
+
+        /// Attaches what [`restore_plan`] decided, and only that.
+        fn attach_plan(&self, plan: &Restoring, path: &Path) -> Result<(), PinError> {
             self.attach(
                 &plan.root,
                 &plan.fd,
-                &path,
-                rec.is_dir,
+                path,
+                plan.is_dir,
                 plan.read_only,
                 &plan.subs,
             )
@@ -1009,6 +1016,48 @@ mod tests {
         std::os::unix::fs::symlink(&project, &linked).unwrap();
         assert!(ProjectRoot::open(&linked).is_ok());
         std::fs::remove_dir_all(&project).unwrap();
+    }
+
+    /// DA2-01 through `PinManager::restore` itself: the re-made pin of a
+    /// name `.git` was renamed into refuses writes. It mounts, so it needs
+    /// root: `cargo test -p marsh-services --lib -- --ignored` as root
+    /// (run so in `audit-linux` for B5); CI's unprivileged run skips it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "mounts: needs root"]
+    fn restore_attaches_a_pin_renamed_into_git_read_only() {
+        let base = std::env::temp_dir().join(format!("pin-attach-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(project.join("foo")).unwrap();
+        let project = std::fs::canonicalize(&project).unwrap();
+        let known = observe(&ProjectRoot::open(&project).unwrap()).unwrap();
+        let rec = crate::ledger::PinRec {
+            scope: "s".into(),
+            project_root: project.to_string_lossy().into_owned(),
+            rel: "foo".into(),
+            read_only: false,
+            is_dir: true,
+            subs: Vec::new(),
+            dev: 0,
+            ino: 0,
+            created: 0,
+            failed: false,
+        };
+        let pins = PinManager::new(&base.join("binds"));
+        let pinned = base.join("binds/s/p");
+        let writable = || std::fs::write(pinned.join("probe"), "x").is_ok();
+        pins.restore("p", &rec, &known).unwrap();
+        assert!(writable(), "a plain directory stays writable");
+        let _ = rustix::mount::unmount(&pinned, rustix::mount::UnmountFlags::DETACH);
+        std::fs::rename(project.join("foo"), project.join("foo.x")).unwrap();
+        std::fs::rename(project.join(".git"), project.join("foo")).unwrap();
+        pins.restore("p", &rec, &known).unwrap();
+        let wrote = writable();
+        let _ = rustix::mount::unmount(&pinned, rustix::mount::UnmountFlags::DETACH);
+        assert!(!wrote, "the restored pin of .git is writable");
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     /// DA2-01: a read-write pin re-made after `.git` was renamed into its
