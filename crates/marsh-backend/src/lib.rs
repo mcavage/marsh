@@ -2164,11 +2164,26 @@ impl DaemonBackend for StockDaemonBackend {
             );
         }
         // Validate every added source before VM preparation or MCP effects.
+        let inside_read_only = if child_view.is_none() && confinement.is_none() {
+            Self::read_only_inside(&request.session, &extra_environment)
+        } else {
+            Vec::new()
+        };
         let extra_environment = Self::session_environment(&request.session, &extra_environment)?;
         let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
         let mut mounts = match child_view {
             None => {
                 let mut mounts = public_mounts(&request.session, confinement.as_ref(), &guards);
+                for target in
+                    read_only_overlays(&request.session.launch_directory, &inside_read_only)
+                {
+                    if !mounts.iter().any(|mount| mount.target == target) {
+                        mounts.push(PublicMount {
+                            target,
+                            access: "read_only".into(),
+                        });
+                    }
+                }
                 mounts.extend(extra_environment.mounts.iter().map(|source| {
                     PublicMount {
                         target: source.path.clone(),
@@ -2470,6 +2485,7 @@ impl DaemonBackend for StockDaemonBackend {
                 &request.session.launch_directory,
                 confinement.as_ref(),
                 &guards,
+                &inside_read_only,
             )
         };
         // Wall time is the Kit's own limit or the parent's remaining time,
@@ -4678,11 +4694,33 @@ fn guard_view(
 /// Replaces the whole-project mount with subpath binds of the same prepared
 /// grant: the fork read-write plus its Git metadata binds
 /// (`docs/design/workspaces.md` section 8). Every other mount is unchanged.
+/// `readOnly` extra folders inside the project that can be bound over it:
+/// real directories (never through a symlink), not the project itself.
+fn read_only_overlays(project: &Path, inside: &[PathBuf]) -> Vec<PathBuf> {
+    inside
+        .iter()
+        .filter(|path| {
+            path.strip_prefix(project).is_ok_and(|relative| {
+                !relative.as_os_str().is_empty()
+                    && relative
+                        .ancestors()
+                        .filter(|part| !part.as_os_str().is_empty())
+                        .all(|part| {
+                            std::fs::symlink_metadata(project.join(part))
+                                .is_ok_and(|metadata| metadata.is_dir())
+                        })
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 fn confine_job_mounts(
     mounts: Vec<JobMount>,
     project: &Path,
     confinement: Option<&marsh_daemon::split_confinement::BranchConfinement>,
     guards: &[(PathBuf, bool)],
+    inside_read_only: &[PathBuf],
 ) -> Vec<JobMount> {
     let Some(confinement) = confinement else {
         // An ordinary job never writes split workspaces or checkpoints, nor
@@ -4694,13 +4732,19 @@ fn confine_job_mounts(
             .find(|mount| mount.target == project && mount.subpath.is_none())
             .cloned()
         {
-            for (target, write) in guards {
+            let overlays = read_only_overlays(project, inside_read_only)
+                .into_iter()
+                .map(|target| (target, false));
+            for (target, write) in guards.iter().cloned().chain(overlays) {
+                if mounts.iter().any(|mount| mount.target == target) {
+                    continue;
+                }
                 let Ok(subpath) = target.strip_prefix(project).map(Path::to_path_buf) else {
                     continue;
                 };
                 mounts.push(JobMount {
-                    target: target.clone(),
-                    access: if *write && whole.access == MountAccess::ReadWrite {
+                    target,
+                    access: if write && whole.access == MountAccess::ReadWrite {
                         MountAccess::ReadWrite
                     } else {
                         MountAccess::ReadOnly
@@ -6330,6 +6374,13 @@ mod tests {
     use super::*;
 
     fn direct_job_mounts(project: &Path) -> Vec<(PathBuf, MountAccess, Option<PathBuf>)> {
+        direct_job_mounts_with(project, &[])
+    }
+
+    fn direct_job_mounts_with(
+        project: &Path,
+        inside_read_only: &[PathBuf],
+    ) -> Vec<(PathBuf, MountAccess, Option<PathBuf>)> {
         let whole = JobMount {
             source: project.to_path_buf(),
             target: project.to_path_buf(),
@@ -6337,7 +6388,7 @@ mod tests {
             subpath: None,
         };
         let guards = project_guards(project).unwrap();
-        confine_job_mounts(vec![whole], project, None, &guards)
+        confine_job_mounts(vec![whole], project, None, &guards, inside_read_only)
             .into_iter()
             .map(|mount| (mount.target, mount.access, mount.subpath))
             .collect()
@@ -6362,6 +6413,48 @@ mod tests {
             fs::symlink_metadata(project.join(".marsh"))
                 .unwrap()
                 .is_dir()
+        );
+    }
+
+    /// DA3-03: a `readOnly` extra folder inside the project stays
+    /// read-only, bound over the project mount; never through a symlink.
+    #[test]
+    fn read_only_extra_folders_inside_the_project_stay_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(project.join("vendor/sdk")).unwrap();
+        std::os::unix::fs::symlink(project.join("vendor"), project.join("link")).unwrap();
+        let inside = [
+            project.join("vendor/sdk"),
+            project.join("link/sdk"),
+            project.clone(),
+        ];
+        let mounts = direct_job_mounts_with(&project, &inside);
+        assert!(mounts.contains(&(
+            project.join("vendor/sdk"),
+            MountAccess::ReadOnly,
+            Some("vendor/sdk".into())
+        )));
+        assert!(
+            !mounts
+                .iter()
+                .any(|(target, ..)| target == &project.join("link/sdk"))
+        );
+        assert_eq!(
+            mounts
+                .iter()
+                .filter(|(target, ..)| target == &project)
+                .count(),
+            1
+        );
+        // One already guarded (`.marsh`) is not bound twice.
+        let mounts = direct_job_mounts_with(&project, &[project.join(".marsh")]);
+        assert_eq!(
+            mounts
+                .iter()
+                .filter(|(target, ..)| target == &project.join(".marsh"))
+                .count(),
+            1
         );
     }
 

@@ -708,7 +708,7 @@ impl StockDaemonBackend {
     fn fit_environment(
         session: &SessionSpec,
         environment: &Environment,
-    ) -> Result<(Environment, Vec<PathBuf>), DaemonError> {
+    ) -> Result<(Environment, Vec<(PathBuf, bool)>), DaemonError> {
         let mut fitted = Environment {
             mounts: Vec::new(),
             servers: environment.servers.clone(),
@@ -737,7 +737,7 @@ impl StockDaemonBackend {
                 )));
             }
             if mount.path.starts_with(&project) {
-                inside.push(mount.path.clone());
+                inside.push((mount.path.clone(), mount.read_only));
                 continue;
             }
             fitted.mounts.push(mount.clone());
@@ -759,7 +759,7 @@ impl StockDaemonBackend {
         let Ok((_, inside)) = Self::fit_environment(session, environment) else {
             return;
         };
-        for path in inside {
+        for (path, read_only) in inside {
             let fresh = {
                 let mut live = self
                     .sbxenv
@@ -771,10 +771,17 @@ impl StockDaemonBackend {
                         .insert((session.session_id.clone(), path.clone()))
             };
             if fresh {
-                let line = format!(
-                    "marsh: {} is inside the project; already visible",
-                    tilde(&path)
-                );
+                let line = if read_only {
+                    format!(
+                        "marsh: {} is inside the project; jobs see it read-only",
+                        tilde(&path)
+                    )
+                } else {
+                    format!(
+                        "marsh: {} is inside the project; already visible",
+                        tilde(&path)
+                    )
+                };
                 let _ = attachment.send(&if shell {
                     marsh_daemon::AttachmentFrame::Notice { message: line }
                 } else {
@@ -784,6 +791,22 @@ impl StockDaemonBackend {
                 });
             }
         }
+    }
+
+    /// Extra folders marked `readOnly` inside the project: each Kit job
+    /// binds them read-only over its project mount (a shell VM does not).
+    pub(crate) fn read_only_inside(
+        session: &SessionSpec,
+        environment: &Environment,
+    ) -> Vec<PathBuf> {
+        Self::fit_environment(session, environment)
+            .map(|(_, inside)| {
+                inside
+                    .into_iter()
+                    .filter_map(|(path, read_only)| read_only.then_some(path))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) fn additional_grants(
@@ -1088,9 +1111,27 @@ mod tests {
 
         write(&[&inside, &outside]);
         let (environment, skipped) = fit(&project, &home).unwrap();
-        assert_eq!(skipped, std::slice::from_ref(&inside));
+        assert_eq!(skipped, [(inside.clone(), false)]);
         assert_eq!(environment.mounts.len(), 1);
         assert_eq!(environment.mounts[0].path, outside);
+
+        // `readOnly` inside the project is kept, for a read-only overlay.
+        fs::write(
+            scope.join("sbxenvs/pi.yaml"),
+            format!(
+                "schemaVersion: '1'\nadditionalWorkspaces:\n  - path: {}\n    readOnly: true\n",
+                inside.display()
+            ),
+        )
+        .unwrap();
+        let configured = backend(&scope).with_sbxenvs().unwrap();
+        assert_eq!(
+            StockDaemonBackend::read_only_inside(
+                &session(&project, &home),
+                &configured.environment("pi")
+            ),
+            std::slice::from_ref(&inside)
+        );
 
         // The project inside an extra folder: refused, naming file and entry.
         write(&[&outside, &wrap]);
