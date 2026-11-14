@@ -2850,13 +2850,34 @@ impl SplitEngine {
                 }),
                 acp: false,
             };
-            // Refused before it was accepted: nothing of the branch ran.
-            let execution = self
-                .client
-                .start_execution(spec)
-                .map_err(|e| BranchError::Refused(e.to_string()))?;
+            let (_slot, execution) = self.start_argv_branch(store, &record.creator, spec)?;
             self.drive(&execution, spool, false, runtime, output, &job)
         }
+    }
+
+    /// Start an argv branch's job. A job's split branch is the daemon
+    /// connecting on the job's behalf, so it takes one of the job's slots,
+    /// held while the branch runs. A refusal (no slot, or the daemon's)
+    /// comes before anything of the branch ran.
+    fn start_argv_branch(
+        &self,
+        store: &DaemonStore,
+        creator: &Creator,
+        spec: ExecuteSpec,
+    ) -> Result<(Option<crate::CapabilityConnection>, ClientExecution), BranchError> {
+        let slot = match creator {
+            Creator::Job(job) => Some(
+                store
+                    .capability_connection(job)
+                    .map_err(BranchError::Refused)?,
+            ),
+            Creator::Host | Creator::Session(_) => None,
+        };
+        let execution = self
+            .client
+            .start_execution(spec)
+            .map_err(|e| BranchError::Refused(e.to_string()))?;
+        Ok((slot, execution))
     }
 
     /// Wait until no Kit job of `session` is queued or running.

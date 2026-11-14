@@ -448,13 +448,27 @@ is 130. `split` exits with the first nonzero code in declaration order.
    through would sit in an agent's VM. Host-only values (`TMPDIR`, `PWD`,
    `SHELL`, ...) name Mac paths and are wrong in a VM.
 - **Capability socket.**
-  - It admits at most 12 open connections per attempt, including idle ones;
-    an excess connection receives a refusal frame.
+  - The worker admits at most 132 open connections per attempt
+    (`FAN_OUT_MAX + 4`), including idle ones; an excess connection
+    receives a refusal frame.
   - Each connection's queue is bounded in both directions (64 chunks), so
     a job that stops reading is disconnected instead of stalling the
     worker transport.
-  - The daemon raises its descriptor soft limit (up to 4096) for its 128
-    connections.
+  - A connection reaches the daemon only once its first request arrived,
+    and only with a slot from the daemon's connection budget. The daemon's
+    own connections on a job's behalf (a `ProcessRun` child's start, the
+    argv branches of a job's split) take one of the job's slots too. A job
+    holds at most twice its live `job-children`, plus 4, and all jobs
+    together three quarters of the daemon's connection cap. A refused
+    connection gets a refusal frame.
+  - So jobs cannot take the last quarter of the cap. It is left to host
+    `marsh` commands, relays, shells, and host and session splits with
+    their branches; only the host's own load can fill it.
+  - The daemon serves at most 1024 connections, or more for a larger job
+    pool: enough that the jobs' share holds two connections for every job
+    of `daemon-jobs` (1371 at its maximum, 512, so about 510 nested
+    children run at once). It raises its descriptor soft limit (up to
+    4096) for them.
 - **Nested splits from a shell branch.** `marsh split` run inside a shell
   branch arrives on that branch's session relay. The daemon maps the
   session to the branch, so the split is a child: argv-only, depth + 1,

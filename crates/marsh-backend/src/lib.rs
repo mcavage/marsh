@@ -3595,10 +3595,12 @@ impl CapabilityBridges {
         };
         let (send, receive) = mpsc::sync_channel::<Vec<u8>>(64);
         self.channels.insert(channel, send);
-        let (socket, control, attempt) = (
+        let (socket, control, attempt, store, job) = (
             self.socket.clone(),
             self.control.clone(),
             self.attempt.clone(),
+            self.store.clone(),
+            self.job.clone(),
         );
         thread::spawn(move || {
             let close = |control: &marsh_sbx::WorkerControlHandle| {
@@ -3609,10 +3611,10 @@ impl CapabilityBridges {
             };
             // Connect only once a whole first request arrived: an idle
             // connection holds a channel slot, never a daemon handshake.
-            let mut daemon: Option<(std::os::unix::net::UnixStream, thread::JoinHandle<()>)> = None;
+            let mut daemon: Option<DaemonSide> = None;
             let mut pending = Vec::new();
             for bytes in receive {
-                if let Some((daemon, _)) = &mut daemon {
+                if let Some((daemon, _, _)) = &mut daemon {
                     if daemon.write_all(&bytes).is_err() {
                         break;
                     }
@@ -3641,6 +3643,15 @@ impl CapabilityBridges {
                     .to_vec();
                 out.extend_from_slice(&frame);
                 out.extend_from_slice(&pending[4 + length..]);
+                // The job's slot among the daemon's connections, held while
+                // this one lasts: jobs never take the host's share.
+                let slot = match store.capability_connection(&job) {
+                    Ok(slot) => slot,
+                    Err(message) => {
+                        refuse_capability_channel(&control, &attempt, channel, message);
+                        break;
+                    }
+                };
                 let Ok(mut stream) = marsh_runtime::connect_unix(&socket) else {
                     break;
                 };
@@ -3669,15 +3680,44 @@ impl CapabilityBridges {
                     let _ = replies.join();
                     break;
                 }
-                daemon = Some((stream, replies));
+                daemon = Some((stream, replies, slot));
             }
-            if let Some((stream, replies)) = daemon {
+            if let Some((stream, replies, _slot)) = daemon {
                 let _ = stream.shutdown(std::net::Shutdown::Write);
                 let _ = replies.join();
             }
             close(&control);
         });
     }
+}
+
+/// A bridged connection's daemon end, its reply pump, and its slot.
+type DaemonSide = (
+    std::os::unix::net::UnixStream,
+    thread::JoinHandle<()>,
+    marsh_daemon::CapabilityConnection,
+);
+
+/// The job's reply on a channel the daemon has no slot for.
+fn refuse_capability_channel(
+    control: &marsh_sbx::WorkerControlHandle,
+    attempt: &str,
+    channel: u32,
+    message: String,
+) {
+    let mut reply = Vec::new();
+    let _ = marsh_daemon::write_frame(
+        &mut reply,
+        &marsh_daemon::PublicReply::Error {
+            code: marsh_daemon::ErrorCode::InvalidRequest,
+            message,
+        },
+    );
+    let _ = control.send(&WorkerRequest::CapData {
+        attempt: attempt.to_owned(),
+        channel,
+        bytes: reply,
+    });
 }
 
 impl Drop for CapabilityBridges {

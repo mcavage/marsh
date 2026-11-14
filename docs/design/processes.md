@@ -93,7 +93,13 @@ then frame relay.
 **Capability socket** (`capability.rs`): blocking accept, at most
 the most live children a job can be allowed plus 4 (`FAN_OUT_MAX + 4`, 132)
 open connections per attempt. An excess connection receives
-`marsh: too many concurrent daemon requests in this job` and closes.
+`marsh: too many concurrent daemon requests in this job` and closes. The
+daemon side then bounds what those connections, and the daemon's own
+connections on the job's behalf (a child's start, a split branch), hold: one
+job at most twice its live `job-children`, plus 4, all jobs together three
+quarters of the daemon's connection cap. Jobs never take the last quarter; only
+the host's own load can fill it (`connection_budget.rs`,
+`docs/design/workspaces.md` "Capability socket").
 
 ## 4. The links and the in-job `marsh`
 

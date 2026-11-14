@@ -45,6 +45,7 @@ use uuid::Uuid;
 mod acp_bridge;
 pub mod checkpoint;
 mod client_liveness;
+mod connection_budget;
 mod daemon_startup;
 pub mod events;
 pub mod lane_services;
@@ -68,6 +69,7 @@ pub mod split_confinement;
 pub mod split_fs;
 mod upgrade;
 pub use acp_bridge::{AcpAttachmentBridge, AcpAttachmentStatus};
+pub use connection_budget::CapabilityConnection;
 pub use upgrade::{HANDOVER_FLAG, Successor, UpdatePending, handover_ready, is_handover_flag};
 mod acp_session;
 pub use acp_session::{
@@ -175,14 +177,6 @@ fn busy_lifecycle_refusal(message: &str) -> bool {
         || message.starts_with(BUSY_BLOCKED)
         || message.starts_with(STOCK_SBX_REMOVED)
 }
-// Leave descriptor headroom for relay socket clones, active attachments,
-// worker transports, and the listener on macOS's default soft FD limit.
-/// Each connection holds one descriptor plus at most two transient ones.
-/// Every running job holds about two (its caller's and its children's
-/// relays), so 1024 leaves room for the largest job pool (`daemon-jobs`, 512)
-/// beside shells and splits. The server raises its descriptor soft limit at
-/// bind (`raise_descriptor_limit`) so they fit.
-const MAX_DAEMON_CONNECTIONS: usize = 1024;
 const DAEMON_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // Publication replies may legitimately wait behind one cold Kit preparation
 // (stock sbx 5 + build 20 + load 10 + docker 2 minutes) and the five-minute
@@ -239,10 +233,17 @@ fn raise_descriptor_limit() {
     }
 }
 
-fn acquire_daemon_connection(active: &Arc<AtomicUsize>) -> Option<DaemonConnectionPermit> {
+/// A permit for one more connection, at most `cap` at once. The cap grows
+/// with the job pool (`connection_budget::connection_cap_for`); job
+/// connections, and the daemon's own on a job's behalf, may hold only
+/// [`connection_budget::capability_share`] of it.
+fn acquire_daemon_connection(
+    active: &Arc<AtomicUsize>,
+    cap: usize,
+) -> Option<DaemonConnectionPermit> {
     active
         .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-            (count < MAX_DAEMON_CONNECTIONS).then_some(count + 1)
+            (count < cap).then_some(count + 1)
         })
         .ok()?;
     Some(DaemonConnectionPermit(Arc::clone(active)))
@@ -2668,6 +2669,8 @@ struct State {
     journal: receipt_journal::ReceiptJournal,
     authentication_tokens: BTreeMap<String, Option<String>>,
     capability_tokens: BTreeMap<String, String>,
+    /// Slots of job capability connections (`connection_budget.rs`).
+    connections: Arc<connection_budget::Budget>,
     reservations: BTreeMap<String, String>,
     /// Requests and daemon-initiated work in flight, by admission, each with
     /// what it is (for a busy refusal).
@@ -3016,6 +3019,7 @@ impl DaemonStore {
             journal,
             authentication_tokens,
             capability_tokens: BTreeMap::new(),
+            connections: connection_budget::Budget::new(),
             process: process::ProcessTable::load(journal_home),
             reservations: BTreeMap::new(),
             ordinary_requests: BTreeMap::new(),
@@ -3060,6 +3064,34 @@ impl DaemonStore {
 
     pub fn revoke_capability_token(&self, token: &str) {
         self.lock().capability_tokens.remove(token);
+    }
+
+    /// A slot for one of `job_id`'s capability connections, taken before its
+    /// bridge connects to the daemon and held until that connection ends.
+    ///
+    /// # Errors
+    /// The job, or jobs together, hold all they may (`connection_budget.rs`);
+    /// the message is the job's reply.
+    pub fn capability_connection(
+        &self,
+        job_id: &str,
+    ) -> Result<connection_budget::CapabilityConnection, String> {
+        let (budget, limits) = {
+            let state = self.lock();
+            (Arc::clone(&state.connections), state.limits())
+        };
+        budget.acquire(job_id, limits.job_children, limits.daemon_jobs)
+    }
+
+    /// The daemon's connection cap now: it grows with `daemon-jobs`.
+    pub(crate) fn connection_cap(&self) -> usize {
+        let state = self.lock();
+        state.connections.cap(state.limits().daemon_jobs)
+    }
+
+    #[cfg(test)]
+    fn set_connection_cap(&self, cap: usize) {
+        self.lock().connections.set_limit(cap);
     }
 
     /// The session spec a job's split requests run under.
@@ -5151,6 +5183,15 @@ impl Server {
         })
     }
 
+    /// Serve at most `cap` connections at once, whatever the job pool
+    /// (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_connection_cap(self, cap: usize) -> Self {
+        self.store.set_connection_cap(cap);
+        self
+    }
+
     #[must_use]
     pub fn with_backend(mut self, backend: Arc<dyn DaemonBackend>) -> Self {
         // Checkpoints reach the services VMs through the backend (C12).
@@ -5416,7 +5457,9 @@ impl Server {
             }
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
                 Ok(stream) => {
-                    let Some(permit) = acquire_daemon_connection(&active_connections) else {
+                    let Some(permit) =
+                        acquire_daemon_connection(&active_connections, self.store.connection_cap())
+                    else {
                         drop(stream);
                         continue;
                     };
