@@ -734,3 +734,130 @@ fn volumes_from_keeps_the_pin_alive_after_the_original_is_deleted() {
     assert_eq!(st, 204);
     assert!(h.svc.ledger.pin("p1").is_none());
 }
+
+// --- long-lived state ---------------------------------------------------------
+
+/// DA1-06: per-attempt, per-root and per-workspace connection counts go
+/// when their last connection does; the endpoint still serves afterwards.
+#[test]
+fn ended_attempts_leave_no_connection_counts_behind() {
+    let h = H::new("state", false, no_custom(), |_| {});
+    let socks = (0..8)
+        .map(|n| {
+            h.serve(&Authority {
+                project_root: scratch(&format!("state-root-{n}")),
+                workspace: format!("ws{n}"),
+                attempt: format!("att{n}"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let clients = socks
+        .iter()
+        .map(|sock| UnixStream::connect(sock).unwrap())
+        .collect::<Vec<_>>();
+    assert!(wait_for(Duration::from_secs(5), || h.svc.tracked().1 == 8));
+    drop(clients);
+    assert!(
+        wait_for(Duration::from_secs(5), || {
+            let (_, attempts, roots, workspaces) = h.svc.tracked();
+            (attempts, roots, workspaces) == (0, 0, 0)
+        }),
+        "{:?}",
+        h.svc.tracked()
+    );
+    let (status, body) = call(
+        &h.serve(&h.auth),
+        "POST",
+        "/containers/create",
+        Some(CREATE),
+    );
+    assert_eq!(status, 201, "{body}");
+}
+
+/// DA1-06: a bind root's descriptor goes with the last workspace that used
+/// it (bind roots open only on Linux).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_forgotten_workspace_releases_its_bind_roots() {
+    let h = H::new("roots", false, no_custom(), |_| {});
+    let shared = scratch("roots-shared");
+    h.svc.hold_root(&shared, "ws-a");
+    h.svc.hold_root(&shared, "ws-b");
+    h.svc.hold_root(&scratch("roots-own"), "ws-a");
+    assert_eq!(h.svc.tracked().0, 2);
+    h.svc.forget_scope("ws-a").unwrap();
+    assert_eq!(h.svc.tracked().0, 1, "a root another workspace uses stays");
+    h.svc.forget_scope("ws-b").unwrap();
+    assert_eq!(h.svc.tracked().0, 0);
+}
+
+/// A `containers/create` with a bind under `root`, as a request.
+#[cfg(target_os = "linux")]
+fn bind_create(root: &Path) -> String {
+    let body = format!(
+        r#"{{"Image":"busybox","HostConfig":{{"Binds":["{}:/data"]}}}}"#,
+        root.join("data").display()
+    );
+    format!(
+        "POST /containers/create HTTP/1.1\r\nHost: d\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// DA1-06: a bind mount in a real `containers/create` opens its root under
+/// the connection's own workspace, kept while the workspace is served, so
+/// forgetting that workspace releases it.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_bind_in_a_create_is_released_with_its_workspace() {
+    let h = H::new("bindroot", false, no_custom(), |_| {});
+    std::fs::create_dir_all(h.dir.join("data")).unwrap();
+    let sock = h.svc.socket_for(&h.auth).unwrap();
+    let mut c = UnixStream::connect(&sock).unwrap();
+    c.write_all(bind_create(&h.dir).as_bytes()).unwrap();
+    // Whether or not this host may mount the pin, the root was opened.
+    let _ = c.read_to_end(&mut Vec::new());
+    assert!(wait_for(Duration::from_secs(5), || h
+        .svc
+        .open_connections()
+        == 0));
+    assert_eq!(h.svc.tracked().0, 1);
+    h.svc.forget_scope("another-workspace").unwrap();
+    assert_eq!(h.svc.tracked().0, 1);
+    h.svc.forget_scope(&h.auth.workspace).unwrap();
+    assert_eq!(h.svc.tracked().0, 0);
+}
+
+/// DA1-06: a bind request that arrives on a connection accepted before its
+/// workspace was forgotten opens the root again, but only for that
+/// connection's life: eight such workspaces leave no root behind.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_late_bind_does_not_bring_back_a_forgotten_root() {
+    let h = H::new("lateroot", false, no_custom(), |_| {});
+    for index in 0..8 {
+        let root = scratch(&format!("lateroot-{index}"));
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let auth = Authority {
+            project_root: root.clone(),
+            workspace: format!("ws{index}"),
+            attempt: "att1".into(),
+        };
+        let sock = h.svc.socket_for(&auth).unwrap();
+        let mut c = UnixStream::connect(&sock).unwrap();
+        assert!(wait_for(Duration::from_secs(5), || h
+            .svc
+            .open_connections()
+            == 1));
+        h.svc.forget_scope(&auth.workspace).unwrap();
+        c.write_all(bind_create(&root).as_bytes()).unwrap();
+        let _ = c.read_to_end(&mut Vec::new());
+        drop(c);
+        assert!(wait_for(Duration::from_secs(5), || h
+            .svc
+            .open_connections()
+            == 0));
+    }
+    assert_eq!(h.svc.tracked().0, 0, "forgotten roots came back");
+    assert_eq!(h.svc.tracked().3, 0, "ended workspaces kept a count");
+}
