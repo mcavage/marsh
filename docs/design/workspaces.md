@@ -458,6 +458,11 @@ is 130. `split` exits with the first nonzero code in declaration order.
     it is sending: at most 4 MiB for all of one attempt's connections
     together. Past that, the connection gets a refusal frame and never
     reaches the daemon.
+  - On the host, the data and openings of an attempt's `cap.sock`
+    connections that the daemon has not yet taken are bounded at 8 MiB.
+    Past it, the connection that sent the data is closed on both sides,
+    and the job's caller reads why on stderr; an opening past it is
+    refused. The attempt and its output go on.
   - A connection reaches the daemon only once its first request arrived,
     and only with a slot from the daemon's connection budget. The daemon's
     own connections on a job's behalf (a `ProcessRun` child's start, the

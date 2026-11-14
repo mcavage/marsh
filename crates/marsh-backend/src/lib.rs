@@ -2855,7 +2855,8 @@ impl DaemonBackend for StockDaemonBackend {
                         }
                     }
                     Ok(WorkerResponse::CapClose { channel, .. }) => {
-                        capability.channels.remove(&channel);
+                        let cut = launch.responses.take_cut(channel);
+                        capability_closed(&mut capability.channels, channel, cut, &attachment);
                     }
                     Ok(response @ (WorkerResponse::Ready { .. } | WorkerResponse::Pong { .. })) => {
                         transport_lost = true;
@@ -3575,6 +3576,10 @@ fn reconcile_worker_cleanup(
     Ok(cleanup_uncertain)
 }
 
+/// What a job's caller reads when one of its `cap.sock` connections was cut
+/// because the daemon fell 8 MiB behind on it.
+const CAP_CUT_NOTICE: &str = "marsh: closed one of this job's daemon connections: more than 8 MiB of its data waited while the job's output was not being read\n";
+
 /// Bridges a job's split capability connections to this daemon's endpoint
 /// with a per-attempt token that is revoked when the job ends
 /// (`docs/design/workspaces.md` s4). Each connection's first request envelope is
@@ -3595,6 +3600,22 @@ struct CapabilityBridges {
 /// First-request bytes one attempt's `cap.sock` channels may hold, before
 /// a daemon slot is taken for them.
 const FIRST_REQUEST_BYTES: usize = 4 << 20;
+
+/// The worker closed `channel` (or the route did, `cut` for the budget):
+/// its bridge ends, and a cut is never silent.
+fn capability_closed(
+    channels: &mut BTreeMap<u32, mpsc::SyncSender<Vec<u8>>>,
+    channel: u32,
+    cut: bool,
+    attachment: &ServerAttachment,
+) {
+    channels.remove(&channel);
+    if cut {
+        let _ = attachment.send(&AttachmentFrame::Stderr {
+            bytes: CAP_CUT_NOTICE.as_bytes().to_vec(),
+        });
+    }
+}
 
 impl CapabilityBridges {
     fn open(&mut self, channel: u32) {
@@ -6134,6 +6155,33 @@ mod tests {
         os::unix::net::UnixStream,
         sync::{Arc, mpsc},
     };
+
+    /// B-01: a channel cut for the budget ends with a line on the job's
+    /// stderr, exactly once; an ordinary close ends silently. The bridge
+    /// goes either way.
+    #[test]
+    fn a_cut_capability_channel_is_reported_on_the_jobs_stderr() {
+        let (attachment, caller) = ServerAttachment::pair().unwrap();
+        let mut channels = BTreeMap::new();
+        for channel in [1, 2] {
+            channels.insert(channel, mpsc::sync_channel(1).0);
+        }
+        capability_closed(&mut channels, 1, false, &attachment);
+        capability_closed(&mut channels, 2, true, &attachment);
+        assert!(channels.is_empty());
+        attachment
+            .send(&AttachmentFrame::Exited { code: 0 })
+            .unwrap();
+        let frames = std::iter::from_fn(|| caller.receive().ok())
+            .take_while(|frame| !matches!(frame, AttachmentFrame::Exited { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            frames,
+            vec![AttachmentFrame::Stderr {
+                bytes: CAP_CUT_NOTICE.as_bytes().to_vec()
+            }]
+        );
+    }
 
     /// A store with one queued job, for the `cap.sock` bridge tests.
     fn bridge_job() -> (tempfile::TempDir, DaemonStore, String) {
