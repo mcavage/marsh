@@ -99,10 +99,14 @@ A job (and every child job) mounts the project read-write, but what your Mac's
 worktree Git directories `.git/modules/` and `.git/worktrees/`. `.git` itself is
 bound onto itself so it can't be renamed away. A `.git` file (the project is
 itself a worktree or submodule, or was made with `--separate-git-dir`) is
-read-only, and when the Git directory it names (or that directory's common
-directory) is inside the project, its controls are guarded the same way; one
-outside the project isn't mounted in the job. A `.git` that is a symlink
-refuses the job. Before each job marsh makes
+read-only. When the Git directory it names (or that directory's common
+directory) is inside the project, its controls are guarded the same way;
+when the path to it passes through a symlink inside the project (which a job
+could re-point), the job is refused. When it is outside the project, only
+the `.git` file is guarded: the job doesn't see that directory unless it is
+under an extra folder or the guest home, where it is not protected; and in
+the job `git status` says `not a git repository`. A `.git` that is a
+symlink refuses the job. Before each job marsh makes
 missing ones, so a job can't plant them: empty `hooks/`, `info/`, `modules/`
 and `worktrees/` directories, empty `config` and `config.worktree` files, and
 a `commondir` containing `./` (the Git directory itself) in a repository that

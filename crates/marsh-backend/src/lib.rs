@@ -4469,30 +4469,60 @@ fn other_common(git: &Path, common: &Path) -> String {
     )
 }
 
-/// `path` as a path under `project` when it lies inside it (by its real
-/// location), through real directories only; `None` when outside.
+/// `path` (as written: absolute, or relative to `project`) as a path under
+/// `project` when it lies inside it; `None` when outside. The path is walked
+/// as written, a component at a time (`..` steps back over a component
+/// already checked), so a job can't re-point what it names: every component
+/// inside the project must be a real directory.
 ///
 /// # Errors
-/// Refuses a path inside the project reached through a symlink.
+/// Refuses a component inside the project that is a symlink or not a
+/// directory, and a path that reaches the project through a symlink
+/// outside it.
 fn in_project(project: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
-    let real_project = std::fs::canonicalize(project).map_err(|error| error.to_string())?;
-    let Ok(real) = std::fs::canonicalize(path) else {
-        return Ok(None);
+    use std::path::Component;
+    let refused = |at: &Path| {
+        format!(
+            "{} is a symlink or not a directory; marsh can't keep jobs from re-pointing the Git directory {} names",
+            at.display(),
+            path.display()
+        )
     };
-    let Ok(relative) = real.strip_prefix(&real_project) else {
-        return Ok(None);
+    // A path Git wrote may name the project by its real path.
+    let real_project = std::fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
+    let inside = |at: &Path| at.starts_with(project) || at.starts_with(&real_project);
+    let mut current = if path.is_absolute() {
+        PathBuf::from("/")
+    } else {
+        project.to_path_buf()
     };
-    let mut current = project.to_path_buf();
-    for part in relative.components() {
-        current.push(part);
-        if !std::fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.is_dir()) {
-            return Err(format!(
-                "{} is reached through a symlink; marsh can't keep jobs from changing it",
-                current.display()
-            ));
+    for component in path.components() {
+        match component {
+            Component::Normal(name) => {
+                current.push(name);
+                if inside(&current)
+                    && !std::fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.is_dir())
+                {
+                    return Err(refused(&current));
+                }
+            }
+            Component::ParentDir => {
+                current.pop();
+            }
+            Component::RootDir | Component::Prefix(_) | Component::CurDir => {}
         }
     }
-    Ok(Some(current))
+    if let Ok(relative) = current.strip_prefix(project) {
+        return Ok(Some(project.join(relative)));
+    }
+    if let Ok(relative) = current.strip_prefix(&real_project) {
+        return Ok(Some(project.join(relative)));
+    }
+    // Outside the project as written: it must not lead back in.
+    if std::fs::canonicalize(&current).is_ok_and(|real| real.starts_with(&real_project)) {
+        return Err(refused(&current));
+    }
+    Ok(None)
 }
 
 /// The Git directory a gitfile names, as a path under `project` when it
@@ -6465,11 +6495,59 @@ mod tests {
                 (outside.join(".git"), false)
             ]
         );
+        // A common dir that names yet another: refused.
+        fs::write(linked.join("admin/commondir"), "other\n").unwrap();
+        let refused = project_guards(&linked).unwrap_err();
+        assert!(refused.contains("names another Git directory"), "{refused}");
         // A symlinked `.git`: refused.
         fs::remove_file(project.join(".git")).unwrap();
         std::os::unix::fs::symlink("admin", project.join(".git")).unwrap();
         let refused = project_guards(&project).unwrap_err();
         assert!(refused.contains("is a symlink"), "{refused}");
+    }
+
+    /// A gitfile's path is walked as written: a symlink in it inside the
+    /// project is refused. Real Git.
+    #[test]
+    fn a_gitfile_path_through_a_symlink_is_refused() {
+        let git = |dir: &Path, args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{args:?}: {output:?}");
+        };
+        let read_only =
+            |guards: &[(PathBuf, bool)], path: &Path| guards.contains(&(path.to_path_buf(), false));
+        let temp = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let main = root.join("main");
+        fs::create_dir(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        // A gitfile path through a symlink in the project: the job could
+        // re-point the link at a Git dir it wrote (`link -> evil`), so it is
+        // refused, whether the link leads inside the project or out.
+        let viasym = root.join("viasym");
+        fs::create_dir_all(viasym.join("real")).unwrap();
+        git(&viasym, &["init", "-q", "--separate-git-dir", "real/admin"]);
+        std::os::unix::fs::symlink("real", viasym.join("link")).unwrap();
+        fs::write(viasym.join(".git"), "gitdir: link/admin\n").unwrap();
+        git(&viasym, &["status", "--short"]);
+        let refused = project_guards(&viasym).unwrap_err();
+        assert!(refused.contains("is a symlink"), "{refused}");
+        fs::remove_file(viasym.join("link")).unwrap();
+        std::os::unix::fs::symlink(&main, viasym.join("link")).unwrap();
+        fs::write(viasym.join(".git"), "gitdir: link/.git\n").unwrap();
+        assert!(project_guards(&viasym).is_err(), "a link leading out");
+        // `..` over real directories is followed as written.
+        fs::remove_file(viasym.join("link")).unwrap();
+        fs::write(viasym.join(".git"), "gitdir: real/../real/admin\n").unwrap();
+        let guards = project_guards(&viasym).unwrap();
+        assert!(read_only(&guards, &viasym.join("real/admin/config")));
     }
 
     /// `.marsh` that is not a directory marsh can make refuses the job.

@@ -290,7 +290,8 @@ public state strings.
   `worktrees/` and `commondir` (made, as `./`, when missing; a `commondir`
   naming another directory, a symlinked control or a symlinked `.git`
   refuses the job; a `.git` file's Git directory inside the project is
-  guarded the same way) as read-only
+  guarded the same way, and a path to it through an in-project symlink
+  refuses the job) as read-only
   binds, under `.git` bound onto itself (`project_guards` in
   `marsh-backend`; `docs/security.md` Git in jobs).
   A Kit job whose project root itself lies inside a `.marsh` directory (a
