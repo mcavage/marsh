@@ -191,16 +191,17 @@ impl StockDaemonBackend {
     }
 
     /// Remove the VMs the ownership map marks retired for good (a stop that
-    /// did not settle, in this or an earlier daemon run). Each background
+    /// did not settle, in this or an earlier daemon run, or a VM the removed
+    /// `marsh --dev` left). Each background
     /// pass, starting when the daemon starts.
     pub(super) fn remove_retired_vms(&self) {
         let (removed, failed) = self.sbx.remove_retired_kit_vms();
         for vm in removed {
             self.forget_retired(&vm);
-            eprintln!("marshd: removed retired Kit VM {vm}");
+            eprintln!("marshd: removed retired VM {vm}");
         }
         for (vm, error) in failed {
-            eprintln!("marshd: retired Kit VM {vm} not removed yet: {error}");
+            eprintln!("marshd: retired VM {vm} not removed yet: {error}");
         }
     }
 

@@ -261,7 +261,6 @@ impl StockDaemonBackend {
             }
         }
         let mut shells = BTreeSet::from([self.config.shell.name.clone()]);
-        shells.extend(self.sbx.recorded_vm_name(VmPurpose::Shell, "dev"));
         for session in live {
             shells.extend(
                 self.sbx

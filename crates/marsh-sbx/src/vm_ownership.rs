@@ -37,7 +37,8 @@ use std::{
 /// Purpose recorded for VMs created by a daemon before purposes existed or
 /// recorded without a lookup key.
 const UNKEYED: &str = "unkeyed";
-/// A VM retired for good (a `marsh workers stop` that did not settle): never
+/// A VM retired for good (a `marsh workers stop` that did not settle, or a
+/// VM the removed `marsh --dev` left, see `retire_dev_vms`): never
 /// looked up, prepared or admitted again, and removed as soon as possible,
 /// also by the next daemon. The purpose keeps the file schema (and an older
 /// marsh) unchanged: an unknown purpose is never looked up by any marsh.
@@ -78,9 +79,9 @@ impl VmPurpose {
     }
 }
 
-/// Name prefix for VMs this daemon creates: `marsh-` by default. A daemon
-/// running inside a dev session gets its grant prefix via `MARSH_VM_PREFIX`
-/// (e.g. `marsh-xab12c-`), so the host broker can confine its names.
+/// Name prefix for VMs this daemon creates: `marsh-` by default.
+/// `MARSH_VM_PREFIX` (e.g. `marsh-xab12c-`) keeps one daemon's names apart
+/// from another's, as cloud and the services end-to-end harnesses do.
 pub fn vm_prefix() -> &'static str {
     static PREFIX: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PREFIX.get_or_init(|| {
@@ -91,7 +92,7 @@ pub fn vm_prefix() -> &'static str {
     })
 }
 
-/// `marsh-` followed by zero or more `x<5 base36>-` grant segments.
+/// `marsh-` followed by zero or more `x<5 base36>-` segments.
 #[must_use]
 pub fn valid_vm_prefix(value: &str) -> bool {
     let Some(mut rest) = value.strip_prefix("marsh-") else {
@@ -113,20 +114,13 @@ pub fn valid_vm_prefix(value: &str) -> bool {
     true
 }
 
-/// A development grant persisted beside the host VM map: the child daemon's
-/// names (`name -> uuid`, `None` = intent), its roots and capacity.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DevGrantRecord {
-    pub session: String,
-    pub prefix: String,
-    pub roots: Vec<PathBuf>,
-    pub scratch: PathBuf,
-    pub max_vms: usize,
-    pub revoked: bool,
+/// A `marsh --dev` grant an older daemon left in the map: only the names of
+/// the VMs its child daemon created (`name -> uuid`, `None` = intent) are
+/// read. Every other historical field is accepted and ignored.
+#[derive(Default, Deserialize)]
+struct LegacyGrant {
     #[serde(default)]
-    pub cleanup_uncertain: bool,
-    pub names: BTreeMap<String, Option<String>>,
+    names: BTreeMap<String, Option<String>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -143,8 +137,9 @@ struct Entry {
 struct OwnershipFile {
     version: u32,
     vms: BTreeMap<String, Entry>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    grants: BTreeMap<String, DevGrantRecord>,
+    /// Read only, to retire what `marsh --dev` left (`retire_dev_vms`).
+    #[serde(default, skip_serializing)]
+    grants: BTreeMap<String, LegacyGrant>,
 }
 
 #[derive(Deserialize)]
@@ -163,7 +158,6 @@ struct State {
     /// such a name (e.g. the daemon's fixed shell spec) that recreates it
     /// keeps its lookup identity instead of becoming unkeyed.
     retired: BTreeMap<String, Entry>,
-    grants: BTreeMap<String, DevGrantRecord>,
 }
 
 pub(crate) struct VmOwnership {
@@ -185,6 +179,32 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), SbxError> {
     file.sync_all()?;
     fs::rename(&temporary, path)?;
     Ok(())
+}
+
+/// `marsh --dev` was removed. Mark what it left retired, so the retired-VM
+/// pass removes it by recorded UUID: each VM a dev grant's child daemon
+/// created (under a random grant prefix that an earlier daemon of this map
+/// chose and recorded), and the dev shell VM. Returns whether anything
+/// changed.
+fn retire_dev_vms(
+    entries: &mut BTreeMap<String, Entry>,
+    grants: BTreeMap<String, LegacyGrant>,
+) -> bool {
+    let mut changed = !grants.is_empty();
+    for (name, uuid) in grants.into_values().flat_map(|grant| grant.names) {
+        entries.entry(name).or_insert_with(|| Entry {
+            purpose: RETIRED.into(),
+            key: String::new(),
+            uuid,
+        });
+    }
+    for entry in entries.values_mut() {
+        if entry.purpose == VmPurpose::Shell.label() && entry.key == "dev" {
+            entry.purpose = RETIRED.into();
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Fresh random name: fixed prefix plus 8 lowercase base36 characters.
@@ -212,7 +232,7 @@ impl VmOwnership {
     /// Load (or start) a persisted owner-only map at `path`.
     pub(crate) fn persisted(path: PathBuf) -> Result<Self, SbxError> {
         let mut grants = BTreeMap::new();
-        let entries = match fs::symlink_metadata(&path) {
+        let mut entries = match fs::symlink_metadata(&path) {
             Ok(metadata) => {
                 if !metadata.is_file()
                     || metadata.uid() != rustix::process::geteuid().as_raw()
@@ -257,22 +277,26 @@ impl VmOwnership {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(error) => return Err(error.into()),
         };
+        let migrated = retire_dev_vms(&mut entries, grants);
         let unclaimed_intents = entries
             .iter()
             .filter(|(_, entry)| entry.uuid.is_none())
             .map(|(name, _)| name.clone())
             .collect();
-        Ok(Self {
+        let ownership = Self {
             path: Some(path),
             mirror: None,
             state: Mutex::new(State {
                 entries,
                 unclaimed_intents,
                 retired: BTreeMap::new(),
-                grants,
             }),
             view: Mutex::new(None),
-        })
+        };
+        if migrated {
+            ownership.persist(&ownership.lock())?;
+        }
+        Ok(ownership)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -310,7 +334,7 @@ impl VmOwnership {
         let bytes = serde_json::to_vec_pretty(&OwnershipFile {
             version: 2,
             vms: state.entries.clone(),
-            grants: state.grants.clone(),
+            grants: BTreeMap::new(),
         })?;
         // The mirror is written first: it never names fewer VMs than the map.
         if let Some(mirror) = &self.mirror {
@@ -515,27 +539,6 @@ impl VmOwnership {
         Ok(())
     }
 
-    pub(crate) fn dev_grants(&self) -> BTreeMap<String, DevGrantRecord> {
-        self.lock().grants.clone()
-    }
-
-    /// Mutate the persisted grant section; a failed write rolls back.
-    pub(crate) fn update_dev_grants<R>(
-        &self,
-        update: impl FnOnce(&mut BTreeMap<String, DevGrantRecord>) -> R,
-    ) -> Result<R, SbxError> {
-        let mut state = self.lock();
-        let prior = state.grants.clone();
-        let result = update(&mut state.grants);
-        if state.grants != prior
-            && let Err(error) = self.persist(&state)
-        {
-            state.grants = prior;
-            return Err(error);
-        }
-        Ok(result)
-    }
-
     /// `(name, purpose, key)` of each entry with a recorded UUID; a legacy
     /// unkeyed entry counts as a Kit VM with no key.
     pub(crate) fn recorded(&self) -> Vec<(String, VmPurpose, String)> {
@@ -563,15 +566,6 @@ impl VmOwnership {
             .iter()
             .find(|(_, entry)| entry.purpose == purpose.label() && entry.key == key)
             .map(|(name, _)| name.clone())
-    }
-
-    /// Names in development grants' child maps.
-    pub(crate) fn grant_names(&self) -> BTreeSet<String> {
-        self.lock()
-            .grants
-            .values()
-            .flat_map(|grant| grant.names.keys().cloned())
-            .collect()
     }
 
     pub(crate) fn host_names(&self) -> BTreeSet<String> {
@@ -607,18 +601,6 @@ impl VmOwnership {
                 {
                     entry.uuid = Some(vm.id.clone());
                     changed = true;
-                }
-            }
-            // Grant intents are adopted by name like host intents (random
-            // per-grant prefix; children reach stock only via the broker).
-            for grant in state.grants.values_mut() {
-                for (name, uuid) in &mut grant.names {
-                    if uuid.is_none()
-                        && let Some(vm) = inventory.get(name)
-                    {
-                        *uuid = Some(vm.id.clone());
-                        changed = true;
-                    }
                 }
             }
             if changed {
