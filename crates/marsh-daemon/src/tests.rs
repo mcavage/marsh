@@ -4034,6 +4034,106 @@ fn failed_shell_setup_and_preparation_detach_their_sessions() {
     task.join().unwrap();
 }
 
+/// `marsh --dev` was removed. Every older client still sends `"dev": false`
+/// on a shell, and an older `--dev --load` sent `"dev": true` on a prepare:
+/// `false` reaches the backend as before; `true` is refused before the
+/// backend sees it, and its session is detached. A newer client never sends
+/// the field.
+#[test]
+fn an_older_clients_dev_field_is_accepted_when_false_and_refused_when_true() {
+    let home = home();
+    for dev in [false, true] {
+        let spec = ShellSpec {
+            dev,
+            session: session("new-client", home.path()),
+            arguments: Vec::new(),
+            terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
+        };
+        assert!(serde_json::to_value(&spec).unwrap().get("dev").is_none());
+        let prepare = PublicRequest::Prepare {
+            selection: LoadSelection::All,
+            session: session("new-client", home.path()),
+            dev,
+        };
+        assert!(serde_json::to_value(&prepare).unwrap().get("dev").is_none());
+    }
+
+    let server = Arc::new(
+        Server::bind(home.path())
+            .unwrap()
+            .with_backend(Arc::new(FailingShellBackend)),
+    );
+    let stop = Arc::new(AtomicBool::new(false));
+    let task_server = Arc::clone(&server);
+    let task_stop = Arc::clone(&stop);
+    let task = thread::spawn(move || {
+        task_server
+            .serve_until(|| task_stop.load(Ordering::Relaxed))
+            .unwrap();
+    });
+    let client = Client::connect(home.path()).unwrap();
+    // Every frame the daemon sends for one request, until it hangs up.
+    let exchange = |body: serde_json::Value| {
+        let mut stream = marsh_runtime::connect_unix(&client.paths.socket).unwrap();
+        write_frame(
+            &mut stream,
+            &Envelope {
+                protocol: PROTOCOL.into(),
+                token: client.token.clone(),
+                body,
+            },
+        )
+        .unwrap();
+        let mut frames = Vec::new();
+        while let Ok(frame) = read_frame::<serde_json::Value>(&mut stream) {
+            frames.push(frame.to_string());
+        }
+        frames.join("\n")
+    };
+    let pid = std::sync::atomic::AtomicU32::new(40);
+    let old_session = || {
+        let session_id = server.store().attach_shell(
+            pid.fetch_add(1, Ordering::Relaxed),
+            authority("/Users/example/project", home.path()),
+        );
+        let spec = serde_json::to_value(session(&session_id, home.path())).unwrap();
+        (session_id, spec)
+    };
+    for dev in [false, true] {
+        let (shell_id, shell_session) = old_session();
+        let shell = exchange(serde_json::json!({
+            "type": "open_shell", "arguments": [], "session": shell_session, "dev": dev,
+        }));
+        let (prepare_id, prepare_session) = old_session();
+        let prepared = exchange(serde_json::json!({
+            "type": "prepare", "selection": {"kits": []}, "session": prepare_session, "dev": dev,
+        }));
+        if dev {
+            for reply in [&shell, &prepared] {
+                assert!(reply.contains("marsh --dev was removed"), "{reply}");
+                assert!(!reply.contains("failed"), "the backend ran: {reply}");
+            }
+        } else {
+            assert!(shell.contains("shell failed"), "{shell}");
+            assert!(prepared.contains("preparation failed"), "{prepared}");
+        }
+        let status = server.store().status(None);
+        for id in [&shell_id, &prepare_id] {
+            assert!(
+                !status
+                    .shells
+                    .iter()
+                    .any(|shell| &shell.session_id == id && shell.state != ShellState::Detached),
+                "dev={dev}: {id} still attached"
+            );
+        }
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    task.join().unwrap();
+}
+
 #[test]
 fn preparation_reports_a_removed_stock_sbx_and_detaches_the_session() {
     let home = home();

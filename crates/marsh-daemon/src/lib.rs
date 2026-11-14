@@ -146,6 +146,14 @@ pub fn stock_sbx_removed_message(path: &Path) -> String {
     )
 }
 
+/// The refusal for a request from an older `marsh --dev` client.
+fn dev_removed() -> PublicReply {
+    PublicReply::Error {
+        code: ErrorCode::InvalidRequest,
+        message: "marsh --dev was removed; build with `make dev` on the host and run ~/.marsh-dev/bin/marsh".into(),
+    }
+}
+
 /// The pinned stock SBX executable no longer exists (a Homebrew upgrade
 /// deletes the old version's directory).
 fn stock_sbx_removed(path: Option<&Path>) -> bool {
@@ -775,8 +783,9 @@ pub enum PublicRequest {
     Prepare {
         selection: LoadSelection,
         session: SessionSpec,
-        /// `marsh --dev --load`: the session attaches to the dev shell VM.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        /// Removed with `marsh --dev`; accepted when false for older
+        /// clients, refused when true, and never sent.
+        #[serde(default, skip_serializing)]
         dev: bool,
     },
     Execute(ExecuteSpec),
@@ -1334,8 +1343,9 @@ pub struct LaneCall<'a> {
 pub struct ShellSpec {
     pub arguments: Vec<Vec<u8>>,
     pub session: SessionSpec,
-    /// `marsh --dev`: attach with a development grant (host checks policy).
-    #[serde(default)]
+    /// Removed with `marsh --dev`. Every older client sends `false`, which
+    /// is accepted; `true` is refused; a newer client never sends it.
+    #[serde(default, skip_serializing)]
     pub dev: bool,
     /// The Mac terminal's identity variables for an interactive session
     /// (`marsh_contracts::terminal::identity`); the backend filters again.
@@ -6581,6 +6591,11 @@ impl ConnectionHandler {
                 Ok(())
             }
             PublicRequest::OpenShell(spec) => {
+                if spec.dev {
+                    let detached = self.store.detach_shell(&spec.session.session_id);
+                    write_frame(&mut stream, &dev_removed())?;
+                    return detached;
+                }
                 let session_id = spec.session.session_id.clone();
                 let mut owner = match self.store.begin_shell_attachment(&session_id) {
                     Ok(owner) => owner,
@@ -7052,6 +7067,11 @@ impl ConnectionHandler {
                 dev,
             } => {
                 let session_id = session.session_id.clone();
+                if dev {
+                    let detached = self.store.detach_shell(&session_id);
+                    write_frame(&mut stream, &dev_removed())?;
+                    return detached;
+                }
                 if let Some(path) = self
                     .stock_sbx
                     .as_deref()
