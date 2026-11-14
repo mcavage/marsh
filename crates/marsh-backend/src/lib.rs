@@ -52,7 +52,11 @@ use std::{
     os::unix::ffi::OsStringExt,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -2726,6 +2730,7 @@ impl DaemonBackend for StockDaemonBackend {
             store: store.clone(),
             token: None,
             channels: BTreeMap::new(),
+            waiting: Arc::default(),
         };
         let output_relay_at = Instant::now();
         let mut started_container = None;
@@ -3582,7 +3587,14 @@ struct CapabilityBridges {
     store: DaemonStore,
     token: Option<String>,
     channels: BTreeMap<u32, mpsc::SyncSender<Vec<u8>>>,
+    /// Bytes of first requests this attempt's channels hold before they
+    /// have a daemon slot.
+    waiting: Arc<AtomicUsize>,
 }
+
+/// First-request bytes one attempt's `cap.sock` channels may hold, before
+/// a daemon slot is taken for them.
+const FIRST_REQUEST_BYTES: usize = 4 << 20;
 
 impl CapabilityBridges {
     fn open(&mut self, channel: u32) {
@@ -3595,98 +3607,172 @@ impl CapabilityBridges {
         };
         let (send, receive) = mpsc::sync_channel::<Vec<u8>>(64);
         self.channels.insert(channel, send);
-        let (socket, control, attempt, store, job) = (
-            self.socket.clone(),
-            self.control.clone(),
-            self.attempt.clone(),
-            self.store.clone(),
-            self.job.clone(),
-        );
-        thread::spawn(move || {
-            let close = |control: &marsh_sbx::WorkerControlHandle| {
-                let _ = control.send(&WorkerRequest::CapClose {
-                    attempt: attempt.clone(),
-                    channel,
-                });
+        let control = self.control.clone();
+        let to_worker: ToWorker =
+            Arc::new(move |request: &WorkerRequest| control.send(request).is_ok());
+        let bridge = Bridge {
+            attempt: self.attempt.clone(),
+            channel,
+            socket: self.socket.clone(),
+            token,
+            store: self.store.clone(),
+            job: self.job.clone(),
+            to_worker,
+            waiting: Arc::clone(&self.waiting),
+        };
+        thread::spawn(move || bridge.run(&receive));
+    }
+}
+
+/// Sends one request to the attempt's worker; false once it is gone.
+type ToWorker = Arc<dyn Fn(&WorkerRequest) -> bool + Send + Sync>;
+
+/// One `cap.sock` channel bridged to a daemon connection.
+struct Bridge {
+    attempt: String,
+    channel: u32,
+    socket: PathBuf,
+    token: String,
+    store: DaemonStore,
+    job: String,
+    to_worker: ToWorker,
+    /// The attempt's first-request bytes held ([`FIRST_REQUEST_BYTES`]).
+    waiting: Arc<AtomicUsize>,
+}
+
+/// First-request bytes one channel holds, counted in its attempt's total
+/// until dropped.
+struct Waiting<'a>(&'a AtomicUsize, usize);
+
+impl Waiting<'_> {
+    fn add(&mut self, bytes: usize) -> bool {
+        if self.0.fetch_add(bytes, Ordering::AcqRel) + bytes > FIRST_REQUEST_BYTES {
+            self.0.fetch_sub(bytes, Ordering::AcqRel);
+            return false;
+        }
+        self.1 += bytes;
+        true
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(self.1, Ordering::AcqRel);
+    }
+}
+
+impl Bridge {
+    fn run(&self, receive: &mpsc::Receiver<Vec<u8>>) {
+        let (channel, attempt, token) = (self.channel, &self.attempt, &self.token);
+        // Connect only once a whole first request arrived: an idle
+        // connection holds a channel slot, never a daemon handshake.
+        let mut daemon: Option<DaemonSide> = None;
+        let mut pending = Vec::new();
+        let mut waiting = Waiting(&self.waiting, 0);
+        for bytes in receive {
+            if let Some((daemon, _, _)) = &mut daemon {
+                if daemon.write_all(&bytes).is_err() {
+                    break;
+                }
+                continue;
+            }
+            if !waiting.add(bytes.len()) {
+                self.refuse(format!(
+                    "marsh: this job's connections hold {} MiB of first requests the daemon has not taken yet, the most",
+                    FIRST_REQUEST_BYTES >> 20
+                ));
+                break;
+            }
+            pending.extend_from_slice(&bytes);
+            let Some(length) = pending.get(..4).map(|prefix| {
+                u32::from_be_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as usize
+            }) else {
+                continue;
             };
-            // Connect only once a whole first request arrived: an idle
-            // connection holds a channel slot, never a daemon handshake.
-            let mut daemon: Option<DaemonSide> = None;
-            let mut pending = Vec::new();
-            for bytes in receive {
-                if let Some((daemon, _, _)) = &mut daemon {
-                    if daemon.write_all(&bytes).is_err() {
-                        break;
-                    }
-                    continue;
-                }
-                pending.extend_from_slice(&bytes);
-                let Some(length) = pending.get(..4).map(|prefix| {
-                    u32::from_be_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as usize
-                }) else {
-                    continue;
-                };
-                if length > marsh_daemon::MAX_FRAME_BYTES {
-                    break;
-                }
-                if pending.len() < 4 + length {
-                    continue;
-                }
-                let Ok(frame) =
-                    marsh_daemon::Client::reauthorize_envelope(&pending[4..4 + length], &token)
-                else {
-                    break;
-                };
-                let mut out = u32::try_from(frame.len())
-                    .unwrap_or(0)
-                    .to_be_bytes()
-                    .to_vec();
-                out.extend_from_slice(&frame);
-                out.extend_from_slice(&pending[4 + length..]);
-                // The job's slot among the daemon's connections, held while
-                // this one lasts: jobs never take the host's share.
-                let slot = match store.capability_connection(&job) {
-                    Ok(slot) => slot,
-                    Err(message) => {
-                        refuse_capability_channel(&control, &attempt, channel, message);
-                        break;
-                    }
-                };
-                let Ok(mut stream) = marsh_runtime::connect_unix(&socket) else {
-                    break;
-                };
-                let Ok(mut reader) = stream.try_clone() else {
-                    break;
-                };
-                let (reply_control, reply_attempt) = (control.clone(), attempt.clone());
-                let replies = thread::spawn(move || {
-                    let mut buffer = vec![0_u8; 32 * 1024];
-                    while let Ok(count) = reader.read(&mut buffer) {
-                        if count == 0
-                            || reply_control
-                                .send(&WorkerRequest::CapData {
-                                    attempt: reply_attempt.clone(),
-                                    channel,
-                                    bytes: buffer[..count].to_vec(),
-                                })
-                                .is_err()
-                        {
-                            break;
-                        }
-                    }
-                });
-                if stream.write_all(&out).is_err() {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    let _ = replies.join();
-                    break;
-                }
-                daemon = Some((stream, replies, slot));
+            if length > marsh_daemon::MAX_FRAME_BYTES {
+                break;
             }
-            if let Some((stream, replies, _slot)) = daemon {
-                let _ = stream.shutdown(std::net::Shutdown::Write);
+            if pending.len() < 4 + length {
+                continue;
+            }
+            let Ok(frame) =
+                marsh_daemon::Client::reauthorize_envelope(&pending[4..4 + length], token)
+            else {
+                break;
+            };
+            let mut out = u32::try_from(frame.len())
+                .unwrap_or(0)
+                .to_be_bytes()
+                .to_vec();
+            out.extend_from_slice(&frame);
+            out.extend_from_slice(&pending[4 + length..]);
+            pending = Vec::new();
+            drop(std::mem::replace(&mut waiting, Waiting(&self.waiting, 0)));
+            // The job's slot among the daemon's connections, held while
+            // this one lasts: jobs never take the host's share.
+            let slot = match self.store.capability_connection(&self.job) {
+                Ok(slot) => slot,
+                Err(message) => {
+                    self.refuse(message);
+                    break;
+                }
+            };
+            let Ok(mut stream) = marsh_runtime::connect_unix(&self.socket) else {
+                break;
+            };
+            let Ok(mut reader) = stream.try_clone() else {
+                break;
+            };
+            let (to_worker, reply_attempt) = (Arc::clone(&self.to_worker), attempt.clone());
+            // Read the daemon side to its end even once the worker is gone:
+            // the slot is held for as long as that connection is (a detached
+            // split runs on after its creator ended).
+            let replies = thread::spawn(move || {
+                let mut buffer = vec![0_u8; 32 * 1024];
+                let mut forwarding = true;
+                while let Ok(count) = reader.read(&mut buffer) {
+                    if count == 0 {
+                        break;
+                    }
+                    forwarding = forwarding
+                        && to_worker(&WorkerRequest::CapData {
+                            attempt: reply_attempt.clone(),
+                            channel,
+                            bytes: buffer[..count].to_vec(),
+                        });
+                }
+            });
+            if stream.write_all(&out).is_err() {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
                 let _ = replies.join();
+                break;
             }
-            close(&control);
+            daemon = Some((stream, replies, slot));
+        }
+        if let Some((stream, replies, _slot)) = daemon {
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+            let _ = replies.join();
+        }
+        (self.to_worker)(&WorkerRequest::CapClose {
+            attempt: attempt.clone(),
+            channel,
+        });
+    }
+
+    /// The job's reply on a channel the daemon has no slot for.
+    fn refuse(&self, message: String) {
+        let mut reply = Vec::new();
+        let _ = marsh_daemon::write_frame(
+            &mut reply,
+            &marsh_daemon::PublicReply::Error {
+                code: marsh_daemon::ErrorCode::InvalidRequest,
+                message,
+            },
+        );
+        (self.to_worker)(&WorkerRequest::CapData {
+            attempt: self.attempt.clone(),
+            channel: self.channel,
+            bytes: reply,
         });
     }
 }
@@ -3697,28 +3783,6 @@ type DaemonSide = (
     thread::JoinHandle<()>,
     marsh_daemon::CapabilityConnection,
 );
-
-/// The job's reply on a channel the daemon has no slot for.
-fn refuse_capability_channel(
-    control: &marsh_sbx::WorkerControlHandle,
-    attempt: &str,
-    channel: u32,
-    message: String,
-) {
-    let mut reply = Vec::new();
-    let _ = marsh_daemon::write_frame(
-        &mut reply,
-        &marsh_daemon::PublicReply::Error {
-            code: marsh_daemon::ErrorCode::InvalidRequest,
-            message,
-        },
-    );
-    let _ = control.send(&WorkerRequest::CapData {
-        attempt: attempt.to_owned(),
-        channel,
-        bytes: reply,
-    });
-}
 
 impl Drop for CapabilityBridges {
     fn drop(&mut self) {
@@ -6070,6 +6134,170 @@ mod tests {
         os::unix::net::UnixStream,
         sync::{Arc, mpsc},
     };
+
+    /// A store with one queued job, for the `cap.sock` bridge tests.
+    fn bridge_job() -> (tempfile::TempDir, DaemonStore, String) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        let store = DaemonStore::new(&path);
+        let session = store.attach_shell(
+            std::process::id(),
+            marsh_daemon::SessionAuthority {
+                username: "fixture".into(),
+                uid: rustix::process::getuid().as_raw(),
+                gid: rustix::process::getgid().as_raw(),
+                launch_directory: path.clone(),
+                guest_home: path.clone(),
+                home_backing: path.clone(),
+                ephemeral_home: false,
+            },
+        );
+        let (job, _) = store
+            .begin_job(marsh_daemon::NewJob {
+                label: None,
+                session_id: session,
+                command: "fixture".into(),
+                kit_ref: "fixture".into(),
+                workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                mounts: Vec::new(),
+            })
+            .unwrap();
+        (root, store, job)
+    }
+
+    /// The channel's sender, what it sent the worker, and its thread.
+    type RunningBridge = (
+        mpsc::SyncSender<Vec<u8>>,
+        Arc<std::sync::Mutex<Vec<WorkerRequest>>>,
+        thread::JoinHandle<()>,
+    );
+
+    /// Run one bridged channel on its own thread; what it sends the worker
+    /// is recorded, and `worker_alive` says whether sends succeed.
+    fn run_bridge(
+        store: &DaemonStore,
+        job: &str,
+        socket: PathBuf,
+        worker_alive: bool,
+        waiting: &Arc<AtomicUsize>,
+    ) -> RunningBridge {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = Arc::clone(&sent);
+        let bridge = Bridge {
+            attempt: "attempt".into(),
+            channel: 7,
+            socket,
+            token: "capability".into(),
+            store: store.clone(),
+            job: job.to_owned(),
+            to_worker: Arc::new(move |request: &WorkerRequest| {
+                record.lock().unwrap().push(request.clone());
+                worker_alive
+            }),
+            waiting: Arc::clone(waiting),
+        };
+        let (frames, receive) = mpsc::sync_channel(64);
+        let task = thread::spawn(move || bridge.run(&receive));
+        let request = serde_json::to_vec(&serde_json::json!({
+            "protocol": "x", "token": "job", "body": {"type": "jobs"}
+        }))
+        .unwrap();
+        let mut frame = u32::try_from(request.len()).unwrap().to_be_bytes().to_vec();
+        frame.extend_from_slice(&request);
+        frames.send(frame).unwrap();
+        (frames, sent, task)
+    }
+
+    /// Take every slot the job may hold; the guard drops them.
+    fn take_all_slots(store: &DaemonStore, job: &str) -> Vec<marsh_daemon::CapabilityConnection> {
+        std::iter::from_fn(|| store.capability_connection(job).ok()).collect()
+    }
+
+    /// A-03: a channel the job has no daemon slot for is answered with the
+    /// refusal and closed; the bridge never connects to the daemon.
+    #[test]
+    fn a_bridge_without_a_slot_refuses_the_channel_without_connecting() {
+        let (root, store, job) = bridge_job();
+        let slots = take_all_slots(&store, &job);
+        assert!(!slots.is_empty());
+        let socket = root.path().join("daemon.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let (frames, sent, task) = run_bridge(&store, &job, socket, true, &Arc::default());
+        task.join().unwrap();
+        drop(frames);
+        assert!(listener.accept().is_err(), "the bridge connected anyway");
+        let sent = sent.lock().unwrap();
+        let [
+            WorkerRequest::CapData {
+                channel: 7, bytes, ..
+            },
+            WorkerRequest::CapClose { channel: 7, .. },
+        ] = sent.as_slice()
+        else {
+            panic!("{sent:?}")
+        };
+        let reply: marsh_daemon::PublicReply =
+            marsh_daemon::read_frame(&mut std::io::Cursor::new(bytes)).unwrap();
+        assert!(
+            matches!(&reply, marsh_daemon::PublicReply::Error { message, .. }
+                if message.contains("too many concurrent daemon requests in this job")),
+            "{reply:?}"
+        );
+    }
+
+    /// A-03: an attempt's channels hold at most 4 MiB of first requests
+    /// before they have a daemon slot: past it a channel is refused, never
+    /// connected, and its bytes are given back.
+    #[test]
+    fn first_requests_waiting_for_a_slot_are_bounded_per_attempt() {
+        let (root, store, job) = bridge_job();
+        let socket = root.path().join("daemon.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let waiting = Arc::new(AtomicUsize::new(FIRST_REQUEST_BYTES - 10));
+        let (frames, sent, task) = run_bridge(&store, &job, socket, true, &waiting);
+        task.join().unwrap();
+        drop(frames);
+        assert!(listener.accept().is_err(), "the bridge connected anyway");
+        assert_eq!(waiting.load(Ordering::Acquire), FIRST_REQUEST_BYTES - 10);
+        let sent = sent.lock().unwrap();
+        let Some(WorkerRequest::CapData { bytes, .. }) = sent.first() else {
+            panic!("{sent:?}")
+        };
+        let reply: marsh_daemon::PublicReply =
+            marsh_daemon::read_frame(&mut std::io::Cursor::new(bytes)).unwrap();
+        assert!(
+            matches!(&reply, marsh_daemon::PublicReply::Error { message, .. }
+                if message.contains("4 MiB of first requests")),
+            "{reply:?}"
+        );
+    }
+
+    /// A-03: a bridged connection keeps its slot until the daemon side ends,
+    /// even once the job's worker is gone (a detached split runs on).
+    #[test]
+    fn a_bridged_connection_holds_its_slot_until_the_daemon_side_ends() {
+        let (root, store, job) = bridge_job();
+        let mut slots = take_all_slots(&store, &job);
+        slots.pop();
+        let socket = root.path().join("daemon.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let (frames, _sent, task) = run_bridge(&store, &job, socket, false, &Arc::default());
+        let (mut daemon, _) = listener.accept().unwrap();
+        daemon.write_all(b"a reply the worker cannot take").unwrap();
+        // The job's side ends; the daemon's does not.
+        drop(frames);
+        thread::sleep(Duration::from_millis(300));
+        assert!(!task.is_finished());
+        assert!(
+            store.capability_connection(&job).is_err(),
+            "the slot was released while its daemon connection lives on"
+        );
+        drop(daemon);
+        task.join().unwrap();
+        assert!(store.capability_connection(&job).is_ok());
+    }
 
     #[test]
     fn no_home_kit_runs_from_a_project_under_the_home_only() {

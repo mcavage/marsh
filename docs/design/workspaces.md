@@ -454,6 +454,10 @@ is 130. `split` exits with the first nonzero code in declaration order.
   - Each connection's queue is bounded in both directions (64 chunks), so
     a job that stops reading is disconnected instead of stalling the
     worker transport.
+  - Until a connection has a daemon slot, the host holds the first request
+    it is sending: at most 4 MiB for all of one attempt's connections
+    together. Past that, the connection gets a refusal frame and never
+    reaches the daemon.
   - A connection reaches the daemon only once its first request arrived,
     and only with a slot from the daemon's connection budget. The daemon's
     own connections on a job's behalf (a `ProcessRun` child's start, the
