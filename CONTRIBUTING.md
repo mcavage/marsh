@@ -282,7 +282,10 @@ Mac, not a release gate.
   version. The Release workflow refuses a tag that is not on `main` or not
   `X.Y.Z`, runs every CI lane on the commit, and only then publishes a GitHub
   Release, Docker Hub images tagged `:X.Y.Z` and `:latest`, and the `marsh`
-  formula.
+  formula. Stable releases run one at a time. A release of a version older
+  than one already tagged, whenever it runs (out of order, or a re-run of
+  failed jobs), publishes only its version: the GitHub "Latest" release,
+  `:latest` and the formula stay on the newest, and the tap never moves back.
 
 ```sh
 git switch main && git pull --ff-only
@@ -291,6 +294,39 @@ git tag v0.1.3 && git push origin v0.1.3
 
 Anyone who can create a `v*` tag can start a stable release. Restrict that
 with a tag ruleset in the repository settings.
+
+**Withdrawing a stable release.** Nothing moves a channel back on its own:
+each publishing job checks the version tags when it runs, and the tap job
+never writes a lower version than the tap has. Prefer releasing a fixed,
+higher version, which moves everything forward. To withdraw `vX.Y.Z` in
+favor of an earlier `vW.V.U` by hand:
+
+1. Cancel every queued or running Release run of `vX.Y.Z` (`gh run list
+   --workflow release.yml`, then `gh run cancel ID`). A job already past its
+   tag check still pushes what it decided, so wait for cancelled runs to stop.
+2. Delete the release and its tag: `gh release delete vX.Y.Z --cleanup-tag`.
+   The `v*` tag ruleset blocks deleting the tag unless you are on its bypass
+   list. From then on a run of `vX.Y.Z` fails its tag check and moves nothing.
+3. Mark the earlier release Latest: `gh release edit vW.V.U --latest`.
+4. Point the moving image tags back. For each image in `vW.V.U`'s run summary
+   ("Published images"): `docker buildx imagetools create --tag REPO:latest
+   REPO:W.V.U`, and the same for `:release` (Kits and the fixture) or
+   `:repaired` (the shell template).
+5. Edit `Formula/marsh.rb` in mcavage/homebrew-tap back to `vW.V.U`'s
+   formula (the `marsh.rb` asset of its release). No release run will do
+   this: the tap never moves back.
+6. The nightly formula stops moving too. Nightlies are numbered from the
+   newest stable tag (`W.V.(U+1)-nightly.…` now), which is lower than the
+   `X.Y.(Z+1)-nightly.…` already in the tap, so the tap job refuses them
+   until a stable release at or above `vX.Y.Z` is tagged. To resume it
+   sooner, after the next nightly is published copy its `marsh-nightly.rb`
+   release asset to `Formula/marsh-nightly.rb` in the tap.
+
+Until these are done the channels disagree. Once the tag is gone, a re-run of
+a lower version's run moves the image tags (its images job counts it as the
+newest) but not the "Latest" mark (its release step refuses a release that
+already exists); a new tag for a lower version would move both. Either way
+the formula keeps naming `vX.Y.Z` until step 5.
 
 To rehearse a release, run the Release workflow by hand with a version: it
 runs the same CI, builds a draft and announces nothing. Its images get only

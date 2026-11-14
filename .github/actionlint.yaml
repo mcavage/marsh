@@ -1,0 +1,7 @@
+# actionlint 1.7.12 does not know concurrency's queue key yet (GitHub added
+# queue: max in May 2026); release.yml relies on it to keep every pending
+# stable tag.
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'
