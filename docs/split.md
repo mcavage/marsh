@@ -292,9 +292,13 @@ per text diff. The snapshot and each fork are walked up to 1,000,000 entries
 (directories included), 256 MiB of path names and 256 directory levels; a
 snapshot past them fails every branch's capture after the branches ran.
 Exceeding a capture limit rejects that branch's result, and the message
-names the limit and what to do: in a Git project, list generated trees
-such as `node_modules` in `.gitignore`; or have the branch change fewer
-files. `.marsh`, nested `.git` entries, and special files are
+names the limit and what to do. For a tree too large: list the
+directories that hold generated files, such as `node_modules`, in
+`.gitignore` (a project that is not a Git repository must become one
+first, as ignore rules apply only there). For too many changes: have the
+branch change fewer files, or, in a Git project, list what it generates
+in `.gitignore`. Files a Git project ignores never count as changes, only
+toward the tree's bounds. `.marsh`, nested `.git` entries, and special files are
 excluded from the initial snapshot; creating a nested `.git` in a fork causes
 capture to reject it.
 
