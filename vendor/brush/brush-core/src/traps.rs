@@ -20,6 +20,27 @@ pub async fn await_hangup() -> Result<(), crate::error::Error> {
     crate::sys::signal::await_hangup().await
 }
 
+/// Hooks for tests of how the shell treats the recorded-signals lock; nothing in the shell
+/// calls them.
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod signal_records_for_test {
+    /// Poisons the lock that guards the recorded signals, as a panic while it is held would.
+    pub fn poison() {
+        crate::signals::poison_for_test();
+    }
+
+    /// Does what a forked child does first: stops observing the arrivals so far.
+    pub fn forget_after_fork() {
+        crate::signals::forget_after_fork();
+    }
+
+    /// Whether `signal` is recorded, as `(armed, arrived)`; `None` if it is not recorded.
+    pub fn state(signal: i32) -> Option<(bool, bool)> {
+        crate::signals::record_state_for_test(signal)
+    }
+}
+
 /// Ignores the signals that have empty traps, just before `exec` replaces the
 /// shell, so the program starts with them ignored, as in Bash.
 #[cfg(unix)]

@@ -2118,3 +2118,45 @@ fn cloud_block_runs_as_one_stage_with_unexpanded_source() {
     assert!(malformed.stdout.is_empty(), "{malformed:?}");
     assert!(!directory.path().join("local.txt").exists());
 }
+
+/// A panic with the recorded-signals lock held poisons it (the driver does
+/// that at start through a test hook; no input reaches such a panic now). The
+/// shell goes on recording, delivering and consulting signals: its traps and
+/// `INT` still work. A shell that treated the poisoned lock as empty ran no
+/// later trap and ignored `INT`. (`signal_records.rs` covers the lock itself,
+/// including the reset a forked child makes.)
+#[cfg(unix)]
+#[test]
+fn signals_keep_working_after_the_recorded_signals_lock_is_poisoned() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let run = |program: &str, script: &str| {
+        let mut command = if program == "bash" {
+            let mut command = isolated_command("bash");
+            command.args(["--noprofile", "--norc", "-c", script]);
+            command
+        } else {
+            let mut command = marsh();
+            command.env("MARSH_TEST_POISON_SIGNAL_RECORDS", "1").args([
+                "--no-config",
+                "--noprofile",
+                "--norc",
+                "-c",
+                script,
+            ]);
+            command
+        };
+        command.stdin(Stdio::null());
+        let output = command.output().unwrap();
+        (output.status.code(), output.status.signal(), output.stdout)
+    };
+    for script in [
+        "trap 'echo got' USR1; kill -USR1 $$; echo end",
+        "trap 'echo int' INT; kill -INT $$; echo end",
+        "kill -INT $$; echo notreached",
+    ] {
+        let bash = run("bash", script);
+        let driver = run(env!("CARGO_BIN_EXE_marsh-brush-test-driver"), script);
+        assert_eq!(driver, bash, "{script}");
+    }
+}

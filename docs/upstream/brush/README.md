@@ -105,6 +105,18 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   brace expansion (`0001`; upstream `8cfa8e86`, which memoizes the
   `brace_expr` rule). Covered by
   `runs_of_unterminated_braces_expand_promptly`.
+- `trap` on `SEGV`, `ILL` or `FPE` (also `trap '' 8`) no longer panics the
+  shell (`0002`). The signal registry refuses to catch those, so `listen` skips
+  them: the trap is recorded and listed but never delivered
+  (`docs/design/bash-compatibility.md`, known gaps). The `RECORDED` lock is also
+  taken through poison, so a panic while it is held (in a `$( )` task, which the
+  shell survives) no longer silences every later trap and `INT` check, and a
+  forked child's reset of the recorded arrivals does not skip a poisoned lock.
+  Covered by `traps_on_synchronous_signals_are_recorded_without_ending_the_shell`,
+  and for the poisoned lock by `signals_keep_working_after_the_recorded_signals_lock_is_poisoned`
+  (`smoke.rs`) and `recording_and_the_post_fork_reset_survive_a_poisoned_lock`
+  (`signal_records.rs`), which poison it through the hidden
+  `brush_core::traps::signal_records_for_test` hooks (nothing in the shell calls them).
 
 ## Retired per-fix inventory
 

@@ -96,6 +96,10 @@ repaired:
   `kill` returns, and a blocking `read` from a terminal is not interrupted.
   An `EXIT` trap without a `TERM` trap does not run when `TERM` kills the
   shell (GNU Bash runs it).
+- `trap` records and lists traps on `SEGV`, `ILL` and `FPE`, but the shell does
+  not catch those signals (the runtime refuses to): one sent with `kill -ILL $$`
+  ends the shell by the signal instead of running the trap, and `trap '' ILL`
+  does not ignore it. GNU Bash runs or ignores it.
 - `(( m["a b"]=1 ))` (quoted associative subscript in arithmetic) does not
   parse.
 - `set -u` on an unbound variable exits 1 (GNU Bash 5.3: 127); diagnostics

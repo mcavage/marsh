@@ -2740,3 +2740,32 @@ fn runs_of_unterminated_braces_expand_promptly() {
         std::format!("{run}.\n{run}.}}\n{run}x}}\n{run}a {run}b\n").as_bytes(),
     );
 }
+
+/// `trap` accepts every signal Bash does, including `SEGV`, `ILL` and `FPE`,
+/// which the runtime's signal registry refuses to catch (it panicked, ending
+/// the shell; legacy scripts say `trap '...' 1 2 3 4 8 15`). The trap is
+/// recorded and listed, and one set in a command substitution (which runs in
+/// the shell's own process) leaves later traps working.
+#[test]
+fn traps_on_synchronous_signals_are_recorded_without_ending_the_shell() {
+    use std::os::unix::process::ExitStatusExt as _;
+    differential(
+        r#"trap 'echo x' SEGV ILL FPE; trap '' 8
+trap -p SEGV ILL FPE
+trap - SEGV; trap -p SEGV; echo "listed=$?"
+x=$(trap : SEGV; echo in); echo "$x"
+trap 'echo got' USR1; kill -USR1 $$; echo end"#,
+        0,
+        b"trap -- 'echo x' SIGSEGV\ntrap -- 'echo x' SIGILL\ntrap -- '' SIGFPE\nlisted=0\nin\ngot\nend\n",
+    );
+    // Known gap (docs/design/bash-compatibility.md): the shell does not catch
+    // these signals, so one sent to it ends it instead of running the trap,
+    // where Bash runs the trap.
+    let output = run(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        "ulimit -c 0; trap 'echo caught' ILL; kill -ILL $$; echo after",
+        false,
+    );
+    assert_eq!(output.status.signal(), Some(4), "SIGILL: {output:?}");
+    assert_eq!(output.stdout, b"", "{output:?}");
+}
