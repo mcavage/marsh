@@ -79,6 +79,9 @@ pub(crate) struct ProcessTable {
     /// window and at most `REFUSAL_BURST` of them: they count toward its
     /// rate (`RateBound`).
     refused_roots: BTreeMap<String, Vec<u64>>,
+    /// When each tree's jobs were admitted, within the launch window: the
+    /// rate counts them even after their receipts are trimmed (`RateBound`).
+    launched_roots: BTreeMap<String, std::collections::VecDeque<u64>>,
     /// Last successful `workers reset` per Kit command (`all` for every Kit),
     /// unix ms; persisted in `process-resets.json` in the control home.
     resets: BTreeMap<String, u64>,
@@ -379,15 +382,21 @@ fn rate(state: &State) -> marsh_contracts::process::LaunchRate {
     state.limits().tree_launch_rate
 }
 
+/// The most launches a tree's window can hold (`tree-launch-rate`'s maximum).
+const LAUNCHES_MAX: usize = 10_000;
+
 /// The per-tree launch rate (`RateBound`): the tree's launches in the
 /// rolling window, its refused child calls up to `REFUSAL_BURST` included.
-/// Only a tight loop reaches it; the refusal says when to retry.
+/// Launches are the admissions recorded here, or the tree's receipts when
+/// they show more (a daemon restart forgets the record; trimming forgets
+/// receipts, never the record). Only a tight loop reaches it; the refusal
+/// says when to retry.
 fn launch_rate(state: &State, root: &str) -> Result<(), String> {
     let rate = rate(state);
     let now = crate::unix_time_ms();
     let window = rate.window_seconds.saturating_mul(1000);
     let since = now.saturating_sub(window);
-    let mut times = state
+    let receipts = state
         .jobs
         .values()
         .filter(|job| {
@@ -398,17 +407,32 @@ fn launch_rate(state: &State, root: &str) -> Result<(), String> {
                     .is_some_and(|lineage| lineage.root == root)
         })
         .map(|job| job.created_unix_ms)
-        .chain(
-            state
-                .process
-                .refused_roots
-                .get(root)
-                .into_iter()
-                .flatten()
-                .copied(),
-        )
         .filter(|at| *at > since)
         .collect::<Vec<_>>();
+    let recorded = state
+        .process
+        .launched_roots
+        .get(root)
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|at| *at > since)
+        .collect::<Vec<_>>();
+    let mut times = if recorded.len() >= receipts.len() {
+        recorded
+    } else {
+        receipts
+    };
+    times.extend(
+        state
+            .process
+            .refused_roots
+            .get(root)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|at| *at > since),
+    );
     if times.len() < rate.launches {
         return Ok(());
     }
@@ -432,11 +456,49 @@ pub(crate) fn refused(state: &mut State, parent: Option<&str>) {
         let root = root_of(state, parent);
         let now = crate::unix_time_ms();
         let since = now.saturating_sub(rate(state).window_seconds.saturating_mul(1000));
+        state.process.forget_before(since);
         let times = state.process.refused_roots.entry(root).or_default();
-        times.retain(|at| *at > since);
         if times.len() < REFUSAL_BURST {
             times.push(now);
         }
+    }
+}
+
+/// Record one admitted launch of `root`'s tree at `at` (unix ms).
+pub(crate) fn launched(state: &mut State, root: &str, at: u64) {
+    let since = at.saturating_sub(rate(state).window_seconds.saturating_mul(1000));
+    state.process.forget_before(since);
+    let times = state
+        .process
+        .launched_roots
+        .entry(root.to_owned())
+        .or_default();
+    times.push_back(at);
+    while times.len() > LAUNCHES_MAX {
+        times.pop_front();
+    }
+}
+
+impl ProcessTable {
+    /// Drop launch and refusal times at or before `since`, and the trees
+    /// left with none: both maps hold only the current window.
+    fn forget_before(&mut self, since: u64) {
+        self.launched_roots.retain(|_, times| {
+            while times.front().is_some_and(|at| *at <= since) {
+                times.pop_front();
+            }
+            !times.is_empty()
+        });
+        self.refused_roots.retain(|_, times| {
+            times.retain(|at| *at > since);
+            !times.is_empty()
+        });
+    }
+
+    /// Trees with launch or refusal times held (tests).
+    #[cfg(test)]
+    pub(crate) fn rate_roots(&self) -> usize {
+        self.launched_roots.len() + self.refused_roots.len()
     }
 }
 

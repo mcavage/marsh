@@ -2700,6 +2700,8 @@ struct State {
     session_authorities: BTreeMap<String, SessionAuthority>,
     session_project_identities: BTreeMap<String, Option<(u64, u64)>>,
     session_home_backings: BTreeMap<String, PathBuf>,
+    /// Detached sessions, oldest first (`shell_admission::note_detached`).
+    detached_sessions: std::collections::VecDeque<String>,
     ephemeral_home_tokens: BTreeMap<String, marsh_sbx::EphemeralHomeToken>,
     // Host-only cleanup ownership, retained when development authority is revoked.
     shell_cleanup_vms: BTreeMap<String, String>,
@@ -3051,6 +3053,7 @@ impl DaemonStore {
             session_authorities: BTreeMap::new(),
             session_project_identities: BTreeMap::new(),
             session_home_backings: BTreeMap::new(),
+            detached_sessions: std::collections::VecDeque::new(),
             ephemeral_home_tokens: BTreeMap::new(),
             shell_cleanup_vms: BTreeMap::new(),
             shell_attachments: BTreeMap::new(),
@@ -3630,11 +3633,16 @@ impl DaemonStore {
             .map(|(session, _)| session.clone())
             .collect::<Vec<_>>();
         for session in sessions {
-            if let Some(shell) = state.shells.get_mut(&session) {
+            let newly = state.shells.get_mut(&session).is_some_and(|shell| {
+                let newly = shell.state != ShellState::Detached;
                 shell.state = ShellState::Detached;
-            }
+                newly
+            });
             state.session_authorities.remove(&session);
             state.shell_cleanup_vms.remove(&session);
+            if newly {
+                shell_admission::note_detached(&mut state, &session);
+            }
             state
                 .authentication_tokens
                 .retain(|_, owner| owner.as_ref() != Some(&session));
@@ -4138,7 +4146,9 @@ impl DaemonStore {
         state.next_cursor = cursor
             .checked_add(1)
             .ok_or_else(|| DaemonError::InvalidState("receipt cursor exhausted".into()))?;
+        let created = receipt.created_unix_ms;
         state.jobs.insert(job_id.clone(), receipt);
+        process::launched(&mut state, &lineage.root, created);
         if state.journal.exceeds_size_limit() {
             let receipts = state.jobs.clone();
             state.journal.compact(&receipts)?;
