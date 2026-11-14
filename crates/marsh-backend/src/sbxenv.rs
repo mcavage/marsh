@@ -708,7 +708,7 @@ impl StockDaemonBackend {
     fn fit_environment(
         session: &SessionSpec,
         environment: &Environment,
-    ) -> Result<(Environment, Vec<PathBuf>), DaemonError> {
+    ) -> Result<(Environment, Vec<(PathBuf, bool)>), DaemonError> {
         let mut fitted = Environment {
             mounts: Vec::new(),
             servers: environment.servers.clone(),
@@ -736,8 +736,13 @@ impl StockDaemonBackend {
                     project.display()
                 )));
             }
+            if mount.path == project && mount.read_only {
+                return Err(conflict(
+                    "is the project itself with readOnly: true; marsh can't mount the project read-only",
+                ));
+            }
             if mount.path.starts_with(&project) {
-                inside.push(mount.path.clone());
+                inside.push((mount.path.clone(), mount.read_only));
                 continue;
             }
             fitted.mounts.push(mount.clone());
@@ -759,7 +764,7 @@ impl StockDaemonBackend {
         let Ok((_, inside)) = Self::fit_environment(session, environment) else {
             return;
         };
-        for path in inside {
+        for (path, read_only) in inside {
             let fresh = {
                 let mut live = self
                     .sbxenv
@@ -771,10 +776,17 @@ impl StockDaemonBackend {
                         .insert((session.session_id.clone(), path.clone()))
             };
             if fresh {
-                let line = format!(
-                    "marsh: {} is inside the project; already visible",
-                    tilde(&path)
-                );
+                let line = if read_only {
+                    format!(
+                        "marsh: {} is inside the project; jobs see it read-only",
+                        tilde(&path)
+                    )
+                } else {
+                    format!(
+                        "marsh: {} is inside the project; already visible",
+                        tilde(&path)
+                    )
+                };
                 let _ = attachment.send(&if shell {
                     marsh_daemon::AttachmentFrame::Notice { message: line }
                 } else {
@@ -784,6 +796,22 @@ impl StockDaemonBackend {
                 });
             }
         }
+    }
+
+    /// Extra folders marked `readOnly` inside the project: each Kit job
+    /// binds them read-only over its project mount (a shell VM does not).
+    ///
+    /// # Errors
+    /// As [`Self::session_environment`].
+    pub(crate) fn read_only_inside(
+        session: &SessionSpec,
+        environment: &Environment,
+    ) -> Result<Vec<PathBuf>, DaemonError> {
+        Ok(Self::fit_environment(session, environment)?
+            .1
+            .into_iter()
+            .filter_map(|(path, read_only)| read_only.then_some(path))
+            .collect())
     }
 
     pub(crate) fn additional_grants(
@@ -1054,6 +1082,87 @@ mod tests {
         }
     }
 
+    /// A `readOnly` folder inside the project becomes a job guard; the
+    /// project itself read-only is refused.
+    #[test]
+    fn read_only_folders_inside_the_project_become_job_guards() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = root.path().canonicalize().unwrap();
+        let project = scope.join("dev");
+        let inside = project.join("pack");
+        let home = scope.join("home");
+        for dir in [&inside, &home, &scope.join("sbxenvs")] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        // `readOnly` inside the project is kept, for a read-only overlay.
+        fs::write(
+            scope.join("sbxenvs/pi.yaml"),
+            format!(
+                "schemaVersion: '1'\nadditionalWorkspaces:\n  - path: {}\n    readOnly: true\n",
+                inside.display()
+            ),
+        )
+        .unwrap();
+        let configured = backend(&scope).with_sbxenvs().unwrap();
+        assert_eq!(
+            StockDaemonBackend::read_only_inside(
+                &session(&project, &home),
+                &configured.environment("pi")
+            )
+            .unwrap(),
+            std::slice::from_ref(&inside)
+        );
+        // What a top-level job's view binds over the project: the guards
+        // and that folder.
+        let Ok(view) = StockDaemonBackend::job_view(
+            &session(&project, &home),
+            &configured.environment("pi"),
+            None,
+            None,
+        ) else {
+            panic!("view refused");
+        };
+        assert!(
+            view.mounts
+                .iter()
+                .any(|mount| mount.target == inside && mount.access == "read_only")
+        );
+        let guards = view.guards;
+        assert!(guards.contains(&(inside.clone(), false)));
+        assert!(guards.contains(&(project.join(".marsh"), false)));
+        let guards_of = |confined, child| {
+            StockDaemonBackend::job_guards(
+                &session(&project, &home),
+                &configured.environment("pi"),
+                confined,
+                child,
+            )
+            .unwrap()
+        };
+        assert_eq!(guards_of(true, false), [], "a fork job binds its own");
+        assert!(!guards_of(false, true).contains(&(inside.clone(), false)));
+
+        // The project itself, read-only: refused, naming the entry.
+        fs::write(
+            scope.join("sbxenvs/pi.yaml"),
+            format!(
+                "schemaVersion: '1'\nadditionalWorkspaces:\n  - path: {}\n    readOnly: true\n",
+                project.display()
+            ),
+        )
+        .unwrap();
+        let configured = backend(&scope).with_sbxenvs().unwrap();
+        let message = StockDaemonBackend::job_guards(
+            &session(&project, &home),
+            &configured.environment("pi"),
+            false,
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(message.contains("is the project itself"), "{message}");
+    }
+
     #[test]
     fn extra_folder_inside_the_project_is_skipped_and_real_conflicts_name_the_entry() {
         let root = tempfile::tempdir().unwrap();
@@ -1088,7 +1197,7 @@ mod tests {
 
         write(&[&inside, &outside]);
         let (environment, skipped) = fit(&project, &home).unwrap();
-        assert_eq!(skipped, std::slice::from_ref(&inside));
+        assert_eq!(skipped, [(inside.clone(), false)]);
         assert_eq!(environment.mounts.len(), 1);
         assert_eq!(environment.mounts[0].path, outside);
 

@@ -2142,14 +2142,6 @@ impl DaemonBackend for StockDaemonBackend {
         // never recomputed from the session (`Attenuation`); only a split
         // branch narrows a view.
         let child_view = link.parent_job.as_ref().filter(|_| !link.branch);
-        // Fails closed before any VM effect: no job mounts the project
-        // without its `.marsh` and Git guards.
-        let guards = if confinement.is_none() {
-            project_guards(&request.session.launch_directory)
-                .map_err(|reason| DaemonError::Refused(format!("{}: {reason}", request.command)))?
-        } else {
-            Vec::new()
-        };
         let extra_environment = if request.session.ephemeral_home || confinement.is_some() {
             sbxenv::Environment::default()
         } else if let Some(parent) = child_view {
@@ -2165,56 +2157,30 @@ impl DaemonBackend for StockDaemonBackend {
                 false,
             );
         }
-        // Validate every added source before VM preparation or MCP effects.
-        let extra_environment = Self::session_environment(&request.session, &extra_environment)?;
-        let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
-        let mut mounts = match child_view {
-            None => {
-                let mut mounts = public_mounts(&request.session, confinement.as_ref(), &guards);
-                mounts.extend(extra_environment.mounts.iter().map(|source| {
-                    PublicMount {
-                        target: source.path.clone(),
-                        access: if source.read_only {
-                            "read_only"
-                        } else {
-                            "read_write"
-                        }
-                        .into(),
-                    }
-                }));
-                mounts
+        // Fails closed before any VM effect: no job mounts the project
+        // without its `.marsh` and Git guards, nor a `readOnly` extra folder
+        // inside it read-write (a child inherits those in its parent's view).
+        let parent_mounts =
+            child_view.map(|parent| store.job(parent).map(|job| job.mounts).unwrap_or_default());
+        let view = match Self::job_view(
+            &request.session,
+            &extra_environment,
+            confinement.as_ref(),
+            parent_mounts
+                .as_deref()
+                .map(|mounts| (mounts, request.effective_working_directory())),
+        ) {
+            Ok(view) => view,
+            Err(ViewRefusal::Parent(message)) => {
+                store.count_refused(child_view.map(String::as_str));
+                return Err(DaemonError::Refused(message));
             }
-            Some(parent) => {
-                let parent_mounts = store.job(parent).map(|job| job.mounts).unwrap_or_default();
-                let covered = parent_mounts.iter().all(|mount| {
-                    mount.target.starts_with(&request.session.launch_directory)
-                        || mount.target.starts_with(&request.session.guest_home)
-                        || extra_environment
-                            .mounts
-                            .iter()
-                            .any(|source| source.path == mount.target)
-                });
-                match marsh_daemon::process::child_view(
-                    &parent_mounts,
-                    request.effective_working_directory(),
-                )
-                .and_then(|view| {
-                    if covered {
-                        Ok(view)
-                    } else {
-                        Err("the parent's view is outside this session's grants".into())
-                    }
-                }) {
-                    // Narrower-or-equal: a guard the parent's view lacks
-                    // is still applied to the child.
-                    Ok(view) => guard_view(view, &request.session.launch_directory, &guards),
-                    Err(message) => {
-                        store.count_refused(Some(parent));
-                        return Err(DaemonError::Refused(message));
-                    }
-                }
-            }
+            Err(ViewRefusal::Other(error)) => return Err(error),
         };
+        // Validate every added source before VM preparation or MCP effects.
+        let extra_environment = view.environment.clone();
+        let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
+        let mut view = view;
         let spec = self.kit_spec_for_session(&request.command, &request.session, &store)?;
         // A run pinned to one Kit generation (an ACP session's) never gets
         // another the command was updated to meanwhile.
@@ -2322,12 +2288,13 @@ impl DaemonBackend for StockDaemonBackend {
             // A project under the home stays mounted on its own; nothing else
             // of the home does.
             let project = &request.session.launch_directory;
-            mounts.retain(|mount| {
+            view.mounts.retain(|mount| {
                 !mount.target.starts_with(guest_home) || mount.target.starts_with(project)
             });
             admitted_grants.retain(|grant| grant.target() != guest_home.as_path());
         }
-        let private_home = !mounts
+        let private_home = !view
+            .mounts
             .iter()
             .any(|mount| guest_home.starts_with(&mount.target));
         let image = vm.job_image().clone();
@@ -2338,7 +2305,7 @@ impl DaemonBackend for StockDaemonBackend {
                 command: request.command.clone(),
                 kit_ref: vm.kit_ref.clone(),
                 workload_image: image.as_str().into(),
-                mounts: mounts.clone(),
+                mounts: view.mounts.clone(),
             },
             &link,
             &registered,
@@ -2444,8 +2411,8 @@ impl DaemonBackend for StockDaemonBackend {
                     .into_bytes(),
             });
         }
-        let job_mounts = if child_view.is_some() {
-            match view_job_mounts(&grants.job_mounts(), &mounts) {
+        let job_mounts =
+            match view.job_mounts(grants.job_mounts(), &request.session.launch_directory) {
                 Ok(job_mounts) => job_mounts,
                 Err(message) => {
                     if self.sbx.revoke_grants(&grants).is_ok() {
@@ -2465,15 +2432,7 @@ impl DaemonBackend for StockDaemonBackend {
                     }
                     return Err(DaemonError::Refused(message));
                 }
-            }
-        } else {
-            confine_job_mounts(
-                grants.job_mounts(),
-                &request.session.launch_directory,
-                confinement.as_ref(),
-                &guards,
-            )
-        };
+            };
         // Wall time is the Kit's own limit or the parent's remaining time,
         // whichever ends first (`docs/design/processes.md` s6); the worker enforces it.
         let kit = self.kit_assets(&image).unwrap_or_else(|message| {
@@ -2515,7 +2474,8 @@ impl DaemonBackend for StockDaemonBackend {
         // derived from the mounts recorded for the job (a child's are its
         // parent's), never from its working directory (C3). A split branch's
         // confined job that is not a lane gets none.
-        let services_scope = self.services_job_scope(&request.session.launch_directory, &mounts);
+        let services_scope =
+            self.services_job_scope(&request.session.launch_directory, &view.mounts);
         let services_root = services_scope.as_ref().map(|scope| scope.root.clone());
         // The limits in effect now (`marsh config limit`): a change applies
         // to jobs started after it.
@@ -4646,6 +4606,142 @@ fn guard_git_dir(git: &Path) -> Result<(Guards, Option<PathBuf>), String> {
     Ok((guards, other.then(|| git.join(common))))
 }
 
+/// What a job sees of the session, decided before any VM effect.
+#[derive(Debug)]
+struct JobView {
+    /// Its receipt mounts (a child's: its parent's, guarded).
+    mounts: Vec<PublicMount>,
+    /// The binds over its whole-project mount (`job_guards`).
+    guards: Vec<(PathBuf, bool)>,
+    /// The session's extra folders as this job sees them.
+    environment: sbxenv::Environment,
+    /// A child's view is bound through the prepared grants as it is.
+    child: bool,
+    /// A fork job's confinement, laid over the project instead of guards.
+    confinement: Option<marsh_daemon::split_confinement::BranchConfinement>,
+}
+
+/// Why a job's view was refused.
+enum ViewRefusal {
+    /// The parent's view does not admit the child (counted against it).
+    Parent(String),
+    Other(DaemonError),
+}
+
+impl JobView {
+    /// The job's `JobMount`s from its prepared grants: a child's view bound
+    /// through them, or the grants with the guards (or a fork job's
+    /// confinement) laid over the project. `execute` calls this once.
+    ///
+    /// # Errors
+    /// A child's view that would widen or lacks a grant.
+    fn job_mounts(&self, grants: Vec<JobMount>, project: &Path) -> Result<Vec<JobMount>, String> {
+        if self.child {
+            return view_job_mounts(&grants, &self.mounts);
+        }
+        Ok(confine_job_mounts(
+            grants,
+            project,
+            self.confinement.as_ref(),
+            &self.guards,
+        ))
+    }
+}
+
+impl StockDaemonBackend {
+    /// A job's view: its guards (`job_guards`), the session's extra folders
+    /// as it sees them, and its receipt mounts, the project and home with
+    /// the guards for a top-level job, or `parent`'s view (with the job's
+    /// cwd) gaining any guard it lacked for a child.
+    fn job_view(
+        session: &SessionSpec,
+        environment: &sbxenv::Environment,
+        confinement: Option<&marsh_daemon::split_confinement::BranchConfinement>,
+        parent: Option<(&[PublicMount], &Path)>,
+    ) -> Result<JobView, ViewRefusal> {
+        let guards = Self::job_guards(
+            session,
+            environment,
+            confinement.is_some(),
+            parent.is_some(),
+        )
+        .map_err(ViewRefusal::Other)?;
+        let fitted = Self::session_environment(session, environment).map_err(ViewRefusal::Other)?;
+        let mounts = match parent {
+            None => {
+                let mut mounts = public_mounts(session, confinement, &guards);
+                mounts.extend(fitted.mounts.iter().map(|source| {
+                    PublicMount {
+                        target: source.path.clone(),
+                        access: if source.read_only {
+                            "read_only"
+                        } else {
+                            "read_write"
+                        }
+                        .into(),
+                    }
+                }));
+                mounts
+            }
+            Some((parent_mounts, cwd)) => {
+                let covered = parent_mounts.iter().all(|mount| {
+                    mount.target.starts_with(&session.launch_directory)
+                        || mount.target.starts_with(&session.guest_home)
+                        || fitted
+                            .mounts
+                            .iter()
+                            .any(|source| source.path == mount.target)
+                });
+                let view = marsh_daemon::process::child_view(parent_mounts, cwd)
+                    .map_err(ViewRefusal::Parent)?;
+                if !covered {
+                    return Err(ViewRefusal::Parent(
+                        "the parent's view is outside this session's grants".into(),
+                    ));
+                }
+                // Narrower-or-equal: a guard the parent's view lacks is
+                // still applied to the child.
+                guard_view(view, &session.launch_directory, &guards)
+            }
+        };
+        Ok(JobView {
+            mounts,
+            guards,
+            environment: fitted,
+            child: parent.is_some(),
+            confinement: confinement.cloned(),
+        })
+    }
+
+    /// Every bind laid over a job's whole-project mount: [`project_guards`]
+    /// and the `readOnly` extra folders inside the project. None for a job
+    /// confined to a fork; a child's read-only folders come with its
+    /// parent's view.
+    ///
+    /// # Errors
+    /// Refuses the job when a guard can't be prepared or a read-only folder
+    /// can't be bound.
+    fn job_guards(
+        session: &SessionSpec,
+        environment: &sbxenv::Environment,
+        confined: bool,
+        child: bool,
+    ) -> Result<Vec<(PathBuf, bool)>, DaemonError> {
+        if confined {
+            return Ok(Vec::new());
+        }
+        let project = &session.launch_directory;
+        let inside = if child {
+            Vec::new()
+        } else {
+            Self::read_only_inside(session, environment)?
+        };
+        project_guards(project)
+            .and_then(|guards| with_read_only_overlays(project, guards, &inside))
+            .map_err(DaemonError::Refused)
+    }
+}
+
 /// A child job's view: its parent's, plus every guard of `project` the
 /// parent's view lacks (a split area made after the parent started), never
 /// wider than the parent's project mount.
@@ -4680,6 +4776,42 @@ fn guard_view(
 /// Replaces the whole-project mount with subpath binds of the same prepared
 /// grant: the fork read-write plus its Git metadata binds
 /// (`docs/design/workspaces.md` section 8). Every other mount is unchanged.
+/// Adds each `readOnly` extra folder inside the project to `guards` as a
+/// read-only bind, read-only winning where it names a guard already there.
+///
+/// # Errors
+/// Refuses a folder that can't be bound safely: the project itself, or one
+/// that is missing or reached through a symlink.
+fn with_read_only_overlays(
+    project: &Path,
+    mut guards: Vec<(PathBuf, bool)>,
+    inside: &[PathBuf],
+) -> Result<Vec<(PathBuf, bool)>, String> {
+    for path in inside {
+        let bindable = path.strip_prefix(project).is_ok_and(|relative| {
+            !relative.as_os_str().is_empty()
+                && relative
+                    .ancestors()
+                    .filter(|part| !part.as_os_str().is_empty())
+                    .all(|part| {
+                        std::fs::symlink_metadata(project.join(part))
+                            .is_ok_and(|metadata| metadata.is_dir())
+                    })
+        });
+        if !bindable {
+            return Err(format!(
+                "the read-only extra folder {} can't be bound read-only (missing, the project itself, or reached through a symlink); change or remove that entry",
+                path.display()
+            ));
+        }
+        match guards.iter_mut().find(|(target, _)| target == path) {
+            Some((_, write)) => *write = false,
+            None => guards.push((path.clone(), false)),
+        }
+    }
+    Ok(guards)
+}
+
 fn confine_job_mounts(
     mounts: Vec<JobMount>,
     project: &Path,
@@ -4696,13 +4828,13 @@ fn confine_job_mounts(
             .find(|mount| mount.target == project && mount.subpath.is_none())
             .cloned()
         {
-            for (target, write) in guards {
+            for (target, write) in guards.iter().cloned() {
                 let Ok(subpath) = target.strip_prefix(project).map(Path::to_path_buf) else {
                     continue;
                 };
                 mounts.push(JobMount {
-                    target: target.clone(),
-                    access: if *write && whole.access == MountAccess::ReadWrite {
+                    target,
+                    access: if write && whole.access == MountAccess::ReadWrite {
                         MountAccess::ReadWrite
                     } else {
                         MountAccess::ReadOnly
@@ -6332,13 +6464,22 @@ mod tests {
     use super::*;
 
     fn direct_job_mounts(project: &Path) -> Vec<(PathBuf, MountAccess, Option<PathBuf>)> {
+        direct_job_mounts_with(project, &[])
+    }
+
+    fn direct_job_mounts_with(
+        project: &Path,
+        inside_read_only: &[PathBuf],
+    ) -> Vec<(PathBuf, MountAccess, Option<PathBuf>)> {
         let whole = JobMount {
             source: project.to_path_buf(),
             target: project.to_path_buf(),
             access: MountAccess::ReadWrite,
             subpath: None,
         };
-        let guards = project_guards(project).unwrap();
+        let guards =
+            with_read_only_overlays(project, project_guards(project).unwrap(), inside_read_only)
+                .unwrap();
         confine_job_mounts(vec![whole], project, None, &guards)
             .into_iter()
             .map(|mount| (mount.target, mount.access, mount.subpath))
@@ -6365,6 +6506,53 @@ mod tests {
                 .unwrap()
                 .is_dir()
         );
+    }
+
+    /// DA3-03: a `readOnly` extra folder inside the project stays
+    /// read-only, bound over the project mount; never through a symlink.
+    #[test]
+    fn read_only_extra_folders_inside_the_project_stay_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(project.join("vendor/sdk")).unwrap();
+        fs::create_dir_all(project.join(".git/objects")).unwrap();
+        let mounts = direct_job_mounts_with(&project, &[project.join("vendor/sdk")]);
+        assert!(mounts.contains(&(
+            project.join("vendor/sdk"),
+            MountAccess::ReadOnly,
+            Some("vendor/sdk".into())
+        )));
+        // One that names a guard makes it read-only, and is bound once.
+        for (guard, relative) in [
+            (project.join(".git"), ".git"),
+            (project.join(".marsh"), ".marsh"),
+        ] {
+            let mounts = direct_job_mounts_with(&project, std::slice::from_ref(&guard));
+            let bound = mounts
+                .iter()
+                .filter(|(target, ..)| target == &guard)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                bound,
+                [&(guard.clone(), MountAccess::ReadOnly, Some(relative.into()))]
+            );
+        }
+        // Never silently skipped: through a symlink, missing, or the project
+        // itself, the job is refused.
+        std::os::unix::fs::symlink(project.join("vendor"), project.join("link")).unwrap();
+        for unbindable in [
+            project.join("link/sdk"),
+            project.join("absent"),
+            project.clone(),
+        ] {
+            let guards = project_guards(&project).unwrap();
+            assert!(
+                with_read_only_overlays(&project, guards, std::slice::from_ref(&unbindable))
+                    .is_err(),
+                "{}",
+                unbindable.display()
+            );
+        }
     }
 
     #[test]
@@ -6588,6 +6776,145 @@ mod tests {
         fs::write(viasym.join(".git"), "gitdir: real/../admin\n").unwrap();
         let guards = project_guards(&viasym).unwrap();
         assert!(read_only(&guards, &viasym.join("admin/config")));
+    }
+
+    /// The view and mounts `execute` builds for a job carry every guard: a
+    /// top-level job's receipt and `JobMount`s, and a child's whose parent's
+    /// view lacked them.
+    #[test]
+    fn a_job_gets_its_guards_through_the_production_view() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(project.join(".git/objects")).unwrap();
+        let session = SessionSpec {
+            session_id: "s".into(),
+            username: "u".into(),
+            uid: 1000,
+            gid: 1000,
+            launch_directory: project.clone(),
+            guest_home: PathBuf::from("/home/u"),
+            home_backing: project.join("home"),
+            ephemeral_home: false,
+            terminal: true,
+            terminal_size: None,
+        };
+        fs::create_dir(project.join("home")).unwrap();
+        let view_of = |parent: Option<(&[PublicMount], &Path)>| {
+            let Ok(view) = StockDaemonBackend::job_view(
+                &session,
+                &sbxenv::Environment::default(),
+                None,
+                parent,
+            ) else {
+                panic!("view refused");
+            };
+            view
+        };
+        let grant = JobMount {
+            source: project.clone(),
+            target: project.clone(),
+            access: MountAccess::ReadWrite,
+            subpath: None,
+        };
+        let read_only = |target: &str| PublicMount {
+            target: project.join(target),
+            access: "read_only".into(),
+        };
+        let bound_read_only = |mounts: &[JobMount], relative: &str| {
+            mounts.iter().any(|mount| {
+                mount.target == project.join(relative)
+                    && mount.access == MountAccess::ReadOnly
+                    && mount.subpath.as_deref() == Some(Path::new(relative))
+            })
+        };
+        let top = view_of(None);
+        assert!(top.mounts.contains(&read_only(".marsh")));
+        let mounts = top.job_mounts(vec![grant.clone()], &project).unwrap();
+        assert!(bound_read_only(&mounts, ".marsh"), "{mounts:?}");
+        assert!(bound_read_only(&mounts, ".git/config"), "{mounts:?}");
+        let parent = [PublicMount {
+            target: project.clone(),
+            access: "read_write".into(),
+        }];
+        let child = view_of(Some((&parent, &project)));
+        assert!(child.mounts.contains(&read_only(".git/hooks")));
+        let mounts = child.job_mounts(vec![grant], &project).unwrap();
+        assert!(bound_read_only(&mounts, ".marsh"), "{mounts:?}");
+    }
+
+    /// A child bound through a parent view narrower than the project gets
+    /// exactly that view, and a fork job gets its confinement, never the
+    /// whole project.
+    #[test]
+    fn narrowed_and_confined_views_never_widen_to_the_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(project.join("sub")).unwrap();
+        fs::create_dir(project.join("home")).unwrap();
+        let session = SessionSpec {
+            session_id: "s".into(),
+            username: "u".into(),
+            uid: 1000,
+            gid: 1000,
+            launch_directory: project.clone(),
+            guest_home: PathBuf::from("/home/u"),
+            home_backing: project.join("home"),
+            ephemeral_home: false,
+            terminal: true,
+            terminal_size: None,
+        };
+        let grant = JobMount {
+            source: project.clone(),
+            target: project.clone(),
+            access: MountAccess::ReadWrite,
+            subpath: None,
+        };
+        let view_of = |confinement, parent: Option<(&[PublicMount], &Path)>| {
+            let Ok(view) = StockDaemonBackend::job_view(
+                &session,
+                &sbxenv::Environment::default(),
+                confinement,
+                parent,
+            ) else {
+                panic!("view refused");
+            };
+            view
+        };
+        let narrowed = [PublicMount {
+            target: project.join("sub"),
+            access: "read_only".into(),
+        }];
+        let child = view_of(None, Some((&narrowed, &project.join("sub"))));
+        let mounts = child.job_mounts(vec![grant.clone()], &project).unwrap();
+        assert_eq!(
+            mounts,
+            [JobMount {
+                source: project.clone(),
+                target: project.join("sub"),
+                access: MountAccess::ReadOnly,
+                subpath: Some("sub".into()),
+            }]
+        );
+        // A fork job: its fork and Git metadata, not the project.
+        let split = project.join(".marsh/split/abc123");
+        fs::create_dir_all(split.join("fix")).unwrap();
+        for dir in ["hooks", "modules", "worktrees"] {
+            fs::create_dir_all(split.join(".admin/fix").join(dir)).unwrap();
+        }
+        fs::write(split.join(".admin/fix/commondir"), "./\n").unwrap();
+        let confinement =
+            marsh_daemon::split_confinement::branch_confinement(&project, &split.join("fix"))
+                .unwrap()
+                .unwrap();
+        let fork = view_of(Some(&confinement), None);
+        let mounts = fork.job_mounts(vec![grant], &project).unwrap();
+        assert!(
+            mounts.iter().all(|mount| mount.target != project),
+            "{mounts:?}"
+        );
+        assert!(mounts.iter().any(
+            |mount| mount.target == split.join("fix") && mount.access == MountAccess::ReadWrite
+        ));
     }
 
     /// `.marsh` that is not a directory marsh can make refuses the job.
