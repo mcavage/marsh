@@ -2583,13 +2583,54 @@ mod relay_tests {
         BreaksInReady,
     }
 
+    /// One channel of the stand-in agent: data waiting for the daemon's credit,
+    /// the credit the daemon has given, and chunks echoed but not yet credited
+    /// back. The real agent also sends only what the daemon has credited.
+    struct EchoChannel {
+        waiting: std::collections::VecDeque<Vec<u8>>,
+        credit: u32,
+        echoed: u32,
+        eof: bool,
+    }
+
+    impl EchoChannel {
+        fn new() -> Self {
+            EchoChannel {
+                waiting: std::collections::VecDeque::new(),
+                credit: WINDOW_CHUNKS,
+                echoed: 0,
+                eof: false,
+            }
+        }
+
+        /// Echoes what the credit allows, then the end of stream once all data is out.
+        fn flush(&mut self, channel: u32, writer: &mut UnixStream) {
+            while self.credit > 0
+                && let Some(bytes) = self.waiting.pop_front()
+            {
+                self.credit -= 1;
+                write_frame(writer, &Outbound::Data { channel, bytes }).unwrap();
+                self.echoed += 1;
+                if self.echoed == 16 {
+                    let chunks = std::mem::take(&mut self.echoed);
+                    let frame = AgentFrame::Credit { channel, chunks };
+                    write_frame(writer, &Outbound::Control(frame)).unwrap();
+                }
+            }
+            if self.eof && self.waiting.is_empty() {
+                self.eof = false;
+                write_frame(writer, &Outbound::Control(AgentFrame::Eof { channel })).unwrap();
+            }
+        }
+    }
+
     /// Echoes data, answers opens and requests, and misbehaves as `quirk` says.
     #[allow(clippy::too_many_lines)]
     fn agent(stream: UnixStream, quirk: Quirk) {
         let mut reader = stream.try_clone().unwrap();
         let mut writer = stream;
         std::thread::spawn(move || {
-            let mut consumed = 0_u32;
+            let mut channels: HashMap<u32, EchoChannel> = HashMap::new();
             loop {
                 match read_frame::<_, HostFrame>(&mut reader, 64 * 1024) {
                     Ok(Some(Inbound::Control(HostFrame::Init { .. }))) => {
@@ -2642,6 +2683,7 @@ mod relay_tests {
                         let _ = write_frame(&mut writer, &Outbound::Control(frame));
                     }
                     Ok(Some(Inbound::Control(HostFrame::Open { channel, .. }))) => {
+                        channels.insert(channel, EchoChannel::new());
                         write_frame(
                             &mut writer,
                             &Outbound::Control(AgentFrame::Opened { channel }),
@@ -2657,23 +2699,19 @@ mod relay_tests {
                         }
                     }
                     Ok(Some(Inbound::Data { channel, bytes })) => {
-                        write_frame(&mut writer, &Outbound::Data { channel, bytes }).unwrap();
-                        consumed += 1;
-                        if consumed == 16 {
-                            write_frame(
-                                &mut writer,
-                                &Outbound::Control(AgentFrame::Credit {
-                                    channel,
-                                    chunks: 16,
-                                }),
-                            )
-                            .unwrap();
-                            consumed = 0;
-                        }
+                        let chan = channels.entry(channel).or_insert_with(EchoChannel::new);
+                        chan.waiting.push_back(bytes);
+                        chan.flush(channel, &mut writer);
+                    }
+                    Ok(Some(Inbound::Control(HostFrame::Credit { channel, chunks }))) => {
+                        let chan = channels.entry(channel).or_insert_with(EchoChannel::new);
+                        chan.credit += chunks;
+                        chan.flush(channel, &mut writer);
                     }
                     Ok(Some(Inbound::Control(HostFrame::Eof { channel }))) => {
-                        write_frame(&mut writer, &Outbound::Control(AgentFrame::Eof { channel }))
-                            .unwrap();
+                        let chan = channels.entry(channel).or_insert_with(EchoChannel::new);
+                        chan.eof = true;
+                        chan.flush(channel, &mut writer);
                     }
                     Ok(Some(Inbound::Control(_))) => {}
                     _ => return,
@@ -2732,6 +2770,9 @@ mod relay_tests {
             sender.write_all(&payload).unwrap();
             sender.shutdown_write().unwrap();
         });
+        // A reader that has not started yet, as on a loaded machine: the
+        // agent must not echo past the credit the daemon has given it.
+        std::thread::sleep(Duration::from_millis(300));
         let mut echoed = Vec::new();
         stream.clone().read_to_end(&mut echoed).unwrap();
         writer.join().unwrap();
