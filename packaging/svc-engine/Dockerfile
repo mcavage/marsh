@@ -23,7 +23,7 @@ USER root
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       docker-ce=5:29.9.3-5 docker-ce-cli=5:29.9.3-5 containerd.io=2.4.2-10 \
-      docker-compose-plugin=5.7.1-4 \
+      docker-compose-plugin=5.7.1-5 \
       xfsprogs util-linux mount iproute2 procps iptables \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
