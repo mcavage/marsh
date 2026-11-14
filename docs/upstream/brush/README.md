@@ -109,9 +109,11 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   shell (`0002`). The signal registry refuses to catch those, so `listen` skips
   them: the trap is recorded and listed but never delivered
   (`docs/design/bash-compatibility.md`, known gaps). The `RECORDED` lock is also
-  taken through poison, so a panic while it is held (in a `$( )` task, which the
-  shell survives) no longer silences every later trap and `INT` check, and a
-  forked child's reset of the recorded arrivals does not skip a poisoned lock.
+  taken through poison where trap recording, `listen`, the pending-arrival take
+  and the post-fork reset use it, so a panic while it is held (in a `$( )` task,
+  which the shell survives) no longer silences every later trap and `INT` check.
+  The other readers of the lock (`take`, `arrived`, `is_recorded`, `discard`)
+  also recover from poison but no test fails if they stop.
   Covered by `traps_on_synchronous_signals_are_recorded_without_ending_the_shell`,
   and for the poisoned lock by `signals_keep_working_after_the_recorded_signals_lock_is_poisoned`
   (`smoke.rs`) and `recording_and_the_post_fork_reset_survive_a_poisoned_lock`
