@@ -1178,6 +1178,28 @@ mod tests {
         }
     }
 
+    /// A file swapped for a FIFO between its stat and its open is caught by
+    /// the type check on the opened file.
+    #[test]
+    fn a_file_swapped_for_a_fifo_before_open_fails_the_read() {
+        let (_root, skill, _other) = swap_rig();
+        let mut swapped = false;
+        let read = read_skill_with(&skill, true, &mut |now, path| {
+            if now == Step::OpenFile && path == Path::new("docs/notes") && !swapped {
+                swapped = true;
+                fs::remove_file(skill.join("docs/notes")).unwrap();
+                nix::unistd::mkfifo(
+                    &skill.join("docs/notes"),
+                    nix::sys::stat::Mode::from_bits_truncate(0o644),
+                )
+                .unwrap();
+            }
+        });
+        assert!(swapped);
+        let error = read.unwrap_err();
+        assert!(error.contains("changed while read"), "{error}");
+    }
+
     /// A link planted in a source while stock SBX imports never reaches the
     /// store: the import reads a copy, not the source.
     #[test]

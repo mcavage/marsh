@@ -278,6 +278,12 @@ counts as the regular file it names in the same folder, by a relative path
 that stays in the folder. A link that leads anywhere else, a file with other
 hard links, or a socket or device, keeps the whole skill out of the store: the store keeps its last good
 copy, and `marsh status` names the skill and the link under errors.
+Hard links are refused because the other link could be any file of yours.
+The whole skill is kept out, not just that file, so a skill never reaches
+jobs incomplete. This has two costs. A job that can write a skill's folder
+can keep that skill from updating by hard-linking one of its files, until
+you remove the extra link. And a skill kept in a hard-linked package store
+(as pnpm makes) is refused.
 
 A skill with the name of one a registered Kit bundles (`agent-skill@1`) is
 never imported: the Kit's copy wins, and the name is listed as a clash
