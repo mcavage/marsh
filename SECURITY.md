@@ -36,8 +36,8 @@ and anything that undoes the [security model](docs/security.md).
 
 Known and accepted, not vulnerabilities by themselves: `sbx` is trusted; the
 path-based `sbx mount` reopen; shared trust between projects in one
-`MARSH_HOME`; the authority you grant by publishing MCP or ACP tools or by
-using `marsh --dev`; agents' own sandboxes being turned off inside containers.
+`MARSH_HOME`; the authority you grant by publishing MCP or ACP tools; agents'
+own sandboxes being turned off inside containers.
 Docker Sandboxes itself is Docker's product; report its bugs to Docker.
 
 Test only systems and data you are allowed to use. Agent calls can cost money.

@@ -52,7 +52,7 @@ it shares two directories with the Mac:
 `--ephemeral-home` uses a private disposable home and separate VMs for that
 session. It does not make the project read-only.
 
-MCP integrations and `--dev` can add access beyond these mounts, as described
+MCP integrations can add access beyond these mounts, as described
 [below](#what-is-not-isolated).
 
 You can mount extra Mac directories through [environment files](configuration.md#servers-and-extra-directories).
@@ -384,11 +384,6 @@ MCP and ACP publications
   managed VM lifecycle. The optional `--allow-full-sbx-control` server flag
   also permits fixed repository test gates on the Mac, which execute the
   checkout's Makefile. See [MCP](mcp.md) and [ACP](acp.md).
-
-`marsh --dev`
-: The development shell's `sbx` is a broker on the Mac. It is limited to VMs
-  with a random prefix and a few directories, but it is real host authority.
-  Kit jobs do not receive this broker relay. Use it only for developing marsh.
 
 ## What marsh records
 

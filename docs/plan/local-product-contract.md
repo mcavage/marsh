@@ -205,16 +205,6 @@ publication is a default: every agent Kit VM the daemon creates afterwards
 loads it before its first job, and no VM that is already running is changed. These grants also apply to
 code running in that shell.
 
-## Development from inside marsh
-
-`marsh --dev` (on a `make dev` install, or a daemon started with
-`MARSH_ENABLE_DEV_SCOPES=1`) opens a dev
-shell whose `sbx` is a host broker confined to one revocable grant: random VM
-name prefix, project and per-project scratch roots, at most 8 VMs, removed when
-the session ends. `make dev-inner` / `make dev-inner-run` build and run a Linux
-candidate there. The grant belongs to the dev shell; Kit jobs cannot use its
-relay. See [self-development](../design/self-development.md).
-
 ## Release gate
 
 A release is gated on every CI lane (`make test`, split into jobs) passing on

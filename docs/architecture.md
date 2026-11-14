@@ -19,8 +19,8 @@ macOS host
 ```
 
 All shells for one user and selected `MARSH_HOME` share the daemon. Ordinary
-persistent shells share a warm shell VM; dev shells and ephemeral homes use
-separate shell-VM slots. Kit VMs are shared by Kit identity. Session, job,
+persistent shells share a warm shell VM; ephemeral homes use separate
+shell-VM slots. Kit VMs are shared by Kit identity. Session, job,
 attempt, worker, VM, and container identities are
 distinct and are never derived from each other.
 
@@ -111,7 +111,7 @@ pathname reopen inside `sbx mount` is an accepted upstream limitation.
 | Crate | Owns |
 |---|---|
 | `marsh` | Host CLI (`marsh`), guest Brush wiring and registered-command dispatch, the static job artifact (`marsh-local`: links and the in-job CLI in a job; Brush elsewhere), `marsh fanout`/`collect`, human output |
-| `marsh-daemon` | Authenticated daemon endpoint, sessions, admission and the process lineage tree, receipt journal, guest relay, ACP session control, MCP publication, dev broker (`marsh --dev` grants, `DevSbx` relay calls) |
+| `marsh-daemon` | Authenticated daemon endpoint, sessions, admission and the process lineage tree, receipt journal, guest relay, ACP session control, MCP publication |
 | `marsh-backend` | `marshd` binary; implements the daemon backend: prepares Kits and shell VMs, connects workers, shell attachment teardown |
 | `marsh-sbx` | The only boundary to stock `sbx`: version probe, create/inspect/mount/exec, ownership map, inventory cache, source admission, ephemeral home slots |
 | `marsh-worker` | Guest worker binary: attempt-keyed multiplexed frames, fresh-container supervision, output drain, cleanup |
@@ -147,7 +147,7 @@ are protected host inputs, not guest-home content.
   `MARSH_HOME`. Its control directory is outside every guest mount.
 - **Shell VM**: the shell user has passwordless `sudo` and the VM's private
   Docker, but no host Docker or SBX control. The relay grants only narrow,
-  explicit operations (MCP publish/load, ACP publication, dev broker scope).
+  explicit operations (MCP publish/load, ACP publication).
   Projects sharing a selected home share this VM.
 - **Kit job container**: nonroot, resource-limited, fresh per call, with the
   project, home, and configured extra mounts (a child job: its parent's mounts;

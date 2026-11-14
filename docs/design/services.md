@@ -99,7 +99,6 @@ Created with `sbx create --name N --pull P --skills off --template <shell image>
 | MCP servers | None marsh loads, and the host's static MCP set is not attached (`--static-mcp none`). **Stock still attaches its MCP gateway** (see below). |
 | Credentials | None marsh adds. **Stock injects the host's global service secrets** unless marsh shadows them (see below). |
 | Docker or SBX control | None for jobs or shells except the filtered endpoint of that project's own services (E2, below). The VM is not reachable from them; `marsh services` is refused to relay and job-capability tokens. |
-| Dev broker | None. |
 | marsh | The marsh guest binary at `/usr/local/bin/marsh`, and the ownership marker `/var/lib/marsh/worker.json`. |
 
 ### Credentials and the MCP gateway (SECURITY-DESIGN A12)

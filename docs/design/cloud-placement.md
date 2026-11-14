@@ -326,7 +326,7 @@ Placement permission is separate from Kit spawn permission: a cloud-authorized
 child is not automatically authorized to use the laptop executor. Initially
 the trusted session may allow both; every child can only narrow that set.
 Permission to execute locally grants a nonroot Kit with the inherited view,
-never Mac process execution, a privileged session shell, or the dev broker.
+never Mac process execution or a privileged session shell.
 
 Cancel, parent exit, disconnect, and deadline revoke the subtree and signal all
 placements. INT then the existing grace period then KILL applies to the whole

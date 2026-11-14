@@ -18,8 +18,6 @@ In scope:
 - daemon-owned filesystem snapshots and private split forks, with patch results
   (`docs/design/workspaces.md`);
 - ACP agent sessions and MCP publication/load;
-- `marsh --dev`: a scoped host broker for developing marsh from a marsh
-  session (`docs/design/self-development.md`).
 - explicit cloud placement (`docs/design/cloud-placement.md`): session-origin
   `cloud { ... }` / `marsh cloud` ships as a preview (`docs/cloud.md`,
   `docs/plan/cloud-dispatch.md`, live gate `tests/acceptance/cloud_uat.py`);
@@ -45,7 +43,7 @@ flight recorder was removed; `marsh results` (structural receipts) is the job re
 
 ```bash
 make dev                              # build everything; install ~/.marsh-dev
-~/.marsh-dev/bin/marsh --dev -c pi-dev  # develop marsh from marsh with Pi
+~/.marsh-dev/bin/marsh                # run the dev install from any project
 make fixture-ref                      # once: published fixture ref -> target/fixture-ref
 make test                             # VM-free gate, the same targets CI runs (needs cargo-nextest)
 make dev && make check                # the loop: fast real smoke, warm scope in target/check

@@ -32,7 +32,7 @@ By topic:
 | [supply-chain.md](supply-chain.md) | Build inputs, published images, notices |
 | [services.md](services.md) | The per-project services VM: identity, mounts, disk size, lease and idle stop, readiness |
 | [test-breaks.md](test-breaks.md) | `MARSH_TEST_BREAK` deliberate breaks for E2E tests (test builds only) |
-| [self-development.md](self-development.md) | `marsh --dev` and the dev broker |
+| [dev-install.md](dev-install.md) | `make dev`, the dev install and its Kit image cache |
 | [test-breaks.md](test-breaks.md) | `MARSH_TEST_BREAK` deliberate breaks for E2E tests (test builds only) |
 | [Brush patch record](../upstream/brush/README.md) | The upstream Brush revision and marsh's patch queue |
 

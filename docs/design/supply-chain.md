@@ -58,7 +58,7 @@ DHI inputs. The registry/repository destinations remain configurable through
 
 The Pi Kit installs its runtime and gateway dependencies with `npm ci` and
 lifecycle scripts disabled. Its declared Kit version must match the exact
-package version. The shell template separately locks the Pi used by `pi-dev`.
+package version.
 
 DHI supplies the shell's npm and Python packages, including their bundled
 dependencies. marsh installs those packages without replacing npm's modules,
