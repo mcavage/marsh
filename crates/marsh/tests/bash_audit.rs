@@ -2725,3 +2725,18 @@ fn named_descriptors_skip_inherited_ones() {
     assert_eq!(outputs[0], b"x=11\ninherited\n");
     assert_eq!(outputs[1], outputs[0]);
 }
+
+/// A run of `{` that never closes is plain text, and finding that out is
+/// quick. Each `{` was tried both as a brace expression and as text, so the
+/// parse doubled in time with every one; thirty never finished. Upstream's own
+/// input (the run, then `.`) has no `}` after it, so the shell's pre-check
+/// never hands it to the word parser; the forms with a later `}` do reach it.
+#[test]
+fn runs_of_unterminated_braces_expand_promptly() {
+    let run = "{".repeat(30);
+    differential(
+        &std::format!("echo {run}.; echo {run}.}}; echo {run}x}}; echo {run}{{a,b}}"),
+        0,
+        std::format!("{run}.\n{run}.}}\n{run}x}}\n{run}a {run}b\n").as_bytes(),
+    );
+}

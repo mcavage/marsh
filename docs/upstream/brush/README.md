@@ -101,6 +101,10 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   stage index, `wait PID`/`wait -n`, `jobs` and notifications are
   unchanged, and the `CHLD` trap counts the child when it is reaped.
   Covered by `finished_background_jobs_are_reaped_without_a_wait`.
+- A run of unterminated `{` in a word no longer takes exponential time in
+  brace expansion (`0001`; upstream `8cfa8e86`, which memoizes the
+  `brace_expr` rule). Covered by
+  `runs_of_unterminated_braces_expand_promptly`.
 
 ## Retired per-fix inventory
 
