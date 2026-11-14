@@ -2178,7 +2178,7 @@ impl DaemonBackend for StockDaemonBackend {
         // Validate every added source before VM preparation or MCP effects.
         let extra_environment = view.environment.clone();
         let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
-        let mut mounts = view.mounts.clone();
+        let mut view = view;
         let spec = self.kit_spec_for_session(&request.command, &request.session, &store)?;
         // A run pinned to one Kit generation (an ACP session's) never gets
         // another the command was updated to meanwhile.
@@ -2286,12 +2286,13 @@ impl DaemonBackend for StockDaemonBackend {
             // A project under the home stays mounted on its own; nothing else
             // of the home does.
             let project = &request.session.launch_directory;
-            mounts.retain(|mount| {
+            view.mounts.retain(|mount| {
                 !mount.target.starts_with(guest_home) || mount.target.starts_with(project)
             });
             admitted_grants.retain(|grant| grant.target() != guest_home.as_path());
         }
-        let private_home = !mounts
+        let private_home = !view
+            .mounts
             .iter()
             .any(|mount| guest_home.starts_with(&mount.target));
         let image = vm.job_image().clone();
@@ -2302,7 +2303,7 @@ impl DaemonBackend for StockDaemonBackend {
                 command: request.command.clone(),
                 kit_ref: vm.kit_ref.clone(),
                 workload_image: image.as_str().into(),
-                mounts: mounts.clone(),
+                mounts: view.mounts.clone(),
             },
             &link,
             &registered,
@@ -2408,15 +2409,8 @@ impl DaemonBackend for StockDaemonBackend {
                     .into_bytes(),
             });
         }
-        let job_mounts = if child_view.is_some() {
-            match job_mounts(
-                &view,
-                &mounts,
-                grants.job_mounts(),
-                &request.session,
-                true,
-                None,
-            ) {
+        let job_mounts =
+            match view.job_mounts(grants.job_mounts(), &request.session.launch_directory) {
                 Ok(job_mounts) => job_mounts,
                 Err(message) => {
                     if self.sbx.revoke_grants(&grants).is_ok() {
@@ -2436,18 +2430,7 @@ impl DaemonBackend for StockDaemonBackend {
                     }
                     return Err(DaemonError::Refused(message));
                 }
-            }
-        } else {
-            job_mounts(
-                &view,
-                &mounts,
-                grants.job_mounts(),
-                &request.session,
-                false,
-                confinement.as_ref(),
-            )
-            .unwrap_or_default()
-        };
+            };
         // Wall time is the Kit's own limit or the parent's remaining time,
         // whichever ends first (`docs/design/processes.md` s6); the worker enforces it.
         let kit = self.kit_assets(&image).unwrap_or_else(|message| {
@@ -2489,7 +2472,8 @@ impl DaemonBackend for StockDaemonBackend {
         // derived from the mounts recorded for the job (a child's are its
         // parent's), never from its working directory (C3). A split branch's
         // confined job that is not a lane gets none.
-        let services_scope = self.services_job_scope(&request.session.launch_directory, &mounts);
+        let services_scope =
+            self.services_job_scope(&request.session.launch_directory, &view.mounts);
         let services_root = services_scope.as_ref().map(|scope| scope.root.clone());
         // The limits in effect now (`marsh config limit`): a change applies
         // to jobs started after it.
@@ -4621,7 +4605,7 @@ fn guard_git_dir(git: &Path) -> Result<(Guards, Option<PathBuf>), String> {
 }
 
 /// What a job sees of the session, decided before any VM effect.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct JobView {
     /// Its receipt mounts (a child's: its parent's, guarded).
     mounts: Vec<PublicMount>,
@@ -4629,6 +4613,10 @@ struct JobView {
     guards: Vec<(PathBuf, bool)>,
     /// The session's extra folders as this job sees them.
     environment: sbxenv::Environment,
+    /// A child's view is bound through the prepared grants as it is.
+    child: bool,
+    /// A fork job's confinement, laid over the project instead of guards.
+    confinement: Option<marsh_daemon::split_confinement::BranchConfinement>,
 }
 
 /// Why a job's view was refused.
@@ -4638,29 +4626,24 @@ enum ViewRefusal {
     Other(DaemonError),
 }
 
-/// A job's `JobMount`s from its view and prepared grants: a child's view
-/// bound through the grants, or the grants with the guards (and a fork
-/// job's confinement) laid over the project.
-///
-/// # Errors
-/// A child's view that would widen or lacks a grant.
-fn job_mounts(
-    view: &JobView,
-    mounts: &[PublicMount],
-    grants: Vec<JobMount>,
-    session: &SessionSpec,
-    child: bool,
-    confinement: Option<&marsh_daemon::split_confinement::BranchConfinement>,
-) -> Result<Vec<JobMount>, String> {
-    if child {
-        return view_job_mounts(&grants, mounts);
+impl JobView {
+    /// The job's `JobMount`s from its prepared grants: a child's view bound
+    /// through them, or the grants with the guards (or a fork job's
+    /// confinement) laid over the project. `execute` calls this once.
+    ///
+    /// # Errors
+    /// A child's view that would widen or lacks a grant.
+    fn job_mounts(&self, grants: Vec<JobMount>, project: &Path) -> Result<Vec<JobMount>, String> {
+        if self.child {
+            return view_job_mounts(&grants, &self.mounts);
+        }
+        Ok(confine_job_mounts(
+            grants,
+            project,
+            self.confinement.as_ref(),
+            &self.guards,
+        ))
     }
-    Ok(confine_job_mounts(
-        grants,
-        &session.launch_directory,
-        confinement,
-        &view.guards,
-    ))
 }
 
 impl StockDaemonBackend {
@@ -4723,6 +4706,8 @@ impl StockDaemonBackend {
             mounts,
             guards,
             environment: fitted,
+            child: parent.is_some(),
+            confinement: confinement.cloned(),
         })
     }
 
@@ -6842,15 +6827,7 @@ mod tests {
         };
         let top = view_of(None);
         assert!(top.mounts.contains(&read_only(".marsh")));
-        let mounts = job_mounts(
-            &top,
-            &top.mounts,
-            vec![grant.clone()],
-            &session,
-            false,
-            None,
-        )
-        .unwrap();
+        let mounts = top.job_mounts(vec![grant.clone()], &project).unwrap();
         assert!(bound_read_only(&mounts, ".marsh"), "{mounts:?}");
         assert!(bound_read_only(&mounts, ".git/config"), "{mounts:?}");
         let parent = [PublicMount {
@@ -6859,7 +6836,7 @@ mod tests {
         }];
         let child = view_of(Some((&parent, &project)));
         assert!(child.mounts.contains(&read_only(".git/hooks")));
-        let mounts = job_mounts(&child, &child.mounts, vec![grant], &session, true, None).unwrap();
+        let mounts = child.job_mounts(vec![grant], &project).unwrap();
         assert!(bound_read_only(&mounts, ".marsh"), "{mounts:?}");
     }
 
