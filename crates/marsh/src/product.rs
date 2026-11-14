@@ -1742,7 +1742,7 @@ mod tests {
                 name: "tool".into(),
                 change: "updated".into(),
                 at: 0,
-                diff: "/control/skills-history/0000000000000-tool/diff".into(),
+                diff: "/control/skills-mirror/history/0000000000000-tool/diff".into(),
             }],
             ..Default::default()
         };
@@ -1751,7 +1751,7 @@ mod tests {
         let out = String::from_utf8(out).unwrap();
         assert!(
             out.contains("    changed:    tool updated ")
-                && out.ends_with(", diff /control/skills-history/0000000000000-tool/diff\n"),
+                && out.ends_with(", diff /control/skills-mirror/history/0000000000000-tool/diff\n"),
             "{out}"
         );
     }

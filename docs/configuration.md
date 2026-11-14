@@ -135,7 +135,7 @@ When unset, control directories are in
 |---|---|
 | `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), whether marsh mirrors your skills folders into the Docker Sandboxes skills store, set by `marsh config skills-mirror on\|off` (default on), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3), job limits (`limits`), set by `marsh config limit NAME VALUE\|default`, and the [services VM](design/services.md) settings: `services_projects`, the projects services are on for, set by `marsh config services on\|off` in a project's folder (default none; per project, never per home), `services_disk_size`, set by `marsh config services-disk-size SIZE` (default `40g`), and `services_idle_seconds`, set by `marsh config services-idle-seconds SECONDS` (default 900). Default path `~/.marsh/config.json`. |
 | `CONTROL/skills-mirror/` | Shared by every scope's skills mirror, since the Docker Sandboxes store belongs to your Mac account: `record-*.json`, the skills a mirror put in the store, with a digest of each (only these are ever replaced or removed), and `lock`, held while one scope's mirror changes the store. An older marsh's `CONTROL/HASH/skills-mirror.json` is merged in and renamed `skills-mirror.json.migrated`. |
-| `CONTROL/HASH/skills-history/` | One folder for each change the skills mirror made to the Docker Sandboxes store, `AT-NAME/`: `change.json`, `diff`, and `before/`, the store's copy it replaced. The newest 20 changes of each skill are kept. |
+| `CONTROL/skills-mirror/history/` | One folder for each change a skills mirror made to the Docker Sandboxes store, `AT-NAME/`: `change.json`, `diff`, and `before/`, the store's copy it replaced. The newest 20 changes of each skill are kept. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
@@ -294,19 +294,29 @@ can keep that skill from updating by hard-linking one of its files, until
 you remove the extra link. And a skill kept in a hard-linked package store
 (as pnpm makes) is refused.
 
-Each change the mirror makes to the store is kept in the control home, in
-`CONTROL/HASH/skills-history/AT-NAME/` (AT is unix ms), before the store is
-changed: `diff` (a unified diff from the store's copy to the new one),
-`before/` (the store's copy it replaced; none for a new skill) and
-`change.json`. The newest 20 changes of each skill are kept. `marsh status`
-lists the newest changes with the path of each diff. An import that fails
-leaves no entry. To roll a skill back, copy the files in `before/` over the
-skill's real folder (for a linked-in skill, the link's target, such as
-`~/dev/tools/my-skill`, so the link stays), for example
-`cp -R CONTROL/HASH/skills-history/AT-NAME/before/. ~/dev/tools/my-skill/`
-(delete by hand any file the change added; `diff` names it); the mirror then
-imports it again, and records that change too. Big files
-(over 1 MiB) are named in the diff, not diffed.
+Each change the mirror makes to the store is kept beside the scopes' control
+folders, in `CONTROL/skills-mirror/history/AT-NAME/` (AT is unix ms):
+`diff` (a unified diff from the store's copy to the new one), `before/` (the
+store's copy it replaced; none for a new skill) and `change.json`. The entry
+is written and synced to disk before the store is changed, and shows up once
+the change is made; an import that fails leaves no entry. After a crash the
+next pass keeps an entry whose change reached the store and drops one whose
+change did not. The newest 20 changes of each skill are kept, and `marsh
+status` lists the newest with the path of each diff. Big files (over 1 MiB)
+are named in the diff, not diffed.
+
+To roll a skill back, replace the skill's real folder with `before/` (for a
+linked-in skill, the link's target, such as `~/dev/tools/my-skill`, so the
+link stays):
+
+```sh
+rm -r ~/dev/tools/my-skill
+cp -R CONTROL/skills-mirror/history/AT-NAME/before ~/dev/tools/my-skill
+```
+
+The mirror then imports it again, and records that change too. A change
+that added the skill has no `before/`: delete the skill's folder (or its
+link) to undo it.
 
 A skill with the name of one a registered Kit bundles (`agent-skill@1`) is
 never imported: the Kit's copy wins, and the name is listed as a clash

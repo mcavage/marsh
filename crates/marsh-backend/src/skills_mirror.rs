@@ -44,8 +44,9 @@ const ACCOUNT_DIR: &str = "skills-mirror";
 /// an error to report, just a pass to try again shortly.
 const BUSY: &str = "another marsh scope is updating the skills store";
 const STAGING_DIR: &str = "skills-mirror-home";
-/// Each change to the store, with the copy it replaced and a diff.
-const HISTORY_DIR: &str = "skills-history";
+/// Each change to the store, with the copy it replaced and a diff, in the
+/// account's mirror folder.
+const HISTORY_DIR: &str = "history";
 /// How many changes of one skill the history keeps.
 const HISTORY_KEEP: usize = 20;
 /// Files bigger than this are named in a history diff, not diffed.
@@ -709,24 +710,50 @@ fn write_record(
     Ok(())
 }
 
-/// Writes a skill's files under `root`, as new regular files.
-fn write_files(root: &Path, files: &Files) -> Result<(), String> {
+/// Writes a skill's files under `root`, as new regular files; `durable`
+/// syncs each file and folder to disk.
+fn write_files(root: &Path, files: &Files, durable: bool) -> Result<(), String> {
     use std::os::unix::fs::OpenOptionsExt as _;
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let mut folders = BTreeSet::from([root.to_owned()]);
     for (relative, (executable, bytes)) in files {
         let path = root.join(relative);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            folders.extend(
+                parent
+                    .ancestors()
+                    .take_while(|at| at.starts_with(root))
+                    .map(Path::to_owned),
+            );
         }
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(if *executable { 0o755 } else { 0o644 })
             .open(&path)
-            .and_then(|mut file| file.write_all(bytes))
+            .and_then(|mut file| {
+                file.write_all(bytes)?;
+                if durable { file.sync_all() } else { Ok(()) }
+            })
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     }
+    if durable {
+        for folder in folders {
+            sync_folder(&folder)?;
+        }
+    }
     Ok(())
+}
+
+fn sync_folder(folder: &Path) -> Result<(), String> {
+    fs::File::open(folder)
+        .and_then(|folder| folder.sync_all())
+        .map_err(|error| format!("cannot sync {}: {error}", folder.display()))
+}
+
+fn history_dir(control_home: &Path) -> PathBuf {
+    account_home(control_home).join(HISTORY_DIR)
 }
 
 /// A unified diff from `before` to `after` (either `None`: no skill). A
@@ -793,32 +820,43 @@ struct HistoryEntry {
     name: String,
     change: String,
     at: u64,
+    /// The digest of the store's copy before the change (`null` when it
+    /// added the skill): what recovery compares the store with.
+    #[serde(default)]
+    before: Option<String>,
 }
 
 /// Prepares one change for the history before the store is changed:
-/// `skills-history/.pending-AT-NAME/` holds `change.json`, `diff`, and
-/// `before/`, the store's copy it replaces (none for a new skill). Only
-/// once the change is made does `publish_history` move it to `AT-NAME/`;
-/// `discard_history` drops it when the change failed, so a failing retry
-/// never adds an entry or pushes out a real one.
+/// `history/.pending-AT-NAME/` holds `change.json`, `diff`, and `before/`,
+/// the store's copy it replaces (none for a new skill). It is written as
+/// `.tmp-AT-NAME`, synced to disk and renamed, so a pending entry is always
+/// whole. Only once the change is made does `publish_history` move it to
+/// `AT-NAME/`; `discard_history` drops it when the change failed, so a
+/// failing retry never adds an entry or pushes out a real one. After a
+/// crash, `recover_history` decides from the store.
 fn keep_history(
     control_home: &Path,
     name: &str,
     before: Option<&Files>,
     after: Option<&Files>,
 ) -> Result<PathBuf, String> {
-    let history = control_home.join(HISTORY_DIR);
+    let history = history_dir(control_home);
     fs::create_dir_all(&history)
         .map_err(|error| format!("cannot keep the skills history: {error}"))?;
     let mut at = now_ms();
-    let entry = loop {
-        let entry = history.join(format!(".pending-{at:013}-{name}"));
-        if history.join(format!("{at:013}-{name}")).exists() {
+    let (temporary, entry) = loop {
+        let names = [
+            format!(".tmp-{at:013}-{name}"),
+            format!(".pending-{at:013}-{name}"),
+            format!("{at:013}-{name}"),
+        ];
+        if names[1..].iter().any(|taken| history.join(taken).exists()) {
             at += 1;
             continue;
         }
-        match fs::create_dir(&entry) {
-            Ok(()) => break entry,
+        let temporary = history.join(&names[0]);
+        match fs::create_dir(&temporary) {
+            Ok(()) => break (temporary, history.join(&names[1])),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => at += 1,
             Err(error) => return Err(format!("cannot keep the skills history: {error}")),
         }
@@ -832,16 +870,26 @@ fn keep_history(
         name: name.to_owned(),
         change: change.to_owned(),
         at,
+        before: before.map(digest),
     };
     let kept = (|| {
         if let Some(before) = before {
-            write_files(&entry.join("before"), before)?;
+            write_files(&temporary.join("before"), before, true)?;
         }
-        fs::write(entry.join("diff"), diff(name, before, after)).map_err(|e| e.to_string())?;
         let bytes = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
-        fs::write(entry.join("change.json"), bytes).map_err(|e| e.to_string())
+        let files = Files::from([
+            (
+                "diff".into(),
+                (false, diff(name, before, after).into_bytes()),
+            ),
+            ("change.json".into(), (false, bytes)),
+        ]);
+        write_files(&temporary, &files, true)?;
+        fs::rename(&temporary, &entry).map_err(|e| e.to_string())?;
+        sync_folder(&history)
     })();
     if let Err(error) = kept {
+        let _ = fs::remove_dir_all(&temporary);
         let _ = fs::remove_dir_all(&entry);
         return Err(format!("cannot keep the skills history: {error}"));
     }
@@ -859,7 +907,7 @@ fn discard_history(pending: &[PathBuf]) {
 /// Moves prepared entries into the history, then keeps the newest
 /// `HISTORY_KEEP` of each skill.
 fn publish_history(control_home: &Path, pending: &[PathBuf]) {
-    let history = control_home.join(HISTORY_DIR);
+    let history = history_dir(control_home);
     let mut names = BTreeSet::new();
     for entry in pending {
         let Some(published) = entry
@@ -875,6 +923,7 @@ fn publish_history(control_home: &Path, pending: &[PathBuf]) {
             names.insert(name.to_owned());
         }
     }
+    let _ = sync_folder(&history);
     let entries: Vec<_> = fs::read_dir(&history)
         .into_iter()
         .flatten()
@@ -895,35 +944,66 @@ fn publish_history(control_home: &Path, pending: &[PathBuf]) {
     }
 }
 
-/// Drops the pending entries a crash left behind.
-fn clear_pending_history(control_home: &Path) {
-    let history = control_home.join(HISTORY_DIR);
-    let stale: Vec<_> = fs::read_dir(&history)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(".pending-"))
-        .map(|entry| entry.path())
-        .collect();
-    discard_history(&stale);
+/// After a crash: drops half-written entries (no change was made before
+/// every entry was whole), and settles each pending entry by the store, as
+/// listed now (`store`: each name's digest). One whose change is in the
+/// store is published; one whose store copy is still its `before` is
+/// dropped; one it cannot read is left, never deleted. Returns the
+/// published ones.
+fn recover_history(
+    control_home: &Path,
+    store: &BTreeMap<String, Option<String>>,
+) -> Vec<HistoryEntry> {
+    let history = history_dir(control_home);
+    let mut made = Vec::new();
+    for entry in fs::read_dir(&history).into_iter().flatten().flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        if file.starts_with(".tmp-") {
+            let _ = fs::remove_dir_all(entry.path());
+            continue;
+        }
+        if !file.starts_with(".pending-") {
+            continue;
+        }
+        let Some(change) = read_change(&entry.path()) else {
+            continue;
+        };
+        let now = store.get(&change.name);
+        let applied = match change.change.as_str() {
+            "removed" => now.is_none(),
+            _ => now.is_some_and(|now| now.is_none() || *now != change.before),
+        };
+        if applied {
+            made.push((entry.path(), change));
+        } else {
+            discard_history(&[entry.path()]);
+        }
+    }
+    let paths: Vec<_> = made.iter().map(|(path, _)| path.clone()).collect();
+    publish_history(control_home, &paths);
+    made.into_iter().map(|(_, change)| change).collect()
+}
+
+fn read_change(entry: &Path) -> Option<HistoryEntry> {
+    let mut bytes = Vec::new();
+    fs::File::open(entry.join("change.json"))
+        .ok()?
+        .take(4096)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// The changes in the history, newest first.
 fn history(control_home: &Path) -> Vec<SkillChange> {
-    let history = control_home.join(HISTORY_DIR);
+    let history = history_dir(control_home);
     let mut found: Vec<_> = fs::read_dir(&history)
         .into_iter()
         .flatten()
         .flatten()
         .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .filter_map(|entry| {
-            let mut bytes = Vec::new();
-            fs::File::open(entry.path().join("change.json"))
-                .ok()?
-                .take(4096)
-                .read_to_end(&mut bytes)
-                .ok()?;
-            let change: HistoryEntry = serde_json::from_slice(&bytes).ok()?;
+            let change = read_change(&entry.path())?;
             Some(SkillChange {
                 name: change.name,
                 change: change.change,
@@ -952,7 +1032,7 @@ fn stage(
     let skills = staging.join(".agents/skills");
     fs::create_dir_all(&skills).map_err(|error| error.to_string())?;
     for (name, files) in chosen {
-        write_files(&skills.join(name), files)?;
+        write_files(&skills.join(name), files, false)?;
     }
     let parent = store
         .parent()
@@ -1030,8 +1110,17 @@ fn sync(
         .iter()
         .map(|name| (name.clone(), store_digest(name)))
         .collect();
-    clear_pending_history(control_home);
     let (mut record, legacy) = read_record(control_home, &store.directory);
+    // A change made before a crash is the mirror's when it owned what the
+    // change replaced.
+    for change in recover_history(control_home, &store_digests) {
+        if change.before.is_some() && record.skills.get(&change.name) == change.before.as_ref() {
+            match store_digests.get(&change.name) {
+                Some(Some(now)) => record.skills.insert(change.name, now.clone()),
+                _ => record.skills.remove(&change.name),
+            };
+        }
+    }
     let scope = scope_name(control_home);
     // A name this scope's Kits bundle but another scope's mirror imported
     // is that scope's: this pass neither removes nor forgets it.
@@ -1814,17 +1903,19 @@ mod tests {
 
     #[test]
     fn the_history_keeps_the_newest_changes_of_each_skill() {
-        let control = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        // The history is beside the control home: keep it in `root`.
+        let control = root.path().join("control");
         let files = |body: &str| Files::from([("SKILL.md".into(), (false, body.into()))]);
         let keep = |name: &str, before: Option<&Files>, after: &Files| {
-            let entry = keep_history(control.path(), name, before, Some(after)).unwrap();
-            publish_history(control.path(), &[entry]);
+            let entry = keep_history(&control, name, before, Some(after)).unwrap();
+            publish_history(&control, &[entry]);
         };
         keep("other", None, &files("o"));
         for round in 0..=HISTORY_KEEP {
             keep("tool", Some(&files(&round.to_string())), &files("x"));
         }
-        let changes = history(control.path());
+        let changes = history(&control);
         let tool: Vec<_> = changes.iter().filter(|c| c.name == "tool").collect();
         assert_eq!(tool.len(), HISTORY_KEEP);
         assert_eq!(changes.iter().filter(|c| c.name == "other").count(), 1);
@@ -1843,7 +1934,7 @@ mod tests {
         fs::create_dir_all(&skill).unwrap();
         fs::write(skill.join("SKILL.md"), "one").unwrap();
         rig.sync().unwrap();
-        let history = rig.root.path().join("control").join(HISTORY_DIR);
+        let history = history_dir(&rig.root.path().join("control"));
         fs::remove_dir_all(&history).unwrap();
         fs::write(&history, "not a folder").unwrap();
         fs::write(skill.join("SKILL.md"), "two").unwrap();
@@ -1883,7 +1974,7 @@ mod tests {
         };
         assert_eq!(changes(history(&control)), ["added"]);
         assert_eq!(
-            fs::read_dir(control.join(HISTORY_DIR)).unwrap().count(),
+            fs::read_dir(history_dir(&control)).unwrap().count(),
             1,
             "no pending entries left"
         );
@@ -2072,6 +2163,82 @@ mod tests {
         let error = read_source(&skill).unwrap_err();
         assert_eq!(error, "notes has other hard links");
         assert!(read_skill(&skill).is_ok());
+    }
+
+    fn skill_md(body: &str) -> Files {
+        Files::from([("SKILL.md".into(), (false, body.into()))])
+    }
+
+    /// A crash after the import but before the entry was published keeps
+    /// the rollback copy, and the change stays the mirror's.
+    #[test]
+    fn a_crash_after_the_import_keeps_the_rollback_copy() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        // The pass that crashed: entry prepared, store changed, nothing more.
+        keep_history(
+            &control,
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        fs::write(rig.stored("tool").join("SKILL.md"), "two").unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+
+        rig.sync().unwrap();
+        let changes = history(&control);
+        assert_eq!(
+            changes
+                .iter()
+                .map(|c| c.change.as_str())
+                .collect::<Vec<_>>(),
+            ["updated", "added"]
+        );
+        let before = Path::new(&changes[0].diff).parent().unwrap().join("before");
+        assert_eq!(fs::read_to_string(before.join("SKILL.md")).unwrap(), "one");
+        fs::write(skill.join("SKILL.md"), "three").unwrap();
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "three".to_owned())])
+        );
+    }
+
+    /// A crash before the import drops its prepared entry, and a
+    /// half-written one, without touching published ones.
+    #[test]
+    fn a_crash_before_the_import_leaves_no_entry() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        keep_history(
+            &control,
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        let half = history_dir(&control).join(".tmp-0000000000001-tool");
+        fs::create_dir_all(half.join("before")).unwrap();
+
+        // The store still holds "one": the change was never made.
+        rig.sync().unwrap();
+        assert_eq!(
+            history(&control)
+                .iter()
+                .map(|c| c.change.as_str())
+                .collect::<Vec<_>>(),
+            ["added"]
+        );
+        assert_eq!(fs::read_dir(history_dir(&control)).unwrap().count(), 1);
     }
 
     #[test]
