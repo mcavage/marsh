@@ -275,8 +275,8 @@ The import gets a copy of each skill's folder, never a link to it. A skill
 folder may itself be a link (`~/.claude/skills/my-skill -> ~/dev/my-skill`),
 but inside it marsh copies only directories and regular files. A link inside
 counts as the regular file it names in the same folder, by a relative path
-that stays in the folder. A link that leads anywhere else, or a socket or
-device, keeps the whole skill out of the store: the store keeps its last good
+that stays in the folder. A link that leads anywhere else, a file with other
+hard links, or a socket or device, keeps the whole skill out of the store: the store keeps its last good
 copy, and `marsh status` names the skill and the link under errors.
 
 A skill with the name of one a registered Kit bundles (`agent-skill@1`) is

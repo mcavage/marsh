@@ -289,18 +289,46 @@ type Files = BTreeMap<PathBuf, (bool, Vec<u8>)>;
 /// directory or regular file, refuses the skill. The import gets a copy of
 /// these files, never a link to the folder, so whatever stock SBX does with
 /// links, nothing outside the folder reaches the store.
+/// A source also may not hold a file with other hard links, which could be
+/// any file of yours; the store's copies, which stock SBX writes, may.
 fn read_skill(root: &Path) -> Result<Files, String> {
+    read_skill_with(root, false, &mut |_, _| {})
+}
+
+fn read_source(root: &Path) -> Result<Files, String> {
+    read_skill_with(root, true, &mut |_, _| {})
+}
+
+/// The points between the steps of a read where `read_skill_with` calls
+/// its hook: after the folder's path is resolved, and before a folder or a
+/// file in it is opened. Tests change the folder there.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Step {
+    Resolved,
+    OpenFolder,
+    OpenFile,
+}
+
+fn read_skill_with(
+    root: &Path,
+    source: bool,
+    hook: &mut dyn FnMut(Step, &Path),
+) -> Result<Files, String> {
     use rustix::fs::{Mode, OFlags};
-    let folder = std::rc::Rc::new(open_skill_folder(root)?);
-    let mut walk = Walk::default();
+    let folder = std::rc::Rc::new(open_skill_folder(root, hook)?);
+    let mut walk = Walk {
+        source,
+        ..Walk::default()
+    };
     let mut pending = Vec::new();
-    for (name, path) in walk.read(&folder, Path::new(""))? {
+    for (name, path) in walk.read(&folder, Path::new(""), hook)? {
         pending.push((std::rc::Rc::clone(&folder), name, path));
     }
     while let Some((parent, name, path)) = pending.pop() {
         if path.components().count() > MAX_SKILL_DEPTH {
             return Err(format!("more than {MAX_SKILL_DEPTH} folder levels"));
         }
+        hook(Step::OpenFolder, &path);
         let inner = rustix::fs::openat(
             &*parent,
             &name,
@@ -310,7 +338,7 @@ fn read_skill(root: &Path) -> Result<Files, String> {
         .map_err(|error| format!("{}: {error}", path.display()))?;
         drop(parent);
         let inner = std::rc::Rc::new(inner);
-        for (name, path) in walk.read(&inner, &path)? {
+        for (name, path) in walk.read(&inner, &path, hook)? {
             pending.push((std::rc::Rc::clone(&inner), name, path));
         }
     }
@@ -342,10 +370,14 @@ fn read_skill(root: &Path) -> Result<Files, String> {
 
 /// Opens the folder `root` resolves to now, one component at a time, never
 /// following a link.
-fn open_skill_folder(root: &Path) -> Result<std::os::fd::OwnedFd, String> {
+fn open_skill_folder(
+    root: &Path,
+    hook: &mut dyn FnMut(Step, &Path),
+) -> Result<std::os::fd::OwnedFd, String> {
     use rustix::fs::{Mode, OFlags};
     use std::path::Component;
     let resolved = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    hook(Step::Resolved, &resolved);
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let mut folder = rustix::fs::open("/", flags, Mode::empty()).map_err(|e| e.to_string())?;
     for component in resolved.components() {
@@ -364,6 +396,8 @@ fn open_skill_folder(root: &Path) -> Result<std::os::fd::OwnedFd, String> {
 /// What a skill-folder walk found so far.
 #[derive(Default)]
 struct Walk {
+    /// Refuse files with other hard links.
+    source: bool,
     files: Files,
     links: Vec<(PathBuf, PathBuf)>,
     total: u64,
@@ -376,6 +410,7 @@ impl Walk {
         &mut self,
         folder: &std::os::fd::OwnedFd,
         relative: &Path,
+        hook: &mut dyn FnMut(Step, &Path),
     ) -> Result<Vec<(std::ffi::CString, PathBuf)>, String> {
         use rustix::fs::{AtFlags, FileType, Mode, OFlags};
         use std::os::unix::ffi::OsStrExt as _;
@@ -397,6 +432,7 @@ impl Walk {
             match FileType::from_raw_mode(stat.st_mode) {
                 FileType::Directory => folders.push((name.to_owned(), path)),
                 FileType::RegularFile => {
+                    hook(Step::OpenFile, &path);
                     let file = rustix::fs::openat(
                         folder,
                         name,
@@ -407,6 +443,9 @@ impl Walk {
                     let stat = rustix::fs::fstat(&file).map_err(|error| error.to_string())?;
                     if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
                         return Err(format!("{} changed while read", path.display()));
+                    }
+                    if self.source && stat.st_nlink > 1 {
+                        return Err(format!("{} has other hard links", path.display()));
                     }
                     let mut bytes = Vec::new();
                     fs::File::from(file)
@@ -626,7 +665,7 @@ fn sync(
     let read: BTreeMap<_, _> = found
         .iter()
         .filter(|(name, _)| !bundled.contains_key(*name))
-        .map(|(name, path)| (name.clone(), read_skill(path)))
+        .map(|(name, path)| (name.clone(), read_source(path)))
         .collect();
     let refused = read
         .iter()
@@ -792,6 +831,8 @@ mod tests {
     struct FakeSbx {
         home: PathBuf,
         imports: Mutex<usize>,
+        /// Runs as the next import starts (a job changing a source then).
+        during_import: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     }
 
     impl FakeSbx {
@@ -851,7 +892,13 @@ mod tests {
                             .unwrap(),
                     ))
                 }
+                ["skills", "import", "--help"] => {
+                    Ok(output(b"Directories:\n  1. ~/.claude/skills\n".to_vec()))
+                }
                 ["skills", "import", "--force", "--no-input"] => {
+                    if let Some(change) = self.during_import.lock().unwrap().take() {
+                        change();
+                    }
                     *self.imports.lock().unwrap() += 1;
                     let (_, home) = invocation
                         .environment
@@ -907,6 +954,7 @@ mod tests {
             let fake = std::sync::Arc::new(FakeSbx {
                 home: root.path().join("stock-home"),
                 imports: Mutex::new(0),
+                during_import: Mutex::new(None),
             });
             fs::create_dir_all(root.path().join("control")).unwrap();
             fs::create_dir_all(root.path().join("folder")).unwrap();
@@ -1070,6 +1118,133 @@ mod tests {
             tree(&rig.stored("tool")),
             BTreeMap::from([("SKILL.md".to_owned(), "good".to_owned())])
         );
+    }
+
+    /// A skill folder and, beside it, a folder that also looks like a
+    /// skill but holds a secret: what a job would point a swap at.
+    fn swap_rig() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let skill = root.path().join("tool");
+        fs::create_dir_all(skill.join("docs")).unwrap();
+        fs::write(skill.join("SKILL.md"), "tool").unwrap();
+        fs::write(skill.join("docs/notes"), "notes").unwrap();
+        let other = root.path().join("other");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("SKILL.md"), "other").unwrap();
+        fs::write(other.join("notes"), "PRIVATE KEY").unwrap();
+        (root, skill, other)
+    }
+
+    fn swap_for_link(path: &Path, target: &Path) {
+        if fs::symlink_metadata(path).unwrap().is_dir() {
+            fs::rename(path, path.with_extension("moved")).unwrap();
+        } else {
+            fs::remove_file(path).unwrap();
+        }
+        std::os::unix::fs::symlink(target, path).unwrap();
+    }
+
+    /// Each open in a read follows no link: a folder or file swapped for a
+    /// link at that moment fails the read instead of leading elsewhere.
+    #[test]
+    fn a_swap_at_any_step_of_a_read_fails_it() {
+        for (step, at, target) in [
+            (Step::Resolved, "", "other"),
+            (Step::OpenFolder, "docs", "other"),
+            (Step::OpenFile, "docs/notes", "other/notes"),
+        ] {
+            let (root, skill, other) = swap_rig();
+            let target = root.path().join(target);
+            let mut swapped = false;
+            let read = read_skill_with(&skill, true, &mut |now, path| {
+                let ours = if now == Step::Resolved {
+                    path == fs::canonicalize(&skill).unwrap()
+                } else {
+                    path == Path::new(at)
+                };
+                if now == step && ours && !swapped {
+                    swapped = true;
+                    let path = if at.is_empty() {
+                        skill.clone()
+                    } else {
+                        skill.join(at)
+                    };
+                    swap_for_link(&path, &target);
+                }
+            });
+            assert!(swapped, "{step:?}");
+            assert!(read.is_err(), "{step:?}: {read:?}");
+            drop(other);
+        }
+    }
+
+    /// A link planted in a source while stock SBX imports never reaches the
+    /// store: the import reads a copy, not the source.
+    #[test]
+    fn a_link_planted_during_the_import_never_reaches_the_store() {
+        let rig = Rig::new();
+        let secret = rig.root.path().join("id_ed25519");
+        fs::write(&secret, "PRIVATE KEY").unwrap();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "tool").unwrap();
+        let plant = skill.join("key");
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            std::os::unix::fs::symlink(&secret, &plant).unwrap();
+        }));
+        rig.sync().unwrap();
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "tool".to_owned())])
+        );
+    }
+
+    /// A refused skill is named in `marsh status`.
+    #[test]
+    fn a_refused_skill_is_listed_in_status() {
+        let rig = Rig::new();
+        let home = rig.root.path().join("home");
+        let skill = home.join(".claude/skills/leaky");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "leaky").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", skill.join("hosts")).unwrap();
+        let mirror = Mirror {
+            scan_home: Some(home),
+            ..Mirror::default()
+        };
+        let scope = rig.root.path().join("scope");
+        fs::create_dir_all(&scope).unwrap();
+        let control = rig.root.path().join("control");
+        mirror.pass(&rig.sbx, &scope, &control, &Bundled::default());
+        let errors = mirror.status(&scope).errors;
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].starts_with("skill leaky not imported: hosts is a link"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn folders_count_toward_the_entry_cap() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("SKILL.md"), "wide").unwrap();
+        for index in 0..MAX_SKILL_FILES {
+            fs::create_dir(root.path().join(index.to_string())).unwrap();
+        }
+        assert_eq!(read_skill(root.path()).unwrap_err(), "too many files");
+    }
+
+    #[test]
+    fn a_source_file_with_other_hard_links_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let skill = root.path().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "tool").unwrap();
+        fs::write(root.path().join("secret"), "PRIVATE KEY").unwrap();
+        fs::hard_link(root.path().join("secret"), skill.join("notes")).unwrap();
+        let error = read_source(&skill).unwrap_err();
+        assert_eq!(error, "notes has other hard links");
+        assert!(read_skill(&skill).is_ok());
     }
 
     #[test]
