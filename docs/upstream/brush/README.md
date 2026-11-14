@@ -117,6 +117,12 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   (`smoke.rs`) and `recording_and_the_post_fork_reset_survive_a_poisoned_lock`
   (`signal_records.rs`), which poison it through the hidden
   `brush_core::traps::signal_records_for_test` hooks (nothing in the shell calls them).
+- A brace sequence increment that does not fit in 64 bits no longer panics the
+  parser, and a sequence that would step past the end of the 64-bit range (or
+  of the character range) stops there instead of overflowing (`0001`, `0004`;
+  upstream `c324f295`): the word stays text, as in Bash. This is the first
+  change to `braceexpansion.rs`, which `0004` now carries. Covered by
+  `brace_sequence_increments_out_of_range_do_not_panic`.
 
 ## Retired per-fix inventory
 
