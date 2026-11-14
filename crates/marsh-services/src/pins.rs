@@ -1030,15 +1030,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let project = base.join("project");
         std::fs::create_dir_all(project.join(".git/hooks")).unwrap();
+        std::fs::write(project.join(".git/f"), "").unwrap();
         std::fs::create_dir_all(project.join("foo")).unwrap();
+        std::fs::write(project.join("foo/f"), "").unwrap();
         let project = std::fs::canonicalize(&project).unwrap();
         let known = observe(&ProjectRoot::open(&project).unwrap()).unwrap();
-        let rec = crate::ledger::PinRec {
+        let rec = |rel: &str, is_dir: bool| crate::ledger::PinRec {
             scope: "s".into(),
             project_root: project.to_string_lossy().into_owned(),
-            rel: "foo".into(),
+            rel: rel.into(),
             read_only: false,
-            is_dir: true,
+            is_dir,
             subs: Vec::new(),
             dev: 0,
             ino: 0,
@@ -1046,17 +1048,28 @@ mod tests {
             failed: false,
         };
         let pins = PinManager::new(&base.join("binds"));
-        let pinned = base.join("binds/s/p");
-        let writable = || std::fs::write(pinned.join("probe"), "x").is_ok();
-        pins.restore("p", &rec, &known).unwrap();
-        assert!(writable(), "a plain directory stays writable");
-        let _ = rustix::mount::unmount(&pinned, rustix::mount::UnmountFlags::DETACH);
+        let (dir, file) = (base.join("binds/s/d"), base.join("binds/s/f"));
+        // Restores both pins; whether each takes a write, then unmounts.
+        let restore_writable = || {
+            pins.restore("d", &rec("foo", true), &known).unwrap();
+            pins.restore("f", &rec("foo/f", false), &known).unwrap();
+            let writable = (
+                std::fs::write(dir.join("probe"), "x").is_ok(),
+                std::fs::OpenOptions::new().write(true).open(&file).is_ok(),
+            );
+            for path in [&dir, &file] {
+                let _ = rustix::mount::unmount(path, rustix::mount::UnmountFlags::DETACH);
+            }
+            writable
+        };
+        assert_eq!(restore_writable(), (true, true), "plain pins stay writable");
         std::fs::rename(project.join("foo"), project.join("foo.x")).unwrap();
         std::fs::rename(project.join(".git"), project.join("foo")).unwrap();
-        pins.restore("p", &rec, &known).unwrap();
-        let wrote = writable();
-        let _ = rustix::mount::unmount(&pinned, rustix::mount::UnmountFlags::DETACH);
-        assert!(!wrote, "the restored pin of .git is writable");
+        assert_eq!(
+            restore_writable(),
+            (false, false),
+            "a restored pin of .git is writable"
+        );
         std::fs::remove_dir_all(&base).unwrap();
     }
 
