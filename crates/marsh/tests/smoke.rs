@@ -158,6 +158,27 @@ fn registered_command_without_relay_fails_closed() {
     }
 }
 
+/// `marsh --dev` was removed: it says so and starts nothing, rather than
+/// handing `--dev` to the shell as an unknown option.
+#[test]
+fn removed_dev_flag_is_refused_before_any_shell_starts() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = isolated_command(env!("CARGO_BIN_EXE_marsh"))
+        .current_dir(directory.path())
+        .args(["--dev", "-c", "printf started > started"])
+        .env_remove("MARSH_DAEMON_SOCKET")
+        .env_remove("MARSH_DAEMON_TOKEN")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--dev was removed"),
+        "{output:?}"
+    );
+    assert!(!directory.path().join("started").exists());
+}
+
 /// A terminal interrupt reaches the whole foreground process group. The shell
 /// defers its INT/TERM trap until the foreground child has died of the same
 /// signal, then runs it, whichever of the two events it observes first.

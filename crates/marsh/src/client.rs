@@ -1560,7 +1560,7 @@ impl DaemonClient for LocalDaemonClient {
                     .map(|argument| argument.as_encoded_bytes().to_vec())
                     .collect(),
                 session,
-                dev: crate::cli::DEV_SESSION.load(std::sync::atomic::Ordering::Relaxed),
+                dev: false,
                 terminal_environment,
                 working_directory,
             })
@@ -1598,7 +1598,7 @@ impl DaemonClient for LocalDaemonClient {
             .prepare_with_progress(
                 selection,
                 daemon_session(session)?,
-                crate::cli::DEV_SESSION.load(std::sync::atomic::Ordering::Relaxed),
+                false,
                 std::io::stderr(),
             )
             .map(|result| LoadReport {

@@ -122,8 +122,9 @@ pub enum ServicesCommand {
 
 pub const SERVICES_USAGE: &str = "usage: marsh docker status [--json] | start [--json] | stop [--json] | rm [--yes] [--json] | hold SECONDS [--json] | release HOLDER [--json] | internet on|off [--json]";
 
-/// `marsh --dev`: attach this shell with a development grant.
-pub static DEV_SESSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `marsh --dev` and its in-VM broker are gone; host `make dev` remains.
+pub const DEV_REMOVED: &str =
+    "--dev was removed; build with `make dev` on the host and run ~/.marsh-dev/bin/marsh";
 
 /// `--detached` on `marsh stop`, `marsh reset`, or `marsh workers reset`:
 /// discard detached cloud runs too (`docs/design/cloud-detach.md` s5).
@@ -224,7 +225,8 @@ pub fn parse_os(mut args: Vec<OsString>) -> Result<ParsedCli, CliError> {
         }
         match argument.to_str().unwrap_or("") {
             "--ephemeral-home" => ephemeral_home = true,
-            "--dev" => DEV_SESSION.store(true, std::sync::atomic::Ordering::Relaxed),
+            // Refused, not handed to Brush as an unknown option.
+            "--dev" => return Err(CliError(DEV_REMOVED.into())),
             "-o" | "+o" | "-O" | "+O" => {
                 // Preserve the native scanner's ordering and no-operand
                 // listing forms; never invent synthetic long options.
