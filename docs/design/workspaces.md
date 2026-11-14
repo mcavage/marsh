@@ -483,6 +483,11 @@ is 130. `split` exits with the first nonzero code in declaration order.
     Past the cap a connection gets a refusal frame. When descriptors still
     run out, `accept` waits and retries; the daemon never stops serving
     for it.
+  - Split input that spooling and running splits hold is bounded: 64 MiB
+    for one job's splits, 192 MiB for all jobs' splits, and, apart, 256 MiB
+    for the host's and sessions' splits (a session shell is the user's), so
+    no job can refuse them. Each job of a tree has its own 64 MiB, so one
+    tree can fill the jobs' pool and refuse other jobs' splits.
 - **Nested splits from a shell branch.** `marsh split` run inside a shell
   branch arrives on that branch's session relay. The daemon maps the
   session to the branch, so the split is a child: argv-only, depth + 1,

@@ -349,6 +349,19 @@ impl Daemon {
     }
 }
 
+/// `bytes` zero bytes of split input, in frames the daemon accepts, until
+/// it stops reading (a refusal).
+fn input(stream: &mut UnixStream, bytes: usize) {
+    for chunk in vec![0_u8; bytes].chunks(SHELL_STDIN_CHUNK) {
+        let frame = AttachmentFrame::Stdin {
+            bytes: chunk.to_vec(),
+        };
+        if write_frame(stream, &frame).is_err() {
+            return;
+        }
+    }
+}
+
 /// No reply yet: the daemon is still holding `stream` open.
 fn held(stream: &UnixStream) -> bool {
     let mut stream = stream;
@@ -672,6 +685,75 @@ fn a_connection_past_the_cap_is_told_why_and_the_daemon_serves_on() {
     wait_until("the host is served again", || {
         daemon.client().status(None).is_ok()
     });
+}
+
+/// A refusal a create's stream reads after its input was sent.
+fn refusal(stream: &mut UnixStream) -> String {
+    // macOS refuses the option (EINVAL) once the peer closed.
+    let _ = stream.set_read_timeout(Some(PATIENCE));
+    match read_frame::<PublicReply>(stream) {
+        Ok(PublicReply::Error { message, .. }) => message,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A host split that spools `bytes` of input and holds there.
+fn host_spooling(daemon: &Daemon, bytes: usize) -> UnixStream {
+    let mut stream = daemon
+        .client()
+        .open_request(PublicRequest::SplitCreate(daemon.spec(1, daemon.session())))
+        .unwrap();
+    input(&mut stream, bytes);
+    stream
+}
+
+/// A-03: the input splits hold is bounded per job, for all jobs, and for
+/// the host and sessions apart: a job cannot refuse the host's splits, a
+/// refusal names the limit that refused, and the daemon still answers.
+#[test]
+fn split_input_is_bounded_per_job_for_all_jobs_and_for_the_host_apart() {
+    let daemon = Daemon::start(|server| server);
+    daemon
+        .server
+        .splits
+        .set_spool_limits(4 << 20, 2 << 20, 1 << 20);
+    let (job, token) = daemon.job();
+    let (_slot, mut first) = daemon.held_split(&job, &token).unwrap();
+    input(&mut first, 900 << 10);
+    assert!(held(&first));
+    let (_slot, mut more) = daemon.held_split(&job, &token).unwrap();
+    input(&mut more, 200 << 10);
+    let refused = refusal(&mut more);
+    assert_eq!(
+        refused,
+        "split: this job's splits hold 1 MiB of input, the most; try again when one ends"
+    );
+    // Other jobs fill the jobs' pool.
+    let (other, other_token) = daemon.job();
+    let (_slot, mut second) = daemon.held_split(&other, &other_token).unwrap();
+    input(&mut second, 900 << 10);
+    assert!(held(&second));
+    let (third, third_token) = daemon.job();
+    let (_slot, mut over) = daemon.held_split(&third, &third_token).unwrap();
+    input(&mut over, 300 << 10);
+    assert_eq!(
+        refusal(&mut over),
+        "split: jobs' splits hold 2 MiB of input, the most; try again when one ends"
+    );
+    // The host's splits have their own pool.
+    let host = host_spooling(&daemon, 3 << 20);
+    assert!(held(&host));
+    let mut host_over = host_spooling(&daemon, 2 << 20);
+    assert_eq!(
+        refusal(&mut host_over),
+        "split: the host's and sessions' splits hold 4 MiB of input, the most; try again when one ends"
+    );
+    daemon.answers();
+    // A create's input is released when it ends.
+    drop(first);
+    let (_slot, mut again) = daemon.held_split(&job, &token).unwrap();
+    input(&mut again, 900 << 10);
+    wait_until("the first split's input is released", || held(&again));
 }
 
 /// A-03: the connection cap leaves descriptors for every connection at its
