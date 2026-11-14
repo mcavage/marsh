@@ -330,11 +330,13 @@ newest) but not the "Latest" mark (its release step refuses a release that
 already exists); a new tag for a lower version would move both. Either way
 the formula keeps naming `vX.Y.Z` until step 5.
 
-To rehearse a release, run the Release workflow by hand with a version: it
-runs the same CI, builds a draft and announces nothing. Its images get only
-the moving tag `:draft`, so no tag a user reads moves, and it replaces any
-earlier draft release of the same version. Without a version it publishes a
-nightly from the branch you pick, any time.
+To rehearse a release, run the Release workflow by hand on `main` with a
+version. It runs the same CI and builds everything up to the macOS tarball and
+formula, which it keeps as the run's `dist` artifact. It makes no GitHub
+Release, not even a draft (publishing one would be an ungated release), and
+its images get only the moving tag `:draft`, so no tag a user reads moves.
+Without a version, a manual run publishes a nightly from `main`'s tip. The
+workflow refuses manual runs on any other branch.
 [.github/workflows/release.yml](.github/workflows/release.yml) documents the
 secrets and the stages.
 
