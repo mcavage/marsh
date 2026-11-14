@@ -1080,11 +1080,19 @@ pub fn admin_contents(git: &GitSnapshot, store: &Path) -> BTreeMap<&'static str,
         ("packed-refs", git.packed_refs.clone()),
         ("objects/info/alternates", alternates.into_bytes()),
         // Read-only to the branch (`split_confinement`), so a planted
-        // `commondir` can't move host Git's config and hooks; `.` keeps the
-        // common dir the admin dir (an empty file stops Git).
-        ("commondir", b".\n".to_vec()),
+        // `commondir` can't move host Git's config and hooks.
+        ("commondir", ADMIN_COMMONDIR.to_vec()),
     ])
 }
+
+/// A fork admin dir's `commondir`: the admin dir itself. `./`, not `.`:
+/// libgit2 (1.9) fails to open a repository whose `commondir` is `.`, and an
+/// empty file stops Git.
+pub const ADMIN_COMMONDIR: &[u8] = b"./\n";
+
+/// Empty directories the daemon makes in a fork's admin dir, bound read-only
+/// into its jobs: hooks, and the submodule and linked-worktree Git dirs.
+pub const ADMIN_EMPTY_DIRS: [&str; 3] = ["hooks", "modules", "worktrees"];
 
 /// SHA-256 digests of the admin files, journaled for capture verification.
 #[must_use]
@@ -1116,7 +1124,9 @@ pub fn write_admin(
     fork: &Dir,
 ) -> io::Result<()> {
     let info = admin.create("info")?;
-    admin.create("hooks")?;
+    for name in ADMIN_EMPTY_DIRS {
+        admin.create(name)?;
+    }
     let objects = admin.create("objects")?;
     objects.create("info")?;
     let refs = admin.create("refs")?;
@@ -1149,9 +1159,9 @@ pub fn gitfile(admin: &Path) -> Vec<u8> {
 }
 
 /// What may appear in a fork's admin directory after a branch ran: Git's
-/// own state files, never `gitdir` or `config.worktree`. `commondir` and an
-/// empty `hooks/` are allowed only where the daemon wrote them (a digest for
-/// `commondir` is journaled).
+/// own state files, never `gitdir` or `config.worktree`. `commondir` and the
+/// empty [`ADMIN_EMPTY_DIRS`] are allowed only where the daemon wrote them (a
+/// digest for `commondir` is journaled).
 /// The pseudo-refs and messages that `git stash pop`, `merge`, `fetch`,
 /// `cherry-pick`, and `revert` leave behind (`AUTO_MERGE` and the rest) are
 /// plain state files that capture never executes or follows; refusing them
@@ -1200,10 +1210,10 @@ pub fn verify(
         for (name, _) in admin.entries().map_err(|e| e.to_string())? {
             let placeholder = expected.contains_key("commondir")
                 && (name == "commondir"
-                    || (name == "hooks"
+                    || (ADMIN_EMPTY_DIRS.iter().any(|dir| name == *dir)
                         && admin
-                            .open("hooks")
-                            .and_then(|hooks| hooks.entries())
+                            .open(&name)
+                            .and_then(|dir| dir.entries())
                             .is_ok_and(|entries| entries.is_empty())));
             if !placeholder && !ADMIN_ALLOWED.iter().any(|allowed| name == *allowed) {
                 return Err(format!(
@@ -2400,10 +2410,19 @@ mod tests {
         fs::create_dir(admin_path.join("hooks")).unwrap();
         assert_eq!(verdict(), Err("admin hooks is not allowed".into()));
         // A fork whose daemon wrote the placeholders: `commondir` is checked
-        // by digest, `hooks/` must stay empty.
-        let contents = BTreeMap::from([("commondir", b".\n".to_vec())]);
-        let expected = admin_digest(&contents);
-        fs::write(admin_path.join("commondir"), ".\n").unwrap();
+        // by the digest `admin_contents` journals, the empty dirs must stay
+        // empty.
+        let expected = admin_digest(&admin_contents(
+            &GitSnapshot::default(),
+            &root.join("store.git"),
+        ))
+        .into_iter()
+        .filter(|(name, _)| name == "commondir")
+        .collect::<BTreeMap<_, _>>();
+        fs::write(admin_path.join("commondir"), ADMIN_COMMONDIR).unwrap();
+        for dir in ["modules", "worktrees"] {
+            fs::create_dir(admin_path.join(dir)).unwrap();
+        }
         let placed = || {
             let top = Dir::open_root(&root).unwrap();
             verify(
@@ -2417,25 +2436,33 @@ mod tests {
         fs::write(admin_path.join("hooks/post-checkout"), "#!/bin/sh\n").unwrap();
         assert_eq!(placed(), Err("admin hooks is not allowed".into()));
         fs::remove_file(admin_path.join("hooks/post-checkout")).unwrap();
+        fs::create_dir(admin_path.join("modules/sub")).unwrap();
+        assert_eq!(placed(), Err("admin modules is not allowed".into()));
+        fs::remove_dir(admin_path.join("modules/sub")).unwrap();
         fs::write(admin_path.join("commondir"), "../../fork/cd\n").unwrap();
         assert_eq!(placed(), Err("admin commondir was changed".into()));
         // An older fork, journaled without one, never accepts a `commondir`.
-        fs::remove_dir(admin_path.join("hooks")).unwrap();
+        for dir in ADMIN_EMPTY_DIRS {
+            fs::remove_dir(admin_path.join(dir)).unwrap();
+        }
         assert_eq!(verdict(), Err("admin commondir is not allowed".into()));
     }
 
-    /// Host Git still works in a fork whose admin dir holds the `.` common
-    /// dir and empty hooks the daemon writes (an empty `commondir` stops it).
+    /// Host Git still works in a fork whose admin dir holds the `./` common
+    /// dir and empty dirs the daemon writes (an empty `commondir` stops it).
     #[test]
     fn host_git_reads_a_fork_with_the_admin_placeholders() {
         let temp = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(temp.path()).unwrap();
         let admin = root.join("admin");
-        for dir in ["admin/refs/heads", "admin/objects", "admin/hooks", "fork"] {
+        for dir in ["admin/refs/heads", "admin/objects", "fork"] {
             fs::create_dir_all(root.join(dir)).unwrap();
         }
+        for dir in ADMIN_EMPTY_DIRS {
+            fs::create_dir(admin.join(dir)).unwrap();
+        }
         fs::write(admin.join("HEAD"), format!("ref: {BRANCH_REF}\n")).unwrap();
-        fs::write(admin.join("commondir"), ".\n").unwrap();
+        fs::write(admin.join("commondir"), ADMIN_COMMONDIR).unwrap();
         fs::write(root.join("fork/.git"), gitfile(&admin)).unwrap();
         let git = |args: &[&str]| {
             Command::new("git")

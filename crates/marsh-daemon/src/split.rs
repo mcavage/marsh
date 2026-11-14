@@ -4049,4 +4049,51 @@ mod quarantine_tests {
         quarantine_untrusted(&record);
         assert!(dir.join(".admin/.untrusted-a").is_dir());
     }
+
+    /// The engine hides an admin dir when a restart makes its branch
+    /// untrusted (load), and when a running engine marks one so (`update`).
+    #[test]
+    fn the_engine_quarantines_at_load_and_on_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let journal = root.join("journal");
+        fs::create_dir(&journal).unwrap();
+        let record = |id: &str, kind: &str| {
+            let dir = root.join(".marsh/split").join(id);
+            for path in ["a", ".admin/a"] {
+                fs::create_dir_all(dir.join(path)).unwrap();
+            }
+            let identity = fs::metadata(&dir).map(|m| (m.dev(), m.ino())).unwrap();
+            serde_json::json!({
+                "id": id, "state": "run", "creator": {"kind": "host"},
+                "session": "x", "parent": null, "depth": 1, "root": root, "dir": dir,
+                "cwd": root, "created_unix_ms": 0, "identity": identity,
+                "branches": [{
+                    "label": "a", "kind": kind, "placement": "local", "state": "running",
+                    "files": 0, "fork": dir.join("a"),
+                }],
+            })
+        };
+        // An argv split the restart interrupted, and an idle open lane.
+        let records = serde_json::json!({"s1": record("s1", "argv"), "s2": record("s2", "lane")});
+        fs::write(journal.join("splits.json"), records.to_string()).unwrap();
+        let client = crate::Client {
+            paths: crate::EndpointPaths {
+                runtime_directory: root.clone(),
+                socket: root.join("sock"),
+                lock: root.join("lock"),
+                token: root.join("token"),
+            },
+            token: String::new(),
+        };
+        let engine = SplitEngine::open(&journal, client, Arc::default());
+        let admin = |id: &str| root.join(".marsh/split").join(id).join(".admin");
+        assert!(admin("s1").join(".untrusted-a").is_dir());
+        assert!(!admin("s1").join("a").exists());
+        assert!(admin("s2").join("a").is_dir(), "an open lane stays usable");
+        engine.update("s2", |record| {
+            record.branches[0].trust = Some("untrusted".into());
+        });
+        assert!(admin("s2").join(".untrusted-a").is_dir());
+    }
 }
