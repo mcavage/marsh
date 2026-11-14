@@ -1053,8 +1053,11 @@ fn recover_history(
 /// follows a change only when it owned the copy the change replaced (or
 /// already holds what it installed); a skill the change added becomes the
 /// mirror's, and the preparing scope's, only when the entry says the import
-/// succeeded with exactly that copy. An uncertain change never moves the
-/// record.
+/// succeeded with exactly that copy. An update moves the record, and the
+/// ownership to the scope that prepared it (as a normal import does), only
+/// when the entry names that scope and does not say the import failed; it
+/// never leaves the copy owned by a scope that did not import it. An
+/// uncertain change never moves the record.
 fn follow(record: &mut Record, change: &HistoryEntry, how: &Settled) {
     if *how != Settled::Made {
         return;
@@ -1067,7 +1070,10 @@ fn follow(record: &mut Record, change: &HistoryEntry, how: &Settled) {
             record.skills.remove(name);
         }
         (Some(after), false) if owned => {
-            record.skills.insert(name.clone(), after.clone());
+            if let (false, Some(scope)) = (change.imported == Some(false), &change.scope) {
+                record.skills.insert(name.clone(), after.clone());
+                record.owners.insert(name.clone(), scope.clone());
+            }
         }
         (Some(after), true) if held.is_none() || held == Some(after) => {
             if let (Some(true), Some(scope)) = (change.imported, &change.scope) {
@@ -2652,6 +2658,34 @@ mod tests {
         follow(&mut record, &proven, &Settled::Made);
         assert_eq!(record.skills["tool"], "2");
         assert_eq!(record.owners["tool"], "b");
+        // An owned update follows, and goes to the scope that prepared it,
+        // unless the entry says its import failed or names no scope.
+        record.skills.insert("tool".into(), "1".into());
+        record.owners.insert("tool".into(), "a".into());
+        let update = HistoryEntry {
+            scope: Some("b".into()),
+            imported: Some(true),
+            ..change("updated", Some("1"), Some("2"))
+        };
+        let failed = HistoryEntry {
+            imported: Some(false),
+            ..update.clone()
+        };
+        follow(&mut record, &failed, &Settled::Made);
+        let nameless = HistoryEntry {
+            scope: None,
+            ..update.clone()
+        };
+        follow(&mut record, &nameless, &Settled::Made);
+        assert_eq!(record.skills["tool"], "1");
+        assert_eq!(record.owners["tool"], "a");
+        let unmarked = HistoryEntry {
+            imported: None,
+            ..update.clone()
+        };
+        follow(&mut record, &unmarked, &Settled::Made);
+        assert_eq!(record.skills["tool"], "2");
+        assert_eq!(record.owners["tool"], "b");
         record.skills.insert("tool".into(), "other".into());
         follow(
             &mut record,
@@ -3005,6 +3039,41 @@ mod tests {
         fs::write(skill.join("SKILL.md"), "two").unwrap();
         assert_eq!(rig.sync().unwrap(), Synced::default());
         assert_eq!(stored_text(&rig), "two");
+    }
+
+    #[test]
+    fn recovery_gives_an_update_to_the_scope_that_imported_it() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let rig = Rig::new();
+        let a = rig.root.path().join("scopes/a");
+        let b = rig.root.path().join("scopes/b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync_in(&a).unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        let home = account_home(&b);
+        let fail_home = home.clone();
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::set_permissions(&fail_home, fs::Permissions::from_mode(0o500)).unwrap();
+        }));
+        let failed = rig.sync_in(&b);
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err());
+        assert_eq!(stored_text(&rig), "two");
+        let bundled = BTreeMap::from([("tool".to_owned(), vec!["pix".to_owned()])]);
+        sync(&rig.sbx, &[rig.folder()], &a, &bundled).unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "recovery retained the old importing scope and deleted B's update"
+        );
+        let (record, _) = read_record(&a, &rig.fake.store());
+        assert_eq!(record.owners.get("tool").map(String::as_str), Some("b"));
     }
 
     #[test]

@@ -442,7 +442,7 @@ refused by the spawn set), and is counted in `marsh status`
   the record, then publishes the entries of the skills the store shows
   changed. A crash leaves entries pending, and the next pass settles each
   by the store: made (published; the record follows only a change of what
-  it owned, and takes a new skill, for the scope that prepared it, only
+  it owned, for the scope that prepared it, and takes a new skill, for the scope that prepared it, only
   when the entry is marked imported), not made (dropped), or uncertain
   (published as `uncertain`, never owned). Before `sbx skills rm` it checks
   each copy again against the record.

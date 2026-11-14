@@ -306,7 +306,8 @@ compares the store with each entry still pending:
 
 - the store holds what the change installed (or the removal is done): the
   entry is kept, and the record follows the change when the mirror owned
-  the copy it replaced. A new skill becomes the mirror's, and the scope's
+  the copy it replaced, giving the skill to the scope that prepared the
+  change (unless the entry says its import failed). A new skill becomes the mirror's, and the scope's
   that imported it, only when the entry says the import succeeded with
   exactly that copy (marsh writes that into the entry right after the
   import, before the record);
