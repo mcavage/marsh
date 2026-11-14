@@ -23,7 +23,8 @@
 #[cfg(unix)]
 pub(crate) use imp::{
     arrived, discard, forget_after_fork, ignored_by_trap, is_recorded, listen, note_child_reaped,
-    set_ignored_by_trap, take, take_pending, take_reaped_children,
+    poison_for_test, record_state_for_test, set_ignored_by_trap, take, take_pending,
+    take_reaped_children,
 };
 
 #[cfg(not(unix))]
@@ -42,7 +43,7 @@ pub(crate) fn take(_signal: i32) -> bool {
 #[cfg(unix)]
 mod imp {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 
     /// A signal whose arrivals the handler counts into `handled`.
     ///
@@ -159,22 +160,50 @@ mod imp {
     }
     static RECORDED: Mutex<Vec<Recorded>> = Mutex::new(Vec::new());
 
+    /// Locks [`RECORDED`], also after a thread panicked while holding it (for
+    /// instance inside a handler registration in a command substitution, which
+    /// runs on a task whose panic the shell survives). An entry is pushed only
+    /// once its handler is installed, so the list stays usable; treating a
+    /// poisoned lock as empty would silently stop every later trap and `INT`
+    /// check in the shell.
+    fn recorded() -> MutexGuard<'static, Vec<Recorded>> {
+        RECORDED.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Poisons [`RECORDED`], as a panic with the lock held would.
+    pub(crate) fn poison_for_test() {
+        let poisoner = std::thread::spawn(|| {
+            let _held = RECORDED.lock();
+            panic!("poisoning the recorded-signals lock for a test");
+        });
+        let _ = poisoner.join();
+    }
+
+    /// Whether `signal` is recorded in this process, as `(armed, arrived)`.
+    pub(crate) fn record_state_for_test(signal: i32) -> Option<(bool, bool)> {
+        recorded()
+            .iter()
+            .find(|entry| entry.signal == signal)
+            .map(|entry| (entry.armed, entry.arrived()))
+    }
+
     /// Starts recording `signal` for delivery between commands. This installs
     /// a handler for it (replacing the default action), so call it only where
     /// the runtime's handler is (or is about to be) installed anyway. Requires
-    /// a runtime.
+    /// a runtime. Signals the registry refuses to catch (`KILL`, `STOP`, `ILL`,
+    /// `FPE`, `SEGV`: it panics) are not recorded.
     ///
     /// The recording handler is installed before the runtime's own, so
     /// whenever the runtime has dispatched an arrival the recording of it is
     /// already visible: a later `discard` cannot be undone by a handler still
     /// running.
     pub(crate) fn listen(signal: i32) {
-        if tokio::runtime::Handle::try_current().is_err() {
+        if signal_hook::consts::FORBIDDEN.contains(&signal)
+            || tokio::runtime::Handle::try_current().is_err()
+        {
             return;
         }
-        let Ok(mut recorded) = RECORDED.lock() else {
-            return;
-        };
+        let mut recorded = recorded();
         if let Some(entry) = recorded.iter_mut().find(|entry| entry.signal == signal) {
             if !entry.armed {
                 // Arrivals from before this process listened are not its own.
@@ -209,10 +238,7 @@ mod imp {
         if !LISTENING.load(Ordering::Acquire) {
             return Vec::new();
         }
-        let Ok(recorded) = RECORDED.lock() else {
-            return Vec::new();
-        };
-        recorded
+        recorded()
             .iter()
             .filter(|entry| entry.armed && entry.consume())
             .map(|entry| entry.signal)
@@ -224,10 +250,7 @@ mod imp {
         if !LISTENING.load(Ordering::Acquire) {
             return false;
         }
-        let Ok(recorded) = RECORDED.lock() else {
-            return false;
-        };
-        recorded
+        recorded()
             .iter()
             .filter(|entry| entry.armed && entry.signal == signal)
             .fold(false, |arrived, entry| entry.consume() || arrived)
@@ -236,21 +259,17 @@ mod imp {
     /// Whether `signal` arrived since it was last taken, leaving the record.
     pub(crate) fn arrived(signal: i32) -> bool {
         LISTENING.load(Ordering::Acquire)
-            && RECORDED.lock().is_ok_and(|recorded| {
-                recorded
-                    .iter()
-                    .any(|entry| entry.armed && entry.signal == signal && entry.arrived())
-            })
+            && recorded()
+                .iter()
+                .any(|entry| entry.armed && entry.signal == signal && entry.arrived())
     }
 
     /// Whether arrivals of `signal` are being recorded in this process.
     pub(crate) fn is_recorded(signal: i32) -> bool {
         LISTENING.load(Ordering::Acquire)
-            && RECORDED.lock().is_ok_and(|recorded| {
-                recorded
-                    .iter()
-                    .any(|entry| entry.armed && entry.signal == signal)
-            })
+            && recorded()
+                .iter()
+                .any(|entry| entry.armed && entry.signal == signal)
     }
 
     /// Forgets recorded arrivals of `signal`; a wait already delivered it.
@@ -258,10 +277,7 @@ mod imp {
         if !LISTENING.load(Ordering::Acquire) {
             return;
         }
-        let Ok(recorded) = RECORDED.lock() else {
-            return;
-        };
-        for entry in recorded.iter().filter(|entry| entry.signal == signal) {
+        for entry in recorded().iter().filter(|entry| entry.signal == signal) {
             entry.consume();
         }
     }
@@ -272,7 +288,12 @@ mod imp {
     pub(crate) fn forget_after_fork() {
         LISTENING.store(false, Ordering::Release);
         REAPED.store(0, Ordering::Release);
-        if let Ok(mut recorded) = RECORDED.try_lock() {
+        let recorded = match RECORDED.try_lock() {
+            Ok(recorded) => Some(recorded),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        if let Some(mut recorded) = recorded {
             for entry in recorded.iter_mut() {
                 entry.armed = false;
                 entry.forget();

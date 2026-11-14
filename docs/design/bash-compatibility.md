@@ -96,8 +96,16 @@ repaired:
   `kill` returns, and a blocking `read` from a terminal is not interrupted.
   An `EXIT` trap without a `TERM` trap does not run when `TERM` kills the
   shell (GNU Bash runs it).
+- `trap` records and lists traps on `SEGV`, `ILL` and `FPE`, but the shell does
+  not catch those signals (the runtime refuses to): one sent with `kill -ILL $$`
+  ends the shell by the signal instead of running the trap, and `trap '' ILL`
+  does not ignore it. GNU Bash runs or ignores it.
 - `(( m["a b"]=1 ))` (quoted associative subscript in arithmetic) does not
   parse.
+- `read -t` takes what Rust parses as a decimal number: `1e1`, `1e-1` and `0e0`
+  are accepted (Bash rejects them), while `''`, `.`, `+` and `-` are rejected
+  with status 1 (Bash reads them as 0). Its diagnostic lacks Bash's
+  `NAME: line N:` prefix.
 - `set -u` on an unbound variable exits 1 (GNU Bash 5.3: 127); diagnostics
   use Brush's wording throughout.
 - `${x~~}` case toggling, `select`, and an unquoted space inside an

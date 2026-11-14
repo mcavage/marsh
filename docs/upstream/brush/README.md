@@ -105,6 +105,33 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   brace expansion (`0001`; upstream `8cfa8e86`, which memoizes the
   `brace_expr` rule). Covered by
   `runs_of_unterminated_braces_expand_promptly`.
+- `trap` on `SEGV`, `ILL` or `FPE` (also `trap '' 8`) no longer panics the
+  shell (`0002`). The signal registry refuses to catch those, so `listen` skips
+  them: the trap is recorded and listed but never delivered
+  (`docs/design/bash-compatibility.md`, known gaps). The `RECORDED` lock is also
+  taken through poison where trap recording, `listen`, the pending-arrival take
+  and the post-fork reset use it, so a panic while it is held (in a `$( )` task,
+  which the shell survives) no longer silences every later trap and `INT` check.
+  The other readers of the lock (`take`, `arrived`, `is_recorded`, `discard`)
+  also recover from poison but no test fails if they stop.
+  Covered by `traps_on_synchronous_signals_are_recorded_without_ending_the_shell`,
+  and for the poisoned lock by `signals_keep_working_after_the_recorded_signals_lock_is_poisoned`
+  (`smoke.rs`) and `recording_and_the_post_fork_reset_survive_a_poisoned_lock`
+  (`signal_records.rs`), which poison it through the hidden
+  `brush_core::traps::signal_records_for_test` hooks (nothing in the shell calls them).
+- A brace sequence increment that does not fit in 64 bits no longer panics the
+  parser, and a sequence that would step past the end of the 64-bit range (or
+  of the character range) stops there instead of overflowing (`0001`, `0004`;
+  upstream `c324f295`): the word stays text, as in Bash. This is the first
+  change to `braceexpansion.rs`, which `0004` now carries. Covered by
+  `brace_sequence_increments_out_of_range_do_not_panic`.
+- `read -t` rejects a timeout it cannot wait for (infinite, NaN, `1e400`,
+  negative, or not a decimal number) with `read: VALUE: invalid timeout
+  specification` and status 1, instead of panicking converting it to a
+  `Duration` (`0005`; upstream `e201ca27`). A finite timeout too long to
+  represent waits without a deadline. Text that is not a number now gets that
+  status 1, where it was a usage error with status 2. Covered by
+  `read_timeouts_that_cannot_be_waited_for_are_rejected`.
 
 ## Retired per-fix inventory
 

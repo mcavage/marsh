@@ -2740,3 +2740,84 @@ fn runs_of_unterminated_braces_expand_promptly() {
         std::format!("{run}.\n{run}.}}\n{run}x}}\n{run}a {run}b\n").as_bytes(),
     );
 }
+
+/// `trap` accepts every signal Bash does, including `SEGV`, `ILL` and `FPE`,
+/// which the runtime's signal registry refuses to catch (it panicked, ending
+/// the shell; legacy scripts say `trap '...' 1 2 3 4 8 15`). The trap is
+/// recorded and listed, and one set in a command substitution (which runs in
+/// the shell's own process) leaves later traps working.
+#[test]
+fn traps_on_synchronous_signals_are_recorded_without_ending_the_shell() {
+    use std::os::unix::process::ExitStatusExt as _;
+    differential(
+        r#"trap 'echo x' SEGV ILL FPE; trap '' 8
+trap -p SEGV ILL FPE
+trap - SEGV; trap -p SEGV; echo "listed=$?"
+x=$(trap : SEGV; echo in); echo "$x"
+trap 'echo got' USR1; kill -USR1 $$; echo end"#,
+        0,
+        b"trap -- 'echo x' SIGSEGV\ntrap -- 'echo x' SIGILL\ntrap -- '' SIGFPE\nlisted=0\nin\ngot\nend\n",
+    );
+    // Known gap (docs/design/bash-compatibility.md): the shell does not catch
+    // these signals, so one sent to it ends it instead of running the trap,
+    // where Bash runs the trap.
+    let output = run(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        "ulimit -c 0; trap 'echo caught' ILL; kill -ILL $$; echo after",
+        false,
+    );
+    assert_eq!(output.status.signal(), Some(4), "SIGILL: {output:?}");
+    assert_eq!(output.stdout, b"", "{output:?}");
+}
+
+/// A brace sequence whose increment does not fit in 64 bits is left as text
+/// rather than panicking the parser, and one that would step past the end of
+/// the 64-bit range stops there instead of overflowing.
+#[test]
+fn brace_sequence_increments_out_of_range_do_not_panic() {
+    differential(
+        r"echo {1..5..99999999999999999999} {1..5..-99999999999999999999} {a..e..99999999999999999999} x{1..5..99999999999999999999}y
+echo {1..5..9223372036854775808}
+echo {1..5..9223372036854775807} {5..1..9223372036854775807} {1..5..-9223372036854775808}
+echo {a..e..9223372036854775807} {a..e..-9223372036854775808}
+echo {5..1..-9223372036854775808} {3..3..-9223372036854775808} {e..a..-9223372036854775808}
+echo {-9223372036854775807..-9223372036854775808..2} {-9223372036854775806..-9223372036854775808..5}
+echo {z..a..200} {z..a..4294967297} {Z..A..30}
+echo {9223372036854775800..9223372036854775807..5} {9223372036854775806..9223372036854775807..2}
+echo {1..5..4294967296} {1..5..4294967297} {a..e..4294967296} {a..z..200}
+echo still running",
+        0,
+        b"{1..5..99999999999999999999} {1..5..-99999999999999999999} {a..e..99999999999999999999} x{1..5..99999999999999999999}y\n\
+{1..5..9223372036854775808}\n\
+1 5 {1..5..-9223372036854775808}\n\
+a {a..e..-9223372036854775808}\n\
+{5..1..-9223372036854775808} {3..3..-9223372036854775808} {e..a..-9223372036854775808}\n\
+-9223372036854775807 -9223372036854775806\n\
+z z Z\n\
+9223372036854775800 9223372036854775805 9223372036854775806\n\
+1 1 a a\n\
+still running\n",
+    );
+}
+
+/// `read -t` rejects a timeout it cannot wait for (infinite, NaN, negative,
+/// not a decimal number) with status 1 and a message; these panicked converting
+/// the value to a `Duration`. A finite timeout too long to represent waits
+/// without a deadline (Bash on macOS fails those with `EINVAL`, so the Bash
+/// oracle is used only for the invalid ones).
+#[test]
+fn read_timeouts_that_cannot_be_waited_for_are_rejected() {
+    differential(
+        r#"for t in inf -inf +inf Infinity nan NaN 1e400 abc 0x10 1:2 -1; do echo x | { read -t "$t" v 2>/dev/null; echo "$t: rc=$? v=$v"; }; done"#,
+        0,
+        b"inf: rc=1 v=\n-inf: rc=1 v=\n+inf: rc=1 v=\nInfinity: rc=1 v=\nnan: rc=1 v=\nNaN: rc=1 v=\n1e400: rc=1 v=\nabc: rc=1 v=\n0x10: rc=1 v=\n1:2: rc=1 v=\n-1: rc=1 v=\n",
+    );
+    let script = r#"for t in 9223372036854775807 99999999999999999999 1e300; do echo x | { read -t "$t" v; echo "$t: rc=$? v=$v"; }; done"#;
+    let output = run(env!("CARGO_BIN_EXE_marsh-local"), script, false);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        output.stdout,
+        b"9223372036854775807: rc=0 v=x\n99999999999999999999: rc=0 v=x\n1e300: rc=0 v=x\n",
+        "{output:?}"
+    );
+}

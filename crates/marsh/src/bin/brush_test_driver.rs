@@ -64,5 +64,11 @@ fn main() {
     if std::env::var_os("MARSH_TEST_EXTENSIONS").is_some() {
         brush_shell::entry::enable_marsh_extensions();
     }
+    if std::env::var_os("MARSH_TEST_POISON_SIGNAL_RECORDS").is_some() {
+        // Silence the poisoning panic's report, then restore the default hook.
+        std::panic::set_hook(Box::new(|_| {}));
+        brush_core::traps::signal_records_for_test::poison();
+        drop(std::panic::take_hook());
+    }
     brush_shell::entry::run();
 }

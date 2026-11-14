@@ -66,7 +66,7 @@ pub(crate) struct ReadCommand {
     /// Specify timeout in seconds; fail if the timeout elapses before
     /// input is completed.
     #[clap(short = 't', value_name = "SECONDS", allow_hyphen_values = true)]
-    timeout_in_seconds: Option<f64>,
+    timeout_in_seconds: Option<String>,
 
     /// File descriptor to read from instead of stdin.
     #[clap(short = 'u', name = "FD")]
@@ -93,9 +93,20 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
         }
 
         // Validate timeout value if provided.
-        if let Some(result) = self.validate_timeout(&context)? {
-            return Ok(result);
-        }
+        let timeout = match self.timeout_in_seconds.as_deref() {
+            None => None,
+            Some(spec) => {
+                let Some(timeout) = parse_timeout(spec) else {
+                    writeln!(
+                        context.stderr(),
+                        "{}: {spec}: invalid timeout specification",
+                        context.command_name
+                    )?;
+                    return Ok(brush_core::ExecutionResult::general_error());
+                };
+                Some(timeout)
+            }
+        };
 
         // Find the input stream to use.
         let fd_num = self.fd_num_to_read.map_or(
@@ -120,9 +131,6 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
         // We convert to owned String to release the borrow before the mutable borrow
         // needed for variable assignment.
         let ifs = context.shell.ifs().into_owned();
-
-        // Convert timeout to Duration.
-        let timeout = self.timeout_in_seconds.map(Duration::from_secs_f64);
 
         // Perform the read operation (potentially with timeout).
         let mut escaped = vec![];
@@ -480,7 +488,8 @@ impl InputReader {
                 1,
                 PolledInput {
                     input,
-                    deadline: timeout.map(|t| Instant::now() + t),
+                    // A deadline too far off to represent is no deadline at all.
+                    deadline: timeout.and_then(|t| Instant::now().checked_add(t)),
                 },
             ),
             term_mode,
@@ -784,29 +793,21 @@ impl ReadCommand {
 
         Ok(mode)
     }
+}
 
-    /// Validates the timeout value and returns an error result if invalid.
-    ///
-    /// Returns `Ok(Some(result))` if the timeout is invalid (caller should return early),
-    /// `Ok(None)` if the timeout is valid or not specified.
-    ///
-    /// TODO(read): Bash uses $TMOUT as a default timeout for `read` when -t is not specified.
-    fn validate_timeout(
-        &self,
-        context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
-    ) -> Result<Option<brush_core::ExecutionResult>, brush_core::Error> {
-        if let Some(timeout) = self.timeout_in_seconds {
-            if timeout < 0.0 {
-                writeln!(
-                    context.stderr(),
-                    "{}: -t: invalid timeout specification",
-                    context.command_name
-                )?;
-                return Ok(Some(brush_core::ExecutionResult::general_error()));
-            }
-        }
-        Ok(None)
+/// Parses a `-t` timeout given in seconds, returning `None` if it isn't a valid timeout.
+///
+/// TODO(read): Bash uses $TMOUT as a default timeout for `read` when -t is not specified.
+fn parse_timeout(spec: &str) -> Option<Duration> {
+    let secs: f64 = spec.parse().ok()?;
+
+    // -0 is a zero timeout; other negatives, infinities and NaN are invalid.
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
     }
+
+    // A timeout too long to represent is as good as one that never expires.
+    Some(Duration::try_from_secs_f64(secs).unwrap_or(Duration::MAX))
 }
 
 #[cfg(test)]
