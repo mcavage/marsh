@@ -111,6 +111,8 @@ struct Connection {
     send_window: Arc<SendWindow>,
     identity: Arc<()>,
     read_closed: bool,
+    /// A write to the peer failed: it reads no more.
+    write_failed: bool,
     end: ConnectionEnd,
 }
 
@@ -946,6 +948,15 @@ where
                     read => break read,
                 }
             };
+            // A peer that closes a socket holding input it never read ends it
+            // with a reset, after the data it had sent. That is a full close,
+            // not a failure: a daemon closes this way when a shell client's
+            // last frames arrive after it ended. Ending the connection with
+            // `Close` instead would overtake the data still queued behind it.
+            let reset = read
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset);
+            let read = if reset { Ok(0) } else { read };
             match read {
                 Ok(0) => {
                     // A zero-byte socket write changes no protocol bytes and
@@ -953,14 +964,15 @@ where
                     // one that only shut down its sending direction. Retaining
                     // the former would let expired daemon handshakes consume
                     // every relay slot even after their sockets disappeared.
-                    let peer_closed = source.stream.write(&[]).is_err_and(|error| {
-                        matches!(
-                            error.kind(),
-                            std::io::ErrorKind::BrokenPipe
-                                | std::io::ErrorKind::ConnectionReset
-                                | std::io::ErrorKind::NotConnected
-                        )
-                    });
+                    let peer_closed = reset
+                        || source.stream.write(&[]).is_err_and(|error| {
+                            matches!(
+                                error.kind(),
+                                std::io::ErrorKind::BrokenPipe
+                                    | std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::NotConnected
+                            )
+                        });
                     if let Some(frame) =
                         reader_eof(&connections, connection, &source.identity, peer_closed)
                         && send(&tunnel, &frame).is_err()
@@ -1037,6 +1049,9 @@ fn reader_eof(
         return None;
     }
     client.read_closed = true;
+    // A peer that cannot be written to has closed, as much as one whose
+    // read reached a reset.
+    let peer_closed = peer_closed || client.write_failed;
     if peer_closed || client.end == ConnectionEnd::EofDelivered {
         close_connection(&mut guard, connection);
     }
@@ -1048,6 +1063,35 @@ fn reader_eof(
     } else {
         TunnelFrame::Eof { connection }
     })
+}
+
+/// A write to the connection's peer failed: it has closed. What the remote
+/// relay still sends for it is discarded, but the connection ends only after
+/// everything this side's reader forwarded, so never with a `Close`, which the
+/// remote applies at once and which drops what it has queued.
+///
+/// If the reader is still running it ends the connection when the peer's
+/// socket reaches its end (`reader_eof`). If it has already ended (the peer
+/// half-closed first), no reader remains to do that: the connection ends here,
+/// with the ordered `Finished` that tells the remote relay the peer is gone.
+fn writer_failed(
+    connections: &Connections,
+    connection: u64,
+    identity: &Arc<()>,
+) -> Option<TunnelFrame> {
+    let mut guard = connections
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let client = guard.get_mut(&connection)?;
+    if !Arc::ptr_eq(&client.identity, identity) {
+        return None;
+    }
+    client.write_failed = true;
+    if !client.read_closed {
+        return None;
+    }
+    close_connection(&mut guard, connection);
+    Some(TunnelFrame::Finished { connection })
 }
 
 fn writer_eof(connections: &Connections, connection: u64, identity: &Arc<()>) -> bool {
@@ -1237,6 +1281,7 @@ fn register_connection_as<W: Write + Send + 'static>(
             send_window,
             identity: Arc::clone(&identity),
             read_closed: false,
+            write_failed: false,
             end: ConnectionEnd::Open,
         },
     );
@@ -1244,27 +1289,36 @@ fn register_connection_as<W: Write + Send + 'static>(
     let connections = Arc::clone(connections);
     let tunnel = Arc::clone(tunnel);
     thread::spawn(move || {
+        // Once a write fails the peer reads no more (`writer_failed`): what
+        // arrives for it is discarded, and credited so the far side's sender
+        // is not left waiting.
+        let mut unwritable = false;
         while let Ok(message) = pending.recv() {
-            match message {
+            let failed = match message {
                 ConnectionWrite::Data(bytes) => {
-                    let result = stream.write_all(&bytes);
+                    let failed = !unwritable && stream.write_all(&bytes).is_err();
                     pending_chunks.fetch_sub(1, Ordering::AcqRel);
-                    if result.is_err()
-                        || send(&tunnel, &TunnelFrame::Credit { connection }).is_err()
-                    {
+                    if send(&tunnel, &TunnelFrame::Credit { connection }).is_err() {
                         break;
                     }
+                    failed
                 }
                 ConnectionWrite::Eof => {
-                    if stream.shutdown(Shutdown::Write).is_err() {
-                        break;
-                    }
-                    if writer_eof(&connections, connection, &identity) {
+                    let failed = !unwritable && stream.shutdown(Shutdown::Write).is_err();
+                    if !failed && writer_eof(&connections, connection, &identity) {
                         return;
                     }
+                    failed
                 }
                 ConnectionWrite::Finish => {
                     finish_connection(&connections, connection, &identity);
+                    return;
+                }
+            };
+            if failed {
+                unwritable = true;
+                if let Some(frame) = writer_failed(&connections, connection, &identity) {
+                    let _ = send(&tunnel, &frame);
                     return;
                 }
             }
@@ -1734,6 +1788,164 @@ mod tests {
             assert!(self.cleaned.load(Ordering::Acquire));
             assert!(!self.socket.exists());
         }
+    }
+
+    /// What the caller does after the daemon has closed its socket.
+    #[derive(Clone, Copy)]
+    enum Afterwards {
+        Nothing,
+        /// Writes more (a shell's late stdin frames and credits do).
+        Writes,
+        /// Ends its sending direction, as a caller that has sent its request does.
+        HalfCloses,
+    }
+
+    /// The daemon answers and closes its socket while the response is still
+    /// on its way: nobody reads it yet, so the daemon writes until every
+    /// buffer on the way is full and part of it is still with the host relay
+    /// when the socket closes. `unread_input` is what the caller sent before
+    /// that, which the daemon never reads (its close then ends in a reset).
+    ///
+    /// The caller then reads half the response and stops for a while, so the
+    /// relays reach the end of the connection while the rest is still queued
+    /// at the guest relay, and an end that was a `Close` would drop it.
+    fn response_survives_the_daemon_closing(unread_input: bool, afterwards: Afterwards) {
+        let relays = PairedRelays::new();
+        let mut guest = UnixStream::connect(&relays.socket).unwrap();
+        guest.set_read_timeout(Some(PATIENCE)).unwrap();
+        let mut peer = relays.listener.accept().unwrap().0;
+        if unread_input {
+            guest.write_all(b"early input").unwrap();
+            thread::sleep(Duration::from_millis(100));
+        }
+        // The size depends on the platform's socket buffers, so it is
+        // whatever the daemon got written.
+        peer.set_write_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let pattern: Vec<u8> = (0..CHUNK_BYTES)
+            .map(|index| u8::try_from(index % 251).unwrap())
+            .collect();
+        let mut written = 0_usize;
+        while written < 16 << 20 {
+            match peer.write(&pattern[written % CHUNK_BYTES..]) {
+                Ok(count) => written += count,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break;
+                }
+                Err(error) => panic!("the daemon's write failed: {error}"),
+            }
+        }
+        assert!(written > 0 && written < 16 << 20, "{written}");
+        drop(peer);
+        thread::sleep(Duration::from_millis(100));
+        match afterwards {
+            Afterwards::Nothing => {}
+            Afterwards::Writes => guest.write_all(b"late input").unwrap(),
+            Afterwards::HalfCloses => guest.shutdown(Shutdown::Write).unwrap(),
+        }
+        let mut response = vec![0_u8; written / 2];
+        guest.read_exact(&mut response).unwrap();
+        thread::sleep(Duration::from_millis(300));
+        let rest = read_to_end(&mut guest);
+        relays.stop();
+        let expected: Vec<u8> = (0..written)
+            .map(|index| pattern[index % CHUNK_BYTES])
+            .collect();
+        response.extend(rest.as_ref().map(Vec::as_slice).unwrap_or_default());
+        assert!(
+            rest.is_ok() && response == expected,
+            "the response was cut short: {} of {written} bytes ({:?})",
+            response.len(),
+            rest.as_ref().err()
+        );
+    }
+
+    #[test]
+    fn a_caller_writing_after_the_daemon_closed_still_gets_the_whole_response() {
+        response_survives_the_daemon_closing(false, Afterwards::Writes);
+    }
+
+    #[test]
+    fn a_caller_half_closing_after_the_daemon_closed_still_gets_the_whole_response() {
+        response_survives_the_daemon_closing(false, Afterwards::HalfCloses);
+    }
+
+    #[test]
+    fn a_daemon_that_closes_with_unread_input_still_delivers_the_whole_response() {
+        response_survives_the_daemon_closing(true, Afterwards::Nothing);
+    }
+
+    /// The caller half-closes (its reader has ended and sent `Eof`), then goes
+    /// away, and a response then fails to write: no reader remains to end the
+    /// connection, so the failed write must, and with the ordered `Finished`
+    /// that tells the remote relay, never a `Close`.
+    #[test]
+    fn a_failed_write_after_the_reader_ended_releases_the_connection() {
+        let connections: Connections = Arc::default();
+        let (stream, peer) = socket_pair();
+        let tunnel = Arc::new(Mutex::new(Vec::new()));
+        let reader = register_connection(1, stream, &connections, &tunnel).unwrap();
+        let task = spawn_reader(1, reader, Arc::clone(&connections), Arc::clone(&tunnel));
+        peer.shutdown(Shutdown::Write).unwrap();
+        wait_until("the reader sees the half-close", || task.is_finished());
+        task.join().unwrap();
+        assert_eq!(connections.lock().unwrap().len(), 1);
+        drop(peer);
+        forward_data(&connections, &tunnel, 1, b"late response".to_vec()).unwrap();
+        wait_until("the failed write releases the connection", || {
+            connections.lock().unwrap().is_empty()
+        });
+        let sent = tunnel.lock().unwrap().clone();
+        let mut sent = Cursor::new(sent);
+        let mut frames = Vec::new();
+        while let Ok(frame) = read_frame::<TunnelFrame>(&mut sent) {
+            frames.push(frame);
+        }
+        assert!(
+            frames.contains(&TunnelFrame::Eof { connection: 1 }),
+            "{frames:?}"
+        );
+        assert!(
+            frames.contains(&TunnelFrame::Finished { connection: 1 }),
+            "{frames:?}"
+        );
+        assert!(
+            !frames.contains(&TunnelFrame::Close { connection: 1 }),
+            "{frames:?}"
+        );
+    }
+
+    /// The caller's end of stream reaches a connection whose peer has closed
+    /// (on macOS the half-close then fails with ENOTCONN). That is not a
+    /// reason to send `Close`, which the remote applies at once, dropping what
+    /// it has queued for its own peer: the connection stays until its reader
+    /// reports the peer's end.
+    #[test]
+    fn a_half_close_toward_a_closed_peer_does_not_send_close() {
+        let connections: Connections = Arc::default();
+        let (stream, peer) = socket_pair();
+        let tunnel = Arc::new(Mutex::new(Vec::new()));
+        let _reader = register_connection(1, stream, &connections, &tunnel).unwrap();
+        drop(peer);
+        end_after_queued_data(&connections, 1, false);
+        wait_until("the writer has handled the end of stream", || {
+            connections.lock().unwrap().get(&1).is_none_or(|client| {
+                client.write_failed || client.end == ConnectionEnd::EofDelivered
+            })
+        });
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(connections.lock().unwrap().len(), 1);
+        let sent = tunnel.lock().unwrap().clone();
+        let mut sent = Cursor::new(sent);
+        while let Ok(frame) = read_frame::<TunnelFrame>(&mut sent) {
+            assert!(!matches!(frame, TunnelFrame::Close { .. }), "{frame:?}");
+        }
+        close_all_connections(&connections);
     }
 
     #[test]
