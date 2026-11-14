@@ -134,7 +134,7 @@ When unset, control directories are in
 | Path | Contents |
 |---|---|
 | `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), whether marsh mirrors your skills folders into the Docker Sandboxes skills store, set by `marsh config skills-mirror on\|off` (default on), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3), job limits (`limits`), set by `marsh config limit NAME VALUE\|default`, and the [services VM](design/services.md) settings: `services_projects`, the projects services are on for, set by `marsh config services on\|off` in a project's folder (default none; per project, never per home), `services_disk_size`, set by `marsh config services-disk-size SIZE` (default `40g`), and `services_idle_seconds`, set by `marsh config services-idle-seconds SECONDS` (default 900). Default path `~/.marsh/config.json`. |
-| `CONTROL/HASH/skills-mirror.json` | The skills the skills mirror put in the Docker Sandboxes store, with a digest of each: only these are ever replaced or removed. |
+| `CONTROL/skills-mirror/` | Shared by every scope's skills mirror, since the Docker Sandboxes store belongs to your Mac account: `record-*.json`, the skills a mirror put in the store, with a digest of each (only these are ever replaced or removed), and `lock`, held while one scope's mirror changes the store. An older marsh's `CONTROL/HASH/skills-mirror.json` is merged in and renamed `skills-mirror.json.migrated`. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
@@ -270,7 +270,11 @@ differs, and `sbx skills rm --force` for the skills it imported whose folder
 is gone. It never replaces or removes a skill it did not import itself: when
 a name is already taken by a skill from `sbx skills add`, that skill wins and
 the name is listed as a clash. An `sbx skills add` skill with the same content
-as the folder's copy is left alone and stays when the folder's copy goes.
+as the folder's copy is left alone and stays when the folder's copy goes. What
+any scope's mirror imported, every scope's mirror may update or remove: the
+record is kept per Mac account, beside the scopes' control folders, and one
+mirror at a time changes the store (another scope's waits and tries again a
+minute later).
 
 The import gets a copy of each skill's folder, never a link to it. A skill
 folder may itself be a link (`~/.claude/skills/my-skill -> ~/dev/my-skill`),
