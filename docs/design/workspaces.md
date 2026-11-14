@@ -555,13 +555,19 @@ with the directory's identity) and reaches its files only by descriptor.
   denied) or whose directory isn't the recorded one is kept, and the orphan
   collector skips that project while any of its checkpoints can't be
   opened, so their Docker snapshots stay. A checkpoint is recognised by its
-  directory's inode alone: an external volume's device number changes
-  between mounts.
+  directory's `(dev, ino)`, or, where the volume guarantees persistent
+  file IDs (APFS; recorded at create), by volume UUID and file ID, so an
+  external volume mounted again (a new device number) keeps its
+  checkpoints. `marsh checkpoints rm` and retention remove only a
+  checkpoint so recognised, or verifiably gone; any other is kept with its
+  snapshots, and `rm` says why.
 - An unreadable `checkpoints.json` is renamed to
   `checkpoints.json.unreadable-<ms>` (copied, if it can't be renamed; left
-  alone and never written if neither works). The orphan collector does not
-  run while any such file is in the control directory, across restarts:
-  restore it as `checkpoints.json`, or remove it, to collect again.
+  alone and never written if neither works). While any such file is in
+  the control directory, across restarts, no services snapshot is dropped
+  (by the orphan collector, `rm` or retention) and the backend's lane
+  protection is not reconciled: restore it as `checkpoints.json`, or
+  remove it, to collect again.
 - Retention runs on every create and at daemon start: the newest 20 per
   label (unlabeled checkpoints are one label), none older than 7 days, at
   most 200 per project. A retired checkpoint goes to `.marsh/.trash`.
