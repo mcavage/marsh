@@ -717,9 +717,12 @@ fn sync(
             .skills_import(&staging)
             .map_err(|error| format!("sbx skills import failed: {error}"));
         let _ = fs::remove_dir_all(&staging);
-        for name in &plan.import {
-            if let Some(digest) = store_digest(name) {
-                record.skills.insert(name.clone(), digest);
+        // Only what this import put there is recorded: never a copy that
+        // appeared beside a failed import (an `sbx skills add`).
+        for (name, files) in &chosen {
+            let staged = digest(files);
+            if store_digest(name).as_ref() == Some(&staged) {
+                record.skills.insert((*name).clone(), staged);
             }
         }
     }
@@ -798,6 +801,25 @@ mod tests {
         assert!(gone.remove.is_empty(), "{gone:?}");
     }
 
+    /// A skill added to the store while an import failed is not recorded
+    /// as the mirror's, so it stays when the folder's copy goes.
+    #[test]
+    fn a_failed_import_never_adopts_a_skill_added_meanwhile() {
+        let rig = Rig::new();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "mine").unwrap();
+        *rig.fake.added_during_import.lock().unwrap() =
+            Some(("tool".to_owned(), "added".to_owned()));
+        assert!(rig.sync().is_err());
+        fs::remove_dir_all(&skill).unwrap();
+        rig.sync().unwrap();
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "added".to_owned())])
+        );
+    }
+
     #[test]
     fn a_kit_bundled_name_is_never_imported_and_an_earlier_import_goes() {
         let sources = map(&[
@@ -853,6 +875,9 @@ mod tests {
         imports: Mutex<usize>,
         /// Runs as the next import starts (a job changing a source then).
         during_import: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+        /// The next import fails after this skill (name, `SKILL.md`)
+        /// appeared in the store, as an `sbx skills add` meanwhile would.
+        added_during_import: Mutex<Option<(String, String)>>,
     }
 
     impl FakeSbx {
@@ -919,6 +944,15 @@ mod tests {
                     if let Some(change) = self.during_import.lock().unwrap().take() {
                         change();
                     }
+                    if let Some((name, body)) = self.added_during_import.lock().unwrap().take() {
+                        fs::create_dir_all(store.join(&name)).unwrap();
+                        fs::write(store.join(&name).join("SKILL.md"), body).unwrap();
+                        return Ok(marsh_runtime::CommandOutput {
+                            exit_code: Some(1),
+                            stdout: Vec::new(),
+                            stderr: b"import failed".to_vec(),
+                        });
+                    }
                     *self.imports.lock().unwrap() += 1;
                     let (_, home) = invocation
                         .environment
@@ -975,6 +1009,7 @@ mod tests {
                 home: root.path().join("stock-home"),
                 imports: Mutex::new(0),
                 during_import: Mutex::new(None),
+                added_during_import: Mutex::new(None),
             });
             fs::create_dir_all(root.path().join("control")).unwrap();
             fs::create_dir_all(root.path().join("folder")).unwrap();
