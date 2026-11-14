@@ -15,7 +15,9 @@ read-only, at its skills folder (`~/.claude/skills`, `~/.agents/skills`), in
 place of that folder in `~/.marsh/home`. `sbx settings set skills.defaultMode
 off` leaves the store out, and `marsh config skills-mirror off` stops the
 mirror. `marsh status` shows what is mirrored, and any skill whose name is
-already taken by an `sbx skills add` skill: the added skill wins.
+already taken by an `sbx skills add` skill: the added skill wins. Every job,
+in every project and marsh home, can read every mirrored skill, and an edit to
+a skill reaches every later job ([Security: Skills](../security.md#skills)).
 
 Use these paths on your Mac for instructions, and for Pi's own skills:
 
