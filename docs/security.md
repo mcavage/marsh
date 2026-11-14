@@ -100,9 +100,11 @@ worktree Git directories `.git/modules/` and `.git/worktrees/`. `.git` itself is
 bound onto itself so it can't be renamed away. A `.git` file (the project is
 itself a worktree or submodule, or was made with `--separate-git-dir`) is
 read-only. When the Git directory it names (or that directory's common
-directory) is inside the project, its controls are guarded the same way;
-when the path to it passes through a symlink inside the project (which a job
-could re-point), the job is refused. When it is outside the project, only
+directory) is directly in the project folder, its controls are guarded the
+same way (a linked worktree's Git directory inside such a common directory
+too). The job is refused when that directory sits deeper (a job could rename
+a directory above it and put its own in its place), or when the path to it
+passes through a symlink inside the project (which a job could re-point). When it is outside the project, only
 the `.git` file is guarded: the job doesn't see that directory unless it is
 under an extra folder or the guest home, where it is not protected; and in
 the job `git status` says `not a git repository`. A `.git` that is a

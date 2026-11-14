@@ -4454,6 +4454,22 @@ fn project_guards(project: &Path) -> Result<Vec<(PathBuf, bool)>, String> {
                     }
                     guards.extend(controls);
                 }
+                // A bind pins only its own directory: one above a Git dir it
+                // guards could be renamed and replaced by the job.
+                for (guarded, _) in guards.iter().filter(|(_, write)| *write) {
+                    if let Some(loose) = guarded
+                        .ancestors()
+                        .skip(1)
+                        .take_while(|ancestor| *ancestor != project)
+                        .find(|ancestor| !guards.iter().any(|(bound, _)| bound == ancestor))
+                    {
+                        return Err(format!(
+                            "{} names a Git directory below {}, which a job could rename and replace; keep it directly in the project folder",
+                            git.display(),
+                            loose.display()
+                        ));
+                    }
+                }
             }
         }
         _ => {}
@@ -4518,8 +4534,14 @@ fn in_project(project: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
     if let Ok(relative) = current.strip_prefix(&real_project) {
         return Ok(Some(project.join(relative)));
     }
-    // Outside the project as written: it must not lead back in.
-    if std::fs::canonicalize(&current).is_ok_and(|real| real.starts_with(&real_project)) {
+    // Outside the project as written: it must not lead back in (resolved
+    // as Git resolves it, `..` after a symlink included).
+    let written = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project.join(path)
+    };
+    if std::fs::canonicalize(&written).is_ok_and(|real| real.starts_with(&real_project)) {
         return Err(refused(&current));
     }
     Ok(None)
@@ -6450,7 +6472,15 @@ mod tests {
         }
         assert!(guards.contains(&(project.join("admin"), true)));
         git(&project, &["status", "--short"]);
-        // A linked worktree's Git dir in the project and its common dir.
+        // A Git dir below another directory of the project: the job could
+        // rename that directory (`mv real real.old`) and plant a new one.
+        let nested = root.join("nested");
+        fs::create_dir_all(nested.join("real")).unwrap();
+        git(&nested, &["init", "-q", "--separate-git-dir", "real/admin"]);
+        let refused = project_guards(&nested).unwrap_err();
+        assert!(refused.contains("could rename and replace"), "{refused}");
+        // A linked worktree's Git dir in the project and its common dir
+        // (whose own binds pin the directories above the worktree's).
         let linked = root.join("linked");
         for dir in ["admin/objects", "admin/refs", "admin/worktrees/w"] {
             fs::create_dir_all(linked.join(dir)).unwrap();
@@ -6543,11 +6573,19 @@ mod tests {
         std::os::unix::fs::symlink(&main, viasym.join("link")).unwrap();
         fs::write(viasym.join(".git"), "gitdir: link/.git\n").unwrap();
         assert!(project_guards(&viasym).is_err(), "a link leading out");
-        // `..` over real directories is followed as written.
         fs::remove_file(viasym.join("link")).unwrap();
-        fs::write(viasym.join(".git"), "gitdir: real/../real/admin\n").unwrap();
+        // A path that leaves the project and comes back in through a
+        // symlink outside it: refused.
+        std::os::unix::fs::symlink(&viasym, root.join("projlink")).unwrap();
+        fs::write(viasym.join(".git"), "gitdir: ../projlink/real/admin\n").unwrap();
+        let refused = project_guards(&viasym).unwrap_err();
+        assert!(refused.contains("is a symlink"), "{refused}");
+        // `..` over real directories is followed as written (to a Git dir
+        // directly in the project).
+        fs::rename(viasym.join("real/admin"), viasym.join("admin")).unwrap();
+        fs::write(viasym.join(".git"), "gitdir: real/../admin\n").unwrap();
         let guards = project_guards(&viasym).unwrap();
-        assert!(read_only(&guards, &viasym.join("real/admin/config")));
+        assert!(read_only(&guards, &viasym.join("admin/config")));
     }
 
     /// `.marsh` that is not a directory marsh can make refuses the job.
