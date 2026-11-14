@@ -15,13 +15,9 @@ pub(super) fn run(arguments: &[std::ffi::OsString]) -> Result<i32, RunError> {
         .ok()
         .filter(|slot| *slot < 16)
         .ok_or_else(|| RunError::new("ephemeral slot must be 0..15", 2))?;
-    if [
-        "MARSH_DAEMON_SOCKET",
-        "MARSH_DAEMON_TOKEN",
-        "MARSH_DEV_UPSTREAM_CONFIG",
-    ]
-    .iter()
-    .any(|key| env::var_os(key).is_some())
+    if ["MARSH_DAEMON_SOCKET", "MARSH_DAEMON_TOKEN"]
+        .iter()
+        .any(|key| env::var_os(key).is_some())
     {
         return Err(RunError::new(
             "retained ephemeral home recovery is host-only, never delegated through a guest relay",

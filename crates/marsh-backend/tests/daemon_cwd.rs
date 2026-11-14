@@ -186,7 +186,6 @@ esac
             .env("MARSH_GUEST_ARTIFACTS", "../guest")
             .env("MARSH_KIT_IMAGE_CACHE", "../kit-images")
             .env("MARSH_OWNERSHIP_MIRROR", "../mirror/vm-ownership.json")
-            .env("MARSH_DEV_CACHE_ROOT", "../dev")
             .env("MARSH_SKILLS_HOME", self.root.join("skills"))
             // A bare name: the host's `sh` on the fixed host command PATH,
             // never the project's.

@@ -1595,12 +1595,7 @@ impl DaemonClient for LocalDaemonClient {
             LoadSelection::Kits(kits) => marsh_daemon::LoadSelection::Kits(kits.clone()),
         };
         self.0
-            .prepare_with_progress(
-                selection,
-                daemon_session(session)?,
-                false,
-                std::io::stderr(),
-            )
+            .prepare_with_progress(selection, daemon_session(session)?, std::io::stderr())
             .map(|result| LoadReport {
                 cold_kits: result.cold_kits,
                 sandboxes: result.sandboxes,

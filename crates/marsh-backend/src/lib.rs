@@ -155,8 +155,6 @@ pub struct StockDaemonBackend {
     configured_mcp_vms: Mutex<BTreeMap<String, BTreeMap<String, String>>>,
     /// Why automatic recovery last left a quarantined Kit VM in place.
     quarantine_recovery: Mutex<BTreeMap<String, String>>,
-    /// The dev broker (`marsh --dev`); dev shells use the one shell image.
-    dev: Option<Arc<marsh_daemon::DevBroker>>,
     /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
     cloud: cloud::CloudPlacement,
     /// Automatic Kit updates; off unless [`Self::with_auto_update`].
@@ -299,12 +297,11 @@ impl StockDaemonBackend {
     }
 
     /// `--load`: prepare the selected Kits while the shell VM the session
-    /// will attach to (`dev`: the dev shell VM) warms in parallel.
+    /// will attach to warms in parallel.
     fn prepare_for_shell(
         &self,
         selection: &LoadSelection,
         session: &SessionSpec,
-        dev: bool,
         progress: &PreparationProgress,
         store: &DaemonStore,
     ) -> Result<PreparationResult, DaemonError> {
@@ -334,12 +331,7 @@ impl StockDaemonBackend {
             && !session.ephemeral_home
             && !store.shell_vm_bound(&session.session_id)
         {
-            // A dev session attaches to the dev shell VM, not the ordinary one.
-            if !dev {
-                self.start_shell_warmup(self.config.shell.clone());
-            } else if self.dev.is_some() {
-                self.start_shell_warmup(self.dev_shell()?);
-            }
+            self.start_shell_warmup(self.config.shell.clone());
         }
         let mut acquired = Vec::<(String, SessionGrantPins)>::new();
         let prepared = (|| {
@@ -388,17 +380,6 @@ impl StockDaemonBackend {
                 Err(error)
             }
         }
-    }
-
-    /// The one warm dev shell VM per daemon (dev template); its VM-local
-    /// build caches survive sessions like the ordinary shell VM.
-    fn dev_shell(&self) -> Result<ShellVmSpec, DaemonError> {
-        let mut dev = self.config.shell.clone();
-        dev.name = self
-            .sbx
-            .vm_name(VmPurpose::Shell, "dev")
-            .map_err(backend_error)?;
-        Ok(dev)
     }
 
     /// Wait for an in-flight shell warm-up before shell admission or cleanup.
@@ -513,7 +494,6 @@ impl StockDaemonBackend {
             sbxenv_sweep: Mutex::new(sbxenv::Sweep::default()),
             configured_mcp_vms: Mutex::new(BTreeMap::new()),
             quarantine_recovery: Mutex::new(BTreeMap::new()),
-            dev: None,
             cloud: cloud::CloudPlacement::default(),
             auto_update: None,
             kit_updates: Mutex::new(()),
@@ -613,14 +593,6 @@ impl StockDaemonBackend {
                 .filter(|key| key.is_absolute()),
         );
         self.services.relays = Some(Arc::new(relays));
-        self
-    }
-
-    /// Serve `marsh --dev` sessions: grants come from `broker`; the dev shell
-    /// VM uses `image` (the Rust + node dev template) when set.
-    #[must_use]
-    pub fn with_dev_broker(mut self, broker: Arc<marsh_daemon::DevBroker>) -> Self {
-        self.dev = Some(broker);
         self
     }
 
@@ -1917,20 +1889,6 @@ impl DaemonBackend for StockDaemonBackend {
         }
         let mut by_vm = BTreeMap::<String, (KitVmSpec, Vec<String>)>::new();
         let mut components = Vec::new();
-        // Report development grants only when some existed to revoke.
-        if let Some(broker) = self.dev.as_ref().filter(|broker| broker.has_grants()) {
-            let (state, detail) = match broker.revoke_all() {
-                Ok(()) => (ScopeCleanupState::Removed, None),
-                Err(error) => (ScopeCleanupState::CleanupUncertain, Some(error.to_string())),
-            };
-            components.push(ScopeCleanupComponent {
-                kind: "dev-grant".into(),
-                label: "development grants".into(),
-                state,
-                vm: None,
-                detail,
-            });
-        }
         let resolution_failed = self.resolve_scope_kits(&mut by_vm, &mut components);
         let worker_ids = by_vm.keys().cloned().collect::<Vec<_>>();
         if store.begin_workers_reset(&worker_ids).is_err() {
@@ -2118,17 +2076,7 @@ impl DaemonBackend for StockDaemonBackend {
         progress: PreparationProgress,
         store: DaemonStore,
     ) -> Result<PreparationResult, DaemonError> {
-        self.prepare_for_shell(selection, session, false, &progress, &store)
-    }
-
-    fn prepare_dev(
-        &self,
-        selection: &LoadSelection,
-        session: &SessionSpec,
-        progress: PreparationProgress,
-        store: DaemonStore,
-    ) -> Result<PreparationResult, DaemonError> {
-        self.prepare_for_shell(selection, session, true, &progress, &store)
+        self.prepare_for_shell(selection, session, &progress, &store)
     }
 
     #[allow(clippy::too_many_lines)] // Keeps the linear cleanup transaction auditable.
@@ -3090,25 +3038,8 @@ impl DaemonBackend for StockDaemonBackend {
                 .vm_name(VmPurpose::Shell, &format!("ephemeral:{session_id}"))
                 .map_err(backend_error)?;
             isolated
-        } else if request.dev {
-            self.dev_shell()?
         } else {
             self.config.shell.clone()
-        };
-        let dev_grant = if request.dev {
-            let Some(broker) = &self.dev else {
-                return Err(DaemonError::InvalidState(
-                    "marsh --dev requires a daemon started with MARSH_ENABLE_DEV_SCOPES=1".into(),
-                ));
-            };
-            let grant = broker.create_grant(
-                &session_id,
-                &request.session.launch_directory,
-                &self.config.shell.shell_binary,
-            )?;
-            Some((Arc::clone(broker), grant))
-        } else {
-            None
         };
         let outcome = thread::scope(|scope| {
             (|| {
@@ -3163,16 +3094,6 @@ impl DaemonBackend for StockDaemonBackend {
                 );
                 admitted_mounts
                     .extend(self.additional_grants(&request.session, &shell_environment)?);
-                if let Some((_, grant)) = &dev_grant {
-                    // Only the scratch leaves are mounted, at their host paths.
-                    for leaf in marsh_daemon::dev_broker::SCRATCH_LEAVES {
-                        let path = grant.scratch.join(leaf);
-                        admitted_mounts.push(
-                            AdmittedHostGrant::open(path.clone(), path, MountAccess::ReadWrite)
-                                .map_err(backend_error)?,
-                        );
-                    }
-                }
                 shell_attachment::require_controller(&attachment)?;
                 if request.session.terminal {
                     self.send_update_notices(None, &attachment);
@@ -3373,22 +3294,6 @@ impl DaemonBackend for StockDaemonBackend {
                             .map(|(name, value)| format!("{name}={value}")),
                     );
                 }
-                if let Some((broker, grant)) = &dev_grant {
-                    if let Err(error) = broker.write_relay(grant, &socket_path, &token_path) {
-                        return Err(rollback(relay, error));
-                    }
-                    let scratch = grant.scratch.display();
-                    extra_environment.extend([
-                    format!("MARSH_DEV_SCRATCH={scratch}"),
-                    format!("MARSH_DEV_DEPTH={}", grant.depth),
-                    format!("MARSH_VM_PREFIX={}", grant.prefix),
-                    format!("MARSH_DEV_SHELL_TEMPLATE={}", self.config.shell.image.as_str()),
-                    format!("MARSH_DEV_GRANT={}", grant.id),
-                    format!(
-                        "PATH={scratch}/tmp/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-                    ),
-                ]);
-                }
                 let arguments = request
                     .arguments
                     .into_iter()
@@ -3488,20 +3393,6 @@ impl DaemonBackend for StockDaemonBackend {
             }
         } else {
             outcome
-        };
-        let outcome = match (&dev_grant, outcome) {
-            (Some((broker, _)), outcome) => match (broker.revoke_session(&session_id), outcome) {
-                (Ok(()), outcome) => outcome,
-                (Err(cleanup), prior) => {
-                    let prior = prior
-                        .err()
-                        .map_or_else(String::new, |error| format!("shell failed: {error}; "));
-                    Err(DaemonError::ShellCleanupUncertain(format!(
-                        "{prior}{cleanup}"
-                    )))
-                }
-            },
-            (None, outcome) => outcome,
         };
         let cleanup_uncertain = matches!(outcome, Err(DaemonError::ShellCleanupUncertain(_)));
         if cleanup_uncertain {

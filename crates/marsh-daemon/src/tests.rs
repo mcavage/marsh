@@ -4134,6 +4134,47 @@ fn an_older_clients_dev_field_is_accepted_when_false_and_refused_when_true() {
     task.join().unwrap();
 }
 
+/// An older `marsh --dev` shell's `sbx` shim sent `dev_sbx`. The request is
+/// gone: the daemon drops it like any unknown request and keeps serving.
+#[test]
+fn an_older_shims_dev_sbx_request_is_an_unknown_request() {
+    let home = home();
+    let server = Arc::new(
+        Server::bind(home.path())
+            .unwrap()
+            .with_backend(Arc::new(FailingShellBackend)),
+    );
+    let stop = Arc::new(AtomicBool::new(false));
+    let task_server = Arc::clone(&server);
+    let task_stop = Arc::clone(&stop);
+    let task = thread::spawn(move || {
+        task_server
+            .serve_until(|| task_stop.load(Ordering::Relaxed))
+            .unwrap();
+    });
+    let client = Client::connect(home.path()).unwrap();
+    let mut stream = marsh_runtime::connect_unix(&client.paths.socket).unwrap();
+    write_frame(
+        &mut stream,
+        &Envelope {
+            protocol: PROTOCOL.into(),
+            token: client.token.clone(),
+            body: serde_json::json!({"type": "dev_sbx", "argv": ["ls"], "pty": null}),
+        },
+    )
+    .unwrap();
+    // An unparseable request is dropped without a reply, as for any other.
+    let reply = read_frame::<serde_json::Value>(&mut stream);
+    assert!(reply.is_err(), "{reply:?}");
+    assert!(matches!(
+        client.request(PublicRequest::Ping).unwrap(),
+        PublicReply::Pong { .. }
+    ));
+
+    stop.store(true, Ordering::Relaxed);
+    task.join().unwrap();
+}
+
 #[test]
 fn preparation_reports_a_removed_stock_sbx_and_detaches_the_session() {
     let home = home();
@@ -4225,7 +4266,6 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
             .prepare_with_progress(
                 LoadSelection::Kits(vec!["fixture".into()]),
                 selected.clone(),
-                false,
                 &mut progress,
             )
             .unwrap(),

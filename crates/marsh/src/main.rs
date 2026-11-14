@@ -3,7 +3,6 @@
 mod acp_publication;
 mod ephemeral_recovery;
 mod mcp_load;
-mod sbx_shim;
 
 use marsh::{
     cli,
@@ -131,7 +130,6 @@ Options:
   --load KIT[,KIT...]|all  Prepare selected Kit VMs (create, or start stopped) before launch
   --shell marsh|bash|zsh   Interactive shell for this launch (default: the home's, else marsh)
   --ephemeral-home         Use a blank session home with no persistent writeback
-  --dev                    Develop marsh: open a dev shell whose `sbx` is a confined host broker
   -h, --help               Show this host-local help and exit
   -V, --version, version   Show the marsh version and exit
 
@@ -306,9 +304,6 @@ const ACP_HOST_HELP: &str = "Usage: marsh acp install-published codex NAME\n    
 fn main() -> ExitCode {
     let _ = marsh_provenance::embed!();
     let arguments: Vec<OsString> = env::args_os().collect();
-    if sbx_shim::invoked_as_sbx(&arguments) {
-        return exit_code(sbx_shim::run(&arguments));
-    }
     let context = env::var_os(external_commands::SESSION_VARIABLE).is_some();
     if let Some(name) = external_command_name_from(&arguments, context) {
         if external_commands::SHELL_BUILTINS.contains(&name.as_str()) {
