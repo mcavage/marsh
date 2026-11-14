@@ -12,9 +12,9 @@
 //! or `services.reused_from`), and an unreferenced one is collected
 //! (`Checkpoints::collect_orphans`). Nothing here starts or creates a VM.
 
-use crate::DaemonBackend;
 use crate::events::Bus;
 use crate::split_fs::{self, Dir};
+use crate::{DaemonBackend, hex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -570,6 +570,12 @@ pub struct Checkpoint {
     /// Whether `git/` holds saved Git metadata.
     pub git: bool,
     pub identity: (u64, u64),
+    /// The volume's UUID (hex) when its filesystem guarantees persistent,
+    /// never-reused file IDs: the directory is then recognised by volume
+    /// and file ID even when the device number changed (a volume mounted
+    /// again). `None` (other filesystems, older records): `identity` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
     /// `SPLIT_ID/LABEL` when this snapshots an open or kept lane's copy
     /// rather than the project (`Checkpoints::create_lane`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -610,6 +616,9 @@ pub enum Refusal {
     Invalid(String),
 }
 
+/// Prefix (after `checkpoints.json.`) of a journal set aside as unreadable.
+const SET_ASIDE: &str = "unreadable-";
+
 pub struct Checkpoints {
     state: Mutex<State>,
     journal: PathBuf,
@@ -617,6 +626,9 @@ pub struct Checkpoints {
     /// The backend that reaches the services VMs, once the daemon has one
     /// (`attach_backend`). Without it checkpoints carry no services.
     backend: Mutex<Option<Weak<dyn DaemonBackend>>>,
+    /// The journal could not be read at load and could not be set aside
+    /// either: it is never written over, and nothing is collected.
+    unsaved: bool,
 }
 
 #[derive(Default)]
@@ -684,16 +696,42 @@ pub fn inside_marsh(path: &Path) -> bool {
 }
 
 impl Checkpoints {
-    /// Load the journal, forget checkpoints whose directory is gone, and
-    /// apply retention to every recorded project.
+    /// Load the journal, forget checkpoints whose directory is verifiably
+    /// gone (one that can't be reached now, say on an unmounted volume or
+    /// behind a privacy prompt, is kept), and apply retention to every
+    /// recorded project. A journal that can't be read is set aside (or, if
+    /// that fails, left alone and never written), never overwritten.
     #[must_use]
     pub fn open(journal_home: &Path, events: Arc<Bus>) -> Self {
         let journal = journal_home.join("checkpoints.json");
-        let mut records: BTreeMap<String, Checkpoint> = std::fs::read(&journal)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
-        records.retain(|_, checkpoint| checkpoint.open().is_ok());
+        let (mut records, unsaved) = match std::fs::read(&journal) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), false),
+            read => match read.map_err(|e| e.to_string()).and_then(|bytes| {
+                serde_json::from_slice::<BTreeMap<String, Checkpoint>>(&bytes)
+                    .map_err(|e| e.to_string())
+            }) {
+                Ok(records) => (records, false),
+                Err(why) => {
+                    let aside = journal
+                        .with_extension(format!("json.{SET_ASIDE}{}", crate::unix_time_ms()));
+                    let kept = std::fs::rename(&journal, &aside)
+                        .or_else(|_| std::fs::copy(&journal, &aside).map(drop));
+                    match &kept {
+                        Ok(()) => eprintln!(
+                            "marshd: could not read {} ({why}); set aside as {}; orphaned services snapshots are not collected while it is there",
+                            journal.display(),
+                            aside.display()
+                        ),
+                        Err(error) => eprintln!(
+                            "marshd: could not read {} ({why}) nor set it aside ({error}); it is left as it is, checkpoints are not journaled and nothing is collected",
+                            journal.display()
+                        ),
+                    }
+                    (BTreeMap::new(), kept.is_err())
+                }
+            },
+        };
+        records.retain(|_, checkpoint| !checkpoint.gone());
         let checkpoints = Self {
             state: Mutex::new(State {
                 records,
@@ -702,6 +740,7 @@ impl Checkpoints {
             journal,
             events,
             backend: Mutex::new(None),
+            unsaved,
         };
         for root in checkpoints.roots() {
             checkpoints.retain(&root);
@@ -736,7 +775,10 @@ impl Checkpoints {
             }
             // A lane the backend journalled a capture for whose record did not
             // survive is no longer protected by that journal entry.
-            backend.services_reconcile(&lanes);
+            // Not with a lost journal: its records' lanes are unknown.
+            if !self.journal_lost() {
+                backend.services_reconcile(&lanes);
+            }
         }
     }
 
@@ -752,11 +794,31 @@ impl Checkpoints {
     /// Journal the records; under the state lock, so a later state is never
     /// overwritten by an earlier one.
     fn save(&self) {
+        if self.unsaved {
+            return;
+        }
         let state = self.lock();
         if let Err(error) = crate::split::SplitEngine::write_durable(&self.journal, &state.records)
         {
             eprintln!("marshd: could not journal checkpoints: {error}");
         }
+    }
+
+    /// Whether a journal could not be read: one set aside (until the user
+    /// restores or removes it, across restarts) or one left in place.
+    /// Which snapshots its records named is unknown, so nothing is collected.
+    fn journal_lost(&self) -> bool {
+        self.unsaved
+            || self.journal.parent().is_some_and(|home| {
+                std::fs::read_dir(home).is_ok_and(|entries| {
+                    entries.flatten().any(|entry| {
+                        entry
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(&format!("checkpoints.json.{SET_ASIDE}"))
+                    })
+                })
+            })
     }
 
     /// Every project with a recorded checkpoint.
@@ -878,6 +940,11 @@ impl Checkpoints {
         let id = crate::split::new_id();
         let dir = area.create(&id).map_err(io)?;
         let identity = dir.fstat().map_err(io)?.identity;
+        let volume = dir
+            .persistent_identity()
+            .ok()
+            .filter(|persistent| persistent.file_id() == identity.1)
+            .map(|persistent| hex(&persistent.volume_uuid()));
         let made = (|| -> Result<u64, String> {
             let tree = dir.create("tree").map_err(|e| e.to_string())?;
             split_fs::snapshot(&source()?, &tree, git)?;
@@ -913,6 +980,7 @@ impl Checkpoints {
             bytes,
             git: git.is_some(),
             identity,
+            volume,
             lane: lane.map(|lane| lane.name.clone()),
             services,
             ignored,
@@ -1139,8 +1207,9 @@ impl Checkpoints {
     /// # Errors
     /// Returns why it was not found or not removed.
     pub fn remove(&self, root: Option<&Path>, id: &str) -> Result<String, String> {
+        let leased = || format!("checkpoint {id} is in use by a split being made from it; retry");
         let checkpoint = {
-            let mut state = self.lock();
+            let state = self.lock();
             let checkpoint = state
                 .records
                 .get(id)
@@ -1148,23 +1217,34 @@ impl Checkpoints {
                 .cloned()
                 .ok_or_else(|| format!("no checkpoint {id}"))?;
             if state.leases.contains_key(id) {
-                return Err(format!(
-                    "checkpoint {id} is in use by a split being made from it; retry"
-                ));
+                return Err(leased());
             }
-            state.records.remove(id);
             checkpoint
         };
-        let message = self.forget(&checkpoint);
+        let found = checkpoint.found().map_err(|why| {
+            format!("{why}; it is kept, with its Docker data, until it can be checked")
+        })?;
+        {
+            let mut state = self.lock();
+            if state.leases.contains_key(id) {
+                return Err(leased());
+            }
+            state.records.remove(id);
+        }
+        let message = self.forget(&checkpoint, found);
         self.release_snapshots(&checkpoint.root, std::slice::from_ref(&checkpoint));
         self.save();
         message
     }
 
     /// Move the files of a checkpoint whose record is already gone to
-    /// `.marsh/.trash` (deleted in the background); a replaced directory is
-    /// forgotten, never removed by path.
-    fn forget(&self, checkpoint: &Checkpoint) -> Result<String, String> {
+    /// `.marsh/.trash` (deleted in the background): the directory `found`
+    /// (its identity now), or nothing when it is verifiably gone.
+    fn forget(&self, checkpoint: &Checkpoint, found: Option<(u64, u64)>) -> Result<String, String> {
+        let Some(identity) = found else {
+            self.publish(checkpoint, true);
+            return Ok(format!("removed checkpoint {}", checkpoint.id));
+        };
         let removed = split_fs::area(&checkpoint.root, "checkpoints", false)
             .and_then(|area| {
                 let trash = split_fs::area(&checkpoint.root, ".trash", true)?;
@@ -1172,12 +1252,7 @@ impl Checkpoints {
             })
             .map_err(|e| e.to_string())
             .and_then(|(area, trash)| {
-                split_fs::remove_verified_detached(
-                    &area,
-                    &checkpoint.id,
-                    checkpoint.identity,
-                    &trash,
-                )
+                split_fs::remove_verified_detached(&area, &checkpoint.id, identity, &trash)
             });
         self.publish(checkpoint, true);
         removed.map(|()| format!("removed checkpoint {}", checkpoint.id))
@@ -1200,6 +1275,12 @@ impl Checkpoints {
                     || now.saturating_sub(checkpoint.created_unix_ms) > MAX_AGE_MS
             })
             .map(|(_, checkpoint)| checkpoint)
+            // One that can't be checked now (unreachable, or not the
+            // recorded directory) is kept with its snapshots.
+            .filter_map(|checkpoint| {
+                let found = checkpoint.found().ok()?;
+                Some((checkpoint, found))
+            })
             .collect::<Vec<_>>();
         let expired = {
             let mut state = self.lock();
@@ -1208,13 +1289,17 @@ impl Checkpoints {
             } = &mut *state;
             expired
                 .into_iter()
-                .filter(|checkpoint| !leases.contains_key(&checkpoint.id))
-                .filter(|checkpoint| records.remove(&checkpoint.id).is_some())
+                .filter(|(checkpoint, _)| !leases.contains_key(&checkpoint.id))
+                .filter(|(checkpoint, _)| records.remove(&checkpoint.id).is_some())
                 .collect::<Vec<_>>()
         };
-        for checkpoint in &expired {
-            let _ = self.forget(checkpoint);
+        for (checkpoint, found) in &expired {
+            let _ = self.forget(checkpoint, *found);
         }
+        let expired = expired
+            .into_iter()
+            .map(|(checkpoint, _)| checkpoint)
+            .collect::<Vec<_>>();
         // Test break: retention removes the checkpoints and keeps their
         // snapshots (the orphan collector is what would still find them).
         if !marsh_contracts::break_mode(breaks::RETENTION_KEEP_SNAPSHOTS) {
@@ -1267,6 +1352,11 @@ impl Checkpoints {
     /// its stop capture is no longer protected. Unreachable (VM stopped) or
     /// busy: left to the orphan collector, which finds it in the agent's list.
     fn release_snapshots(&self, root: &Path, removed: &[Checkpoint]) {
+        // A lost journal's records may name the same snapshots: none is
+        // released or untracked until it is restored or removed.
+        if self.journal_lost() {
+            return;
+        }
         let Some(backend) = self.backend() else {
             return;
         };
@@ -1318,7 +1408,7 @@ impl Checkpoints {
     /// project whose last record is gone is still scanned. Only a ready VM is
     /// listed; it never starts one to look.
     pub fn collect_orphans(&self) {
-        if marsh_contracts::break_mode(breaks::ORPHAN_GC_OFF) {
+        if marsh_contracts::break_mode(breaks::ORPHAN_GC_OFF) || self.journal_lost() {
             return;
         }
         let Some(backend) = self.backend() else {
@@ -1337,6 +1427,14 @@ impl Checkpoints {
     }
 
     fn collect_orphans_of(&self, root: &Path, backend: &dyn DaemonBackend) {
+        // A checkpoint that can't be reached now still names its snapshots.
+        if self
+            .list(Some(root), None)
+            .iter()
+            .any(|c| c.open().is_err())
+        {
+            return;
+        }
         let Ok(listed) = backend.list_services(root) else {
             return;
         };
@@ -1378,10 +1476,53 @@ impl Checkpoint {
         let dir = split_fs::area(&self.root, "checkpoints", false)
             .and_then(|area| area.open(&self.id))
             .map_err(|e| format!("checkpoint {}: {e}", self.id))?;
-        if dir.fstat().map_err(|e| e.to_string())?.identity != self.identity {
-            return Err(format!("checkpoint {} was replaced", self.id));
-        }
+        self.identity_of(&dir)?;
         Ok(dir)
+    }
+
+    /// `dir`'s identity now, if it is this checkpoint's directory: the
+    /// recorded `(dev, ino)`, or, with a recorded volume, the same volume
+    /// UUID and file ID (the device number changes when a volume is mounted
+    /// again).
+    fn identity_of(&self, dir: &Dir) -> Result<(u64, u64), String> {
+        let now = dir.fstat().map_err(|e| e.to_string())?.identity;
+        let same_volume = || {
+            self.volume.as_ref().is_some_and(|volume| {
+                dir.persistent_identity().is_ok_and(|persistent| {
+                    hex(&persistent.volume_uuid()) == *volume
+                        && persistent.file_id() == self.identity.1
+                })
+            })
+        };
+        if now == self.identity || same_volume() {
+            Ok(now)
+        } else {
+            Err(format!("checkpoint {} was replaced", self.id))
+        }
+    }
+
+    /// What removing this checkpoint may act on: `Some` identity of its
+    /// directory, `None` when the directory is verifiably gone. Anything
+    /// else (unreachable, not the recorded directory) is an error, and the
+    /// checkpoint and its snapshots are kept.
+    fn found(&self) -> Result<Option<(u64, u64)>, String> {
+        match self.open() {
+            Ok(dir) => self.identity_of(&dir).map(Some),
+            Err(_) if self.gone() => Ok(None),
+            Err(why) => Err(why),
+        }
+    }
+
+    /// Whether the checkpoint directory is verifiably gone: its project
+    /// opens and the directory is missing. Any other failure (the project
+    /// unreachable, access denied, a directory that is not the recorded one)
+    /// is not proof: the record, and so its snapshots, stay.
+    fn gone(&self) -> bool {
+        self.open().is_err()
+            && Dir::open_root(&self.root).is_ok()
+            && split_fs::area(&self.root, "checkpoints", false)
+                .and_then(|area| area.open(&self.id))
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
     }
 
     /// The `--json` and list shape.
@@ -1749,6 +1890,357 @@ mod tests {
             "{:?}",
             record.gaps
         );
+    }
+
+    /// A restart forgets a checkpoint only when its directory is verifiably
+    /// gone: an unreachable project keeps it (and so its snapshots), and an
+    /// unreadable journal is set aside, not overwritten.
+    #[test]
+    fn a_restart_keeps_checkpoints_it_cannot_reach() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(project.join("a"), "a").unwrap();
+        let reopen = || Checkpoints::open(&root, Arc::new(Bus::default()));
+        let Ok(made) = reopen().create(&project, None) else {
+            panic!("checkpoint refused");
+        };
+        let chmod =
+            |bits| std::fs::set_permissions(&project, std::fs::Permissions::from_mode(bits));
+        chmod(0o000).unwrap();
+        let kept = reopen().list(Some(&project), None).len();
+        chmod(0o755).unwrap();
+        assert_eq!(kept, 1, "an unreadable project dropped its checkpoint");
+        std::fs::rename(&project, root.join("away")).unwrap();
+        assert_eq!(reopen().list(Some(&project), None).len(), 1);
+        std::fs::rename(root.join("away"), &project).unwrap();
+        std::fs::remove_dir_all(&made.dir).unwrap();
+        assert!(reopen().list(Some(&project), None).is_empty());
+
+        std::fs::write(root.join("checkpoints.json"), "{not json").unwrap();
+        let lost = reopen();
+        assert!(lost.journal_lost());
+        let aside = std::fs::read_dir(&root).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("checkpoints.json.unreadable-")
+        });
+        assert!(aside);
+    }
+
+    /// A services backend that lists one old snapshot per project and
+    /// records what the collector lists and drops.
+    #[derive(Default)]
+    struct Recorder {
+        roots: Vec<PathBuf>,
+        listed: Mutex<Vec<PathBuf>>,
+        dropped: Mutex<Vec<String>>,
+        reconciled: Mutex<usize>,
+    }
+
+    impl DaemonBackend for Recorder {
+        fn registered_commands(&self) -> Result<Vec<String>, crate::DaemonError> {
+            Ok(Vec::new())
+        }
+        fn prepare(
+            &self,
+            _: &crate::LoadSelection,
+            _: &crate::SessionSpec,
+            _: crate::PreparationProgress,
+            _: crate::DaemonStore,
+        ) -> Result<crate::PreparationResult, crate::DaemonError> {
+            Err(crate::DaemonError::BackendUnavailable)
+        }
+        fn execute(
+            &self,
+            _: crate::ExecuteSpec,
+            _: crate::ServerAttachment,
+            _: crate::DaemonStore,
+        ) -> Result<(), crate::DaemonError> {
+            Err(crate::DaemonError::BackendUnavailable)
+        }
+        fn open_shell(
+            &self,
+            _: crate::ShellSpec,
+            _: crate::ServerAttachment,
+            _: crate::DaemonStore,
+        ) -> Result<(), crate::DaemonError> {
+            Err(crate::DaemonError::BackendUnavailable)
+        }
+        fn services_snapshot_roots(&self) -> Vec<PathBuf> {
+            self.roots.clone()
+        }
+        fn list_services(&self, root: &Path) -> Result<Vec<ServicesSnapshotInfo>, String> {
+            self.listed.lock().unwrap().push(root.to_path_buf());
+            Ok(vec![ServicesSnapshotInfo {
+                id: "saved-data".into(),
+                created_unix_ms: Some(0),
+            }])
+        }
+        fn drop_services(&self, _: &Path, id: &str) -> Result<bool, String> {
+            self.dropped.lock().unwrap().push(id.to_owned());
+            Ok(true)
+        }
+        fn services_reconcile(&self, _: &BTreeSet<(PathBuf, String)>) {
+            *self.reconciled.lock().unwrap() += 1;
+        }
+    }
+
+    /// Rewrites every journaled checkpoint under `root`.
+    fn edit_journal(root: &Path, edit: impl Fn(&mut serde_json::Value)) {
+        let journal = root.join("checkpoints.json");
+        let mut records: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&journal).unwrap()).unwrap();
+        for record in records.as_object_mut().unwrap().values_mut() {
+            edit(record);
+        }
+        std::fs::write(&journal, records.to_string()).unwrap();
+    }
+
+    /// While a set-aside journal exists, removing a checkpoint releases none
+    /// of its snapshots (a lost record may share them), and attaching the
+    /// backend does not reconcile its lanes away.
+    #[test]
+    fn a_lost_journal_stops_every_snapshot_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        edit_journal(&root, |record| {
+            record["services"] = serde_json::json!({"snapshot": "shared"});
+        });
+        std::fs::write(root.join("checkpoints.json.unreadable-1"), "{").unwrap();
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let recorder = Arc::new(Recorder::default());
+        let backend: Arc<dyn DaemonBackend> = Arc::clone(&recorder) as _;
+        checkpoints.attach_backend(&Arc::downgrade(&backend));
+        assert_eq!(*recorder.reconciled.lock().unwrap(), 0);
+        assert!(checkpoints.remove(Some(&project), &made.id).is_ok());
+        assert_eq!(*recorder.dropped.lock().unwrap(), Vec::<String>::new());
+        // Without it, the same removal releases the snapshot.
+        std::fs::remove_file(root.join("checkpoints.json.unreadable-1")).unwrap();
+        let again = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        edit_journal(&root, |record| {
+            record["services"] = serde_json::json!({"snapshot": "shared"});
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        checkpoints.attach_backend(&Arc::downgrade(&backend));
+        assert_eq!(*recorder.reconciled.lock().unwrap(), 1);
+        assert!(checkpoints.remove(Some(&project), &again.id).is_ok());
+        assert_eq!(*recorder.dropped.lock().unwrap(), ["shared"]);
+    }
+
+    /// A checkpoint whose directory can't be shown to be the recorded one
+    /// (a device number changed, no volume recorded) is kept by `rm` and
+    /// by retention, with its directory; one with a recorded volume is
+    /// still recognised (macOS APFS).
+    #[test]
+    fn an_unverifiable_checkpoint_is_kept_by_rm_and_retention() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        let remount = |record: &mut serde_json::Value| {
+            let dev = record["identity"][0].as_u64().unwrap();
+            record["identity"][0] = (dev + 1).into();
+        };
+        #[cfg(target_os = "macos")]
+        {
+            assert!(made.volume.is_some());
+            edit_journal(&root, remount);
+            let kept =
+                Checkpoints::open(&root, Arc::new(Bus::default())).list(Some(&project), None);
+            assert_eq!(kept.len(), 1);
+            assert!(kept[0].open().is_ok(), "same volume and file ID");
+        }
+        // Remove the volume (an older record, or another filesystem).
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        edit_journal(&root, |record| {
+            if record["id"] == made.id.as_str() {
+                remount(record);
+                record["created_unix_ms"] = 0.into();
+                record.as_object_mut().unwrap().remove("volume");
+            }
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        assert!(
+            checkpoints.lease(&project, &made.id).is_some(),
+            "kept at load and by retention"
+        );
+        let refused = checkpoints.remove(Some(&project), &made.id).unwrap_err();
+        assert!(refused.contains("kept"), "{refused}");
+        assert!(made.dir.is_dir());
+        assert!(checkpoints.lease(&project, &made.id).is_some());
+    }
+
+    /// A recorded volume must match: the same file ID on another volume
+    /// (and a changed device number) is not this checkpoint, so `rm` keeps
+    /// it and its directory.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn another_volume_with_the_same_file_id_is_not_the_checkpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        assert!(made.volume.is_some());
+        edit_journal(&root, |record| {
+            record["identity"][0] = (record["identity"][0].as_u64().unwrap() + 1).into();
+            record["volume"] = "00000000000000000000000000000000".into();
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let record = checkpoints.list(Some(&project), None).pop().unwrap();
+        assert!(record.open().is_err());
+        assert!(checkpoints.remove(Some(&project), &made.id).is_err());
+        assert!(made.dir.is_dir());
+        // The right volume but another file ID (a replaced directory on a
+        // remounted volume) is not the checkpoint either.
+        let volume = made.volume.clone().unwrap();
+        edit_journal(&root, |record| {
+            record["volume"] = volume.as_str().into();
+            record["identity"][1] = (record["identity"][1].as_u64().unwrap() + 1).into();
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let record = checkpoints.list(Some(&project), None).pop().unwrap();
+        assert!(record.open().is_err());
+        assert!(checkpoints.remove(Some(&project), &made.id).is_err());
+        assert!(made.dir.is_dir());
+    }
+
+    /// A checkpoint recognised on a remounted volume (new device number,
+    /// same volume and file ID) is removed through the identity it has now.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_remounted_checkpoint_can_be_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        assert!(made.volume.is_some());
+        edit_journal(&root, |record| {
+            record["identity"][0] = (record["identity"][0].as_u64().unwrap() + 1).into();
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        assert!(checkpoints.remove(Some(&project), &made.id).is_ok());
+        assert!(!made.dir.exists());
+    }
+
+    /// What one orphan pass over `checkpoints` drops.
+    fn collected(checkpoints: &Checkpoints, roots: &[PathBuf]) -> Vec<String> {
+        let recorder = Arc::new(Recorder {
+            roots: roots.to_vec(),
+            ..Recorder::default()
+        });
+        let backend: Arc<dyn DaemonBackend> = Arc::clone(&recorder) as _;
+        checkpoints.attach_backend(&Arc::downgrade(&backend));
+        checkpoints.collect_orphans();
+        recorder.dropped.lock().unwrap().clone()
+    }
+
+    /// An unreadable journal stops collection across restarts until the
+    /// set-aside file is gone, even after a later save writes a valid one;
+    /// a project with an unreachable checkpoint is not collected; a changed
+    /// device number alone keeps the checkpoint.
+    #[test]
+    fn collection_waits_for_lost_journals_and_unreachable_checkpoints() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(project.join("a"), "a").unwrap();
+        let reopen = || Checkpoints::open(&root, Arc::new(Bus::default()));
+        let roots = [project.clone()];
+        assert_eq!(collected(&reopen(), &roots), ["saved-data"]);
+
+        std::fs::write(root.join("checkpoints.json"), "{not json").unwrap();
+        let lost = reopen();
+        assert_eq!(collected(&lost, &roots), Vec::<String>::new());
+        assert!(lost.create(&project, None).is_ok(), "saves a valid journal");
+        drop(lost);
+        assert_eq!(
+            collected(&reopen(), &roots),
+            Vec::<String>::new(),
+            "second restart"
+        );
+        for entry in std::fs::read_dir(&root).unwrap().flatten() {
+            if entry.file_name().to_string_lossy().contains(".unreadable-") {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        assert_eq!(collected(&reopen(), &roots), ["saved-data"]);
+
+        let chmod = |bits| {
+            std::fs::set_permissions(&project, std::fs::Permissions::from_mode(bits)).unwrap();
+        };
+        chmod(0o000);
+        let skipped = collected(&reopen(), &roots);
+        chmod(0o755);
+        assert_eq!(
+            skipped,
+            Vec::<String>::new(),
+            "collected beside an unreachable checkpoint"
+        );
+    }
+
+    /// An unreadable journal that can't be renamed (immutable) is copied
+    /// aside, so collection stays off, and it is left as it was.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unrenamable_lost_journal_is_copied_aside() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let journal = root.join("checkpoints.json");
+        std::fs::write(&journal, "{not json").unwrap();
+        let chflags = |flag: &str| {
+            assert!(
+                std::process::Command::new("chflags")
+                    .arg(flag)
+                    .arg(&journal)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        chflags("uchg");
+        let lost = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let journal_lost = lost.journal_lost();
+        let aside = std::fs::read_dir(&root).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("checkpoints.json.unreadable-")
+        });
+        chflags("nouchg");
+        assert!(journal_lost);
+        assert!(aside, "the copy fallback set nothing aside");
+        assert_eq!(std::fs::read(&journal).unwrap(), b"{not json");
     }
 
     /// A split cloning a checkpoint holds it: neither retention nor `rm`

@@ -305,6 +305,12 @@ impl Dir {
         self.0.try_clone().map(Self)
     }
 
+    /// The directory's volume UUID and file ID, on a filesystem that
+    /// guarantees they persist and are never reused (`marsh_host_identity`).
+    pub fn persistent_identity(&self) -> io::Result<marsh_host_identity::PersistentIdentity> {
+        marsh_host_identity::read(&std::fs::File::from(self.0.try_clone()?))
+    }
+
     /// Create (or reuse) a real subdirectory; a symlink is refused.
     pub fn ensure(&self, name: impl AsRef<OsStr>) -> io::Result<Self> {
         match rustix::fs::mkdirat(&self.0, name.as_ref(), Mode::from_raw_mode(0o755)) {
