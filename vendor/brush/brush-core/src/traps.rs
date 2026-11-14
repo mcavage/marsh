@@ -314,9 +314,11 @@ pub struct TrapHandler {
 pub struct TrapHandlerConfig {
     /// Registered handlers for traps; maps signal type to command.
     handlers: HashMap<TrapSignal, TrapHandler>,
-    /// Counts handler changes, so a forked subshell can tell whether it set its own traps.
+    /// Whether the `EXIT` handler is the parent's, copied into a forked subshell. It stays
+    /// registered (for `trap -p`) but the subshell does not run it, as in Bash; setting or
+    /// removing the trap there makes it the subshell's own.
     #[cfg_attr(feature = "serde", serde(skip))]
-    generation: u64,
+    exit_inherited: bool,
 }
 
 impl TrapHandlerConfig {
@@ -336,9 +338,16 @@ impl TrapHandlerConfig {
         self.handlers.get(&signal_type)
     }
 
-    /// Returns a counter that changes whenever a handler is registered or removed.
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    /// Marks the `EXIT` handler, if any, as inherited from a parent shell: still listed,
+    /// but not run (see [`Self::runs_exit_handler`]) unless this shell sets one itself.
+    pub const fn inherit_exit_handler(&mut self) {
+        self.exit_inherited = true;
+    }
+
+    /// Returns whether this shell runs an `EXIT` handler when it exits: one is registered
+    /// and it was not inherited by a forked subshell.
+    pub fn runs_exit_handler(&self) -> bool {
+        !self.exit_inherited && self.handles(TrapSignal::Exit)
     }
 
     /// Returns whether a handler is registered for the given signal.
@@ -359,7 +368,9 @@ impl TrapHandlerConfig {
         command: String,
         source_info: crate::SourceInfo,
     ) {
-        self.generation += 1;
+        if signal_type == TrapSignal::Exit {
+            self.exit_inherited = false;
+        }
         #[cfg(unix)]
         match signal_type {
             TrapSignal::Signal(signal) => {
@@ -394,7 +405,9 @@ impl TrapHandlerConfig {
     ///
     /// * `signal_type` - The type of signal to remove handlers for.
     pub fn remove_handlers(&mut self, signal_type: TrapSignal) {
-        self.generation += 1;
+        if signal_type == TrapSignal::Exit {
+            self.exit_inherited = false;
+        }
         #[cfg(unix)]
         if let TrapSignal::Signal(signal) = signal_type {
             crate::signals::set_ignored_by_trap(signal as i32, false);

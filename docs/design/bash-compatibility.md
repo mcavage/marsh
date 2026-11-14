@@ -119,6 +119,19 @@ repaired:
   as an unexpected end of file. Messages keep a `(col N)` suffix.
 - Interactive Ctrl-C at a plain-fallback prompt (below) is noticed when the
   line ends, not immediately.
+- A forked subshell starts with a copy of its parent's traps, and never runs
+  the parent's `EXIT` trap (it runs only one it sets itself, at its end or when
+  an untrapped signal ends it). Bash also hides the inherited traps from
+  `trap -p` once the subshell has run its first `trap` (`trap 'echo p' EXIT; (
+  trap -p EXIT; trap '' INT; trap -p EXIT )` lists the `EXIT` trap once); here
+  the inherited `EXIT` and signal traps stay listed. A signal trap inherited
+  this way is never run in the subshell.
+- `EXIT` traps set inside a subshell differ from Bash in three ways that were
+  already there: the output of `x=$(trap 'echo C' EXIT)` is lost, and
+  `$( ( trap ... EXIT ) )` and `<( trap ... EXIT )` write it to the outer
+  standard output instead of the capture; `( trap 'exit 6' EXIT )` does not set
+  the subshell's status; `( trap C EXIT; kill -TERM $BASHPID )` (or `-INT`) does
+  not run `C`.
 
 Classified divergences by design:
 

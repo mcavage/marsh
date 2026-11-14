@@ -15,7 +15,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// Invokes the `EXIT` trap handler, if any. If the handler exits the shell, returns
     /// the status it exits with, having made it the shell's last exit status.
     pub(crate) async fn run_exit_trap(&mut self) -> Result<Option<u8>, error::Error> {
-        let exit_status = if self.traps.handles(TrapSignal::Exit) {
+        let exit_status = if self.traps.runs_exit_handler() {
             let result = self
                 .invoke_trap_handler(TrapSignal::Exit, &self.default_exec_params())
                 .await;

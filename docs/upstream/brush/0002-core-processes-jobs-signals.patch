@@ -1588,7 +1588,7 @@ index 2ddb350a..e597067d 100644
          }
  
 diff --git a/brush-core/src/shell/traps.rs b/brush-core/src/shell/traps.rs
-index 54ee0a5a..df9956b0 100644
+index 54ee0a5a..969269be 100644
 --- a/brush-core/src/shell/traps.rs
 +++ b/brush-core/src/shell/traps.rs
 @@ -15,21 +15,31 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
@@ -1602,7 +1602,7 @@ index 54ee0a5a..df9956b0 100644
 -        let result = self
 -            .invoke_trap_handler(TrapSignal::Exit, &self.default_exec_params())
 -            .await?;
-+        let exit_status = if self.traps.handles(TrapSignal::Exit) {
++        let exit_status = if self.traps.runs_exit_handler() {
 +            let result = self
 +                .invoke_trap_handler(TrapSignal::Exit, &self.default_exec_params())
 +                .await;
@@ -2849,7 +2849,7 @@ index 74d1437b..7a8eb187 100644
  }
  
 diff --git a/brush-core/src/traps.rs b/brush-core/src/traps.rs
-index e4324889..bb6c06f8 100644
+index e4324889..6c61d0d7 100644
 --- a/brush-core/src/traps.rs
 +++ b/brush-core/src/traps.rs
 @@ -1,5 +1,141 @@
@@ -2994,33 +2994,44 @@ index e4324889..bb6c06f8 100644
  use std::str::FromStr;
  use std::{collections::HashMap, fmt::Display};
  
-@@ -178,6 +314,9 @@ pub struct TrapHandler {
+@@ -178,6 +314,11 @@ pub struct TrapHandler {
  pub struct TrapHandlerConfig {
      /// Registered handlers for traps; maps signal type to command.
      handlers: HashMap<TrapSignal, TrapHandler>,
-+    /// Counts handler changes, so a forked subshell can tell whether it set its own traps.
++    /// Whether the `EXIT` handler is the parent's, copied into a forked subshell. It stays
++    /// registered (for `trap -p`) but the subshell does not run it, as in Bash; setting or
++    /// removing the trap there makes it the subshell's own.
 +    #[cfg_attr(feature = "serde", serde(skip))]
-+    generation: u64,
++    exit_inherited: bool,
  }
  
  impl TrapHandlerConfig {
-@@ -197,6 +336,11 @@ impl TrapHandlerConfig {
+@@ -197,6 +338,18 @@ impl TrapHandlerConfig {
          self.handlers.get(&signal_type)
      }
  
-+    /// Returns a counter that changes whenever a handler is registered or removed.
-+    pub const fn generation(&self) -> u64 {
-+        self.generation
++    /// Marks the `EXIT` handler, if any, as inherited from a parent shell: still listed,
++    /// but not run (see [`Self::runs_exit_handler`]) unless this shell sets one itself.
++    pub const fn inherit_exit_handler(&mut self) {
++        self.exit_inherited = true;
++    }
++
++    /// Returns whether this shell runs an `EXIT` handler when it exits: one is registered
++    /// and it was not inherited by a forked subshell.
++    pub fn runs_exit_handler(&self) -> bool {
++        !self.exit_inherited && self.handles(TrapSignal::Exit)
 +    }
 +
      /// Returns whether a handler is registered for the given signal.
      pub fn handles(&self, signal_type: TrapSignal) -> bool {
          self.handlers.contains_key(&signal_type)
-@@ -215,6 +359,26 @@ impl TrapHandlerConfig {
+@@ -215,6 +368,28 @@ impl TrapHandlerConfig {
          command: String,
          source_info: crate::SourceInfo,
      ) {
-+        self.generation += 1;
++        if signal_type == TrapSignal::Exit {
++            self.exit_inherited = false;
++        }
 +        #[cfg(unix)]
 +        match signal_type {
 +            TrapSignal::Signal(signal) => {
@@ -3043,11 +3054,13 @@ index e4324889..bb6c06f8 100644
          let _ = self.handlers.insert(
              signal_type,
              TrapHandler {
-@@ -230,6 +394,11 @@ impl TrapHandlerConfig {
+@@ -230,6 +405,13 @@ impl TrapHandlerConfig {
      ///
      /// * `signal_type` - The type of signal to remove handlers for.
      pub fn remove_handlers(&mut self, signal_type: TrapSignal) {
-+        self.generation += 1;
++        if signal_type == TrapSignal::Exit {
++            self.exit_inherited = false;
++        }
 +        #[cfg(unix)]
 +        if let TrapSignal::Signal(signal) = signal_type {
 +            crate::signals::set_ignored_by_trap(signal as i32, false);
