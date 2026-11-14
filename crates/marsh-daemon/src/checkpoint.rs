@@ -2091,6 +2091,54 @@ mod tests {
         assert!(checkpoints.lease(&project, &made.id).is_some());
     }
 
+    /// A recorded volume must match: the same file ID on another volume
+    /// (and a changed device number) is not this checkpoint, so `rm` keeps
+    /// it and its directory.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn another_volume_with_the_same_file_id_is_not_the_checkpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        assert!(made.volume.is_some());
+        edit_journal(&root, |record| {
+            record["identity"][0] = (record["identity"][0].as_u64().unwrap() + 1).into();
+            record["volume"] = "00000000000000000000000000000000".into();
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let record = checkpoints.list(Some(&project), None).pop().unwrap();
+        assert!(record.open().is_err());
+        assert!(checkpoints.remove(Some(&project), &made.id).is_err());
+        assert!(made.dir.is_dir());
+    }
+
+    /// A checkpoint recognised on a remounted volume (new device number,
+    /// same volume and file ID) is removed through the identity it has now.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_remounted_checkpoint_can_be_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let made = Checkpoints::open(&root, Arc::new(Bus::default()))
+            .create(&project, None)
+            .ok()
+            .unwrap();
+        assert!(made.volume.is_some());
+        edit_journal(&root, |record| {
+            record["identity"][0] = (record["identity"][0].as_u64().unwrap() + 1).into();
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        assert!(checkpoints.remove(Some(&project), &made.id).is_ok());
+        assert!(!made.dir.exists());
+    }
+
     /// What one orphan pass over `checkpoints` drops.
     fn collected(checkpoints: &Checkpoints, roots: &[PathBuf]) -> Vec<String> {
         let recorder = Arc::new(Recorder {
