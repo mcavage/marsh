@@ -181,16 +181,43 @@ mod imp {
     }
 
     impl ProjectRoot {
+        /// Opens `path`. Below a `.marsh` component (a lane's copy, inside a
+        /// project its jobs could write) no component may be a symlink, so
+        /// a planted link can't move the root, and so everything pinned
+        /// "beneath" it, out of the project.
         pub fn open(path: &Path) -> Result<Self, PinError> {
+            let failed =
+                |e: Errno| PinError::Internal(format!("open project root {}: {e}", path.display()));
+            let parts = path.components().collect::<Vec<_>>();
+            let split = parts
+                .iter()
+                .position(|part| part.as_os_str() == ".marsh")
+                .unwrap_or(parts.len());
             let fd = openat(
                 CWD,
-                path,
+                parts[..split].iter().collect::<PathBuf>(),
                 OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
                 Mode::empty(),
             )
-            .map_err(|e| {
-                PinError::Internal(format!("open project root {}: {e}", path.display()))
-            })?;
+            .map_err(failed)?;
+            let fd = if split == parts.len() {
+                fd
+            } else {
+                openat2(
+                    &fd,
+                    parts[split..].iter().collect::<PathBuf>(),
+                    OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+                    Mode::empty(),
+                    ResolveFlags::BENEATH | ResolveFlags::NO_MAGICLINKS | ResolveFlags::NO_SYMLINKS,
+                )
+                .map_err(|e| match e {
+                    Errno::LOOP => PinError::Refused(format!(
+                        "project root {} goes through a symbolic link",
+                        path.display()
+                    )),
+                    e => failed(e),
+                })?
+            };
             let canonical = fd_path(&fd)?;
             Ok(Self {
                 fd,
@@ -909,5 +936,32 @@ mod tests {
         ] {
             assert!(ok(bad).is_err(), "{bad}");
         }
+    }
+
+    /// A lane root is inside a project: a link planted under `.marsh` must
+    /// not move the root (and so every pin beneath it) elsewhere.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_lane_root_never_follows_a_symlink() {
+        let project = std::env::temp_dir().join(format!("pin-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(&project).unwrap();
+        let project = std::fs::canonicalize(&project).unwrap();
+        let lane = project.join(".marsh/split/s1/a");
+        std::fs::create_dir_all(&lane).unwrap();
+        let root = ProjectRoot::open(&lane).unwrap();
+        assert_eq!(root.canonical(), lane.to_str().unwrap());
+        std::fs::remove_dir(&lane).unwrap();
+        std::os::unix::fs::symlink("/", &lane).unwrap();
+        assert!(ProjectRoot::open(&lane).is_err());
+        std::fs::remove_file(&lane).unwrap();
+        std::fs::rename(project.join(".marsh/split/s1"), project.join("s1")).unwrap();
+        std::os::unix::fs::symlink("/", project.join(".marsh/split/s1")).unwrap();
+        assert!(ProjectRoot::open(&lane).is_err());
+        // Above `.marsh` the project's own path is the user's.
+        let linked = project.join("linked");
+        std::os::unix::fs::symlink(&project, &linked).unwrap();
+        assert!(ProjectRoot::open(&linked).is_ok());
+        std::fs::remove_dir_all(&project).unwrap();
     }
 }
