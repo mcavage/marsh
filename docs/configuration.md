@@ -271,6 +271,14 @@ is gone. It never replaces or removes a skill it did not put there: when a
 name is already taken by a skill from `sbx skills add`, that skill wins and the
 name is listed as a clash.
 
+The import gets a copy of each skill's folder, never a link to it. A skill
+folder may itself be a link (`~/.claude/skills/my-skill -> ~/dev/my-skill`),
+but inside it marsh copies only directories and regular files. A link inside
+counts as the regular file it names in the same folder, by a relative path
+that stays in the folder. A link that leads anywhere else, or a socket or
+device, keeps the whole skill out of the store: the store keeps its last good
+copy, and `marsh status` names the skill and the link under errors.
+
 A skill with the name of one a registered Kit bundles (`agent-skill@1`) is
 never imported: the Kit's copy wins, and the name is listed as a clash
 `NAME (bundled by KIT)`. One an earlier marsh imported is removed from the
@@ -291,7 +299,8 @@ pass. `marsh status` shows the last import, clashes, and errors. `marsh status
 --json` has the feature `skills-mirror-v1` and a `skills_mirror` object:
 `enabled` (bool), `last_import` (unix ms of the last finished import or
 removal, or `null`), `errors` (strings from the last pass; empty when it
-succeeded, plus a line for each Kit VM running without the store), and
+succeeded, plus a line for each skill kept out of the store and each Kit VM
+running without the store), and
 `clashes` (skill names where the `sbx skills add` skill won, and
 `NAME (bundled by KIT)` for those a Kit bundles).
 `sbx settings set skills.defaultMode off` keeps the store out of new Kit VMs;

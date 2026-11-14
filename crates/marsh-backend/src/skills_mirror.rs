@@ -18,8 +18,9 @@
 //! descriptor has been read (or `BUNDLED_WAIT` passed) nothing is imported.
 //!
 //! `sbx skills import` takes no names, so the import runs with a HOME the
-//! daemon prepares: `.agents/skills` holds links to just the skills to
-//! import, and the store's path leads to the real store.
+//! daemon prepares: `.agents/skills` holds a copy of just the skills to
+//! import, read without following links out of each skill's folder, and
+//! the store's path leads to the real store.
 
 use marsh_daemon::SkillsMirrorStatus;
 use marsh_sbx::StockSbx;
@@ -183,10 +184,10 @@ impl Mirror {
             }
         }
         match sync(sbx, &folders, control_home, &bundled.skills) {
-            Ok(clashes) => {
-                state.status.clashes = clashes;
+            Ok(synced) => {
+                state.status.clashes = synced.clashes;
                 state.status.last_import = Some(now_ms());
-                state.status.errors.clear();
+                state.status.errors = synced.refused;
             }
             Err(message) => fail(&mut state, message),
         }
@@ -267,45 +268,151 @@ fn valid_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-/// A digest of a skill's regular files (links inside are skipped, as
-/// `sbx skills import` skips them); `None` when unreadable or too big.
-fn digest(root: &Path) -> Option<String> {
-    let mut files = Vec::new();
-    let mut pending = vec![PathBuf::new()];
-    while let Some(relative) = pending.pop() {
-        for entry in fs::read_dir(root.join(&relative)).ok()?.flatten() {
-            let kind = entry.file_type().ok()?;
-            let path = relative.join(entry.file_name());
-            if kind.is_dir() {
-                pending.push(path);
-            } else if kind.is_file() {
-                files.push(path);
+/// One skill's content: each regular file's path in the skill folder, and
+/// whether it is executable, with its bytes.
+type Files = BTreeMap<PathBuf, (bool, Vec<u8>)>;
+
+/// Reads a skill folder by descriptor, following no link below it (a
+/// top-level link is followed: its target is the skill folder). A link
+/// inside counts as the regular file it names in the same folder, by a
+/// relative path that stays in the folder; any other link, or anything but
+/// a directory or regular file, refuses the skill. The import gets a copy
+/// of these files, never a link to the folder, so whatever stock SBX does
+/// with links, nothing outside the folder reaches the store.
+fn read_skill(root: &Path) -> Result<Files, String> {
+    use rustix::fs::{Mode, OFlags};
+    let folder = rustix::fs::open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| error.to_string())?;
+    let mut files = Files::new();
+    let mut links = Vec::new();
+    let mut total = 0;
+    read_folder(&folder, &PathBuf::new(), &mut files, &mut links, &mut total)?;
+    for (link, target) in links {
+        let Some(file) = files.get(&target).cloned() else {
+            return Err(format!(
+                "{} is a link to {}, which is not a regular file in the skill folder",
+                link.display(),
+                target.display()
+            ));
+        };
+        total += file.1.len() as u64;
+        if files.len() >= MAX_SKILL_FILES || total > MAX_SKILL_BYTES {
+            return Err("too big".into());
+        }
+        files.insert(link, file);
+    }
+    Ok(files)
+}
+
+fn read_folder(
+    folder: &std::os::fd::OwnedFd,
+    relative: &Path,
+    files: &mut Files,
+    links: &mut Vec<(PathBuf, PathBuf)>,
+    total: &mut u64,
+) -> Result<(), String> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags};
+    use std::os::unix::ffi::OsStrExt as _;
+    let mut reader = rustix::fs::Dir::read_from(folder).map_err(|error| error.to_string())?;
+    while let Some(entry) = reader.read() {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        if matches!(name.to_bytes(), b"." | b"..") {
+            continue;
+        }
+        let path = relative.join(std::ffi::OsStr::from_bytes(name.to_bytes()));
+        let stat = rustix::fs::statat(folder, name, AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if files.len() + links.len() >= MAX_SKILL_FILES {
+            return Err("too many files".into());
+        }
+        match FileType::from_raw_mode(stat.st_mode) {
+            FileType::Directory => {
+                let inner = rustix::fs::openat(
+                    folder,
+                    name,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+                read_folder(&inner, &path, files, links, total)?;
             }
-            if files.len() > MAX_SKILL_FILES {
-                return None;
+            FileType::RegularFile => {
+                let file = rustix::fs::openat(
+                    folder,
+                    name,
+                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+                let stat = rustix::fs::fstat(&file).map_err(|error| error.to_string())?;
+                if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+                    return Err(format!("{} changed while read", path.display()));
+                }
+                let mut bytes = Vec::new();
+                fs::File::from(file)
+                    .take(MAX_SKILL_BYTES + 1 - *total)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+                *total += bytes.len() as u64;
+                if *total > MAX_SKILL_BYTES {
+                    return Err("too big".into());
+                }
+                files.insert(path, (stat.st_mode & 0o111 != 0, bytes));
             }
+            FileType::Symlink => {
+                let target = rustix::fs::readlinkat(folder, name, Vec::new())
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+                let target = Path::new(std::ffi::OsStr::from_bytes(target.as_bytes()));
+                let resolved = inside(relative, target).ok_or_else(|| {
+                    format!(
+                        "{} is a link to {}, outside the skill folder",
+                        path.display(),
+                        target.display()
+                    )
+                })?;
+                links.push((path, resolved));
+            }
+            _ => return Err(format!("{} is not a regular file", path.display())),
         }
     }
-    files.sort();
-    let mut hash = Sha256::new();
-    let mut total = 0;
-    for file in files {
-        let mut bytes = Vec::new();
-        fs::File::open(root.join(&file))
-            .ok()?
-            .take(MAX_SKILL_BYTES + 1 - total)
-            .read_to_end(&mut bytes)
-            .ok()?;
-        total += bytes.len() as u64;
-        if total > MAX_SKILL_BYTES {
-            return None;
+    Ok(())
+}
+
+/// Where a relative link target in `folder` leads, when that stays inside
+/// the skill folder.
+fn inside(folder: &Path, target: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut resolved = folder.to_owned();
+    for component in target.components() {
+        match component {
+            Component::Normal(name) => resolved.push(name),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    return None;
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
         }
+    }
+    Some(resolved)
+}
+
+/// A digest of a skill's files (paths and bytes).
+fn digest(files: &Files) -> String {
+    let mut hash = Sha256::new();
+    for (file, (_, bytes)) in files {
         hash.update(file.as_os_str().as_encoded_bytes());
         hash.update([0]);
         hash.update((bytes.len() as u64).to_le_bytes());
-        hash.update(&bytes);
+        hash.update(bytes);
     }
-    Some(marsh_contracts::process::hex(&hash.finalize()))
+    marsh_contracts::process::hex(&hash.finalize())
 }
 
 /// What one sync does with each name.
@@ -320,8 +427,9 @@ struct Plan {
     record: BTreeMap<String, String>,
 }
 
-/// `store` holds the digest of each store entry; `sources` of each source;
-/// `bundled` the commands whose Kit bundles each name.
+/// `store` holds the digest of each store entry; `sources` of each source
+/// (`None`: refused, so its store copy is left as it is); `bundled` the
+/// commands whose Kit bundles each name.
 fn plan(
     sources: &BTreeMap<String, Option<String>>,
     store: &BTreeMap<String, Option<String>>,
@@ -334,16 +442,18 @@ fn plan(
             plan.bundled.push((name.clone(), kits.clone()));
             continue;
         }
+        let Some(source) = source else { continue };
         let recorded = record.get(name);
         match store.get(name) {
             None => plan.import.push(name.clone()),
             Some(current) => {
-                let ours = current.is_some() && (current.as_ref() == recorded || current == source);
+                let ours = current.is_some()
+                    && (current.as_ref() == recorded || current.as_ref() == Some(source));
                 if !ours {
                     plan.clashes.push(name.clone());
                     continue;
                 }
-                if current != source || source.is_none() {
+                if current.as_ref() != Some(source) {
                     plan.import.push(name.clone());
                 } else if let Some(current) = current {
                     plan.record.insert(name.clone(), current.clone());
@@ -389,14 +499,15 @@ fn write_record(control_home: &Path, record: &Record) -> Result<(), String> {
     Ok(())
 }
 
-/// The HOME for one import: links to the chosen sources, and the store's
-/// parent directory at its place under HOME.
+/// The HOME for one import: a copy of each chosen skill's files, and the
+/// store's parent directory at its place under HOME.
 fn stage(
     control_home: &Path,
     stock_home: &Path,
     store: &Path,
-    chosen: &[(&String, &PathBuf)],
+    chosen: &[(&String, &Files)],
 ) -> Result<PathBuf, String> {
+    use std::os::unix::fs::OpenOptionsExt as _;
     let staging = control_home.join(STAGING_DIR);
     if fs::symlink_metadata(&staging).is_ok() {
         fs::remove_dir_all(&staging)
@@ -404,8 +515,20 @@ fn stage(
     }
     let skills = staging.join(".agents/skills");
     fs::create_dir_all(&skills).map_err(|error| error.to_string())?;
-    for (name, source) in chosen {
-        std::os::unix::fs::symlink(source, skills.join(name)).map_err(|error| error.to_string())?;
+    for (name, files) in chosen {
+        for (relative, (executable, bytes)) in *files {
+            let path = skills.join(name).join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(if *executable { 0o755 } else { 0o644 })
+                .open(&path)
+                .and_then(|mut file| file.write_all(bytes))
+                .map_err(|error| format!("cannot stage {}: {error}", path.display()))?;
+        }
     }
     let parent = store
         .parent()
@@ -425,25 +548,55 @@ fn stage(
     Ok(staging)
 }
 
-/// Brings the store in step; returns the clashes.
+/// What one sync left for `marsh status`.
+#[derive(Debug, Default, Eq, PartialEq)]
+struct Synced {
+    clashes: Vec<String>,
+    /// Skills not imported, each with why (a link out of its folder).
+    refused: Vec<String>,
+}
+
+/// Brings the store in step.
 fn sync(
     sbx: &StockSbx,
     folders: &[PathBuf],
     control_home: &Path,
     bundled: &BTreeMap<String, Vec<String>>,
-) -> Result<Vec<String>, String> {
+) -> Result<Synced, String> {
     let store = sbx
         .skills_store()
         .map_err(|error| format!("cannot list the sbx skills store: {error}"))?;
     let found = sources(folders);
-    let source_digests: BTreeMap<_, _> = found
+    let read: BTreeMap<_, _> = found
         .iter()
-        .map(|(name, path)| (name.clone(), digest(path)))
+        .filter(|(name, _)| !bundled.contains_key(*name))
+        .map(|(name, path)| (name.clone(), read_skill(path)))
         .collect();
+    let refused = read
+        .iter()
+        .filter_map(|(name, files)| {
+            files
+                .as_ref()
+                .err()
+                .map(|why| format!("skill {name} not imported: {why}"))
+        })
+        .collect();
+    let source_digests: BTreeMap<_, _> = found
+        .keys()
+        .map(|name| {
+            let files = read.get(name).and_then(|files| files.as_ref().ok());
+            (name.clone(), files.map(digest))
+        })
+        .collect();
+    let store_digest = |name: &String| {
+        read_skill(&store.directory.join(name))
+            .ok()
+            .map(|files| digest(&files))
+    };
     let store_digests: BTreeMap<_, _> = store
         .skills
         .iter()
-        .map(|name| (name.clone(), digest(&store.directory.join(name))))
+        .map(|name| (name.clone(), store_digest(name)))
         .collect();
     let mut record = read_record(control_home);
     let plan = plan(&source_digests, &store_digests, &record.skills, bundled);
@@ -457,7 +610,7 @@ fn sync(
         let chosen: Vec<_> = plan
             .import
             .iter()
-            .filter_map(|name| found.get_key_value(name))
+            .filter_map(|name| Some((name, read.get(name)?.as_ref().ok()?)))
             .collect();
         let home = sbx
             .stock_home()
@@ -468,7 +621,7 @@ fn sync(
             .map_err(|error| format!("sbx skills import failed: {error}"));
         let _ = fs::remove_dir_all(&staging);
         for name in &plan.import {
-            if let Some(digest) = digest(&store.directory.join(name)) {
+            if let Some(digest) = store_digest(name) {
                 record.skills.insert(name.clone(), digest);
             }
         }
@@ -489,7 +642,7 @@ fn sync(
             .iter()
             .map(|(name, kits)| format!("{name} (bundled by {})", kits.join(", "))),
     );
-    Ok(clashes)
+    Ok(Synced { clashes, refused })
 }
 
 #[cfg(test)]
@@ -571,8 +724,251 @@ mod tests {
         let found = sources(&[a.clone(), b]);
         assert_eq!(found.keys().collect::<Vec<_>>(), ["x"]);
         assert_eq!(found["x"], a.join("x"));
-        let before = digest(&a.join("x")).unwrap();
+        let before = digest(&read_skill(&a.join("x")).unwrap());
         fs::write(a.join("x/SKILL.md"), "edited").unwrap();
-        assert_ne!(digest(&a.join("x")).unwrap(), before);
+        assert_ne!(digest(&read_skill(&a.join("x")).unwrap()), before);
+    }
+
+    /// Stock SBX's skills CLI over a store under `home`. `import` copies
+    /// what HOME's `.agents/skills` holds following every link (`cp -RL`):
+    /// the worst case, since what stock SBX does with links is not
+    /// documented.
+    struct FakeSbx {
+        home: PathBuf,
+        imports: Mutex<usize>,
+    }
+
+    impl FakeSbx {
+        fn store(&self) -> PathBuf {
+            self.home.join(".sbx/skills")
+        }
+    }
+
+    fn copy_following(from: &Path, to: &Path) {
+        if fs::metadata(from).unwrap().is_dir() {
+            fs::create_dir_all(to).unwrap();
+            for entry in fs::read_dir(from).unwrap().flatten() {
+                copy_following(&entry.path(), &to.join(entry.file_name()));
+            }
+        } else {
+            fs::copy(from, to).unwrap();
+        }
+    }
+
+    fn output(stdout: Vec<u8>) -> marsh_runtime::CommandOutput {
+        marsh_runtime::CommandOutput {
+            exit_code: Some(0),
+            stdout,
+            stderr: Vec::new(),
+        }
+    }
+
+    impl marsh_runtime::CommandRunner for FakeSbx {
+        fn stock_control_environment(
+            &self,
+            _program: &Path,
+        ) -> Option<(PathBuf, Vec<(std::ffi::OsString, std::ffi::OsString)>)> {
+            Some((self.home.clone(), Vec::new()))
+        }
+
+        fn run(
+            &self,
+            invocation: &marsh_runtime::Invocation,
+        ) -> std::io::Result<marsh_runtime::CommandOutput> {
+            let arguments: Vec<_> = invocation
+                .arguments
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect();
+            let store = self.store();
+            fs::create_dir_all(&store).unwrap();
+            match arguments.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+                ["skills", "ls", "--json"] => {
+                    let mut names: Vec<_> = fs::read_dir(&store)
+                        .unwrap()
+                        .flatten()
+                        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                        .collect();
+                    names.sort();
+                    Ok(output(
+                        serde_json::to_vec(&serde_json::json!({"store": store, "skills": names}))
+                            .unwrap(),
+                    ))
+                }
+                ["skills", "import", "--force", "--no-input"] => {
+                    *self.imports.lock().unwrap() += 1;
+                    let (_, home) = invocation
+                        .environment
+                        .iter()
+                        .find(|(key, _)| key == "HOME")
+                        .unwrap();
+                    let home = Path::new(home);
+                    let into = home.join(".sbx/skills");
+                    for entry in fs::read_dir(home.join(".agents/skills")).unwrap().flatten() {
+                        let to = into.join(entry.file_name());
+                        let _ = fs::remove_dir_all(&to);
+                        copy_following(&entry.path(), &to);
+                    }
+                    Ok(output(Vec::new()))
+                }
+                ["skills", "rm", "--force", "--no-input", ref names @ ..] => {
+                    for name in names {
+                        fs::remove_dir_all(store.join(name)).unwrap();
+                    }
+                    Ok(output(Vec::new()))
+                }
+                _ => Err(std::io::Error::other(format!(
+                    "unexpected sbx {arguments:?}"
+                ))),
+            }
+        }
+
+        fn run_bounded(
+            &self,
+            invocation: &marsh_runtime::Invocation,
+            _timeout: Duration,
+        ) -> std::io::Result<marsh_runtime::CommandOutput> {
+            self.run(invocation)
+        }
+
+        fn spawn_attached(
+            &self,
+            _invocation: &marsh_runtime::Invocation,
+        ) -> std::io::Result<marsh_runtime::Attachment> {
+            Err(std::io::Error::other("unexpected attached sbx"))
+        }
+    }
+
+    struct Rig {
+        root: tempfile::TempDir,
+        fake: std::sync::Arc<FakeSbx>,
+        sbx: StockSbx,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let fake = std::sync::Arc::new(FakeSbx {
+                home: root.path().join("stock-home"),
+                imports: Mutex::new(0),
+            });
+            fs::create_dir_all(root.path().join("control")).unwrap();
+            fs::create_dir_all(root.path().join("folder")).unwrap();
+            let sbx = StockSbx::new("sbx", fake.clone());
+            Self { root, fake, sbx }
+        }
+
+        fn folder(&self) -> PathBuf {
+            self.root.path().join("folder")
+        }
+
+        fn sync(&self) -> Result<Synced, String> {
+            sync(
+                &self.sbx,
+                &[self.folder()],
+                &self.root.path().join("control"),
+                &BTreeMap::new(),
+            )
+        }
+
+        fn stored(&self, name: &str) -> PathBuf {
+            self.fake.store().join(name)
+        }
+    }
+
+    /// Every regular file under `root`, with its bytes; panics on a link.
+    fn tree(root: &Path) -> BTreeMap<String, String> {
+        let mut found = BTreeMap::new();
+        let mut pending = vec![root.to_owned()];
+        while let Some(path) = pending.pop() {
+            for entry in fs::read_dir(&path).unwrap().flatten() {
+                let kind = entry.file_type().unwrap();
+                assert!(
+                    !kind.is_symlink(),
+                    "a link in the store: {:?}",
+                    entry.path()
+                );
+                if kind.is_dir() {
+                    pending.push(entry.path());
+                } else {
+                    let relative = entry.path().strip_prefix(root).unwrap().to_owned();
+                    found.insert(
+                        relative.to_string_lossy().into_owned(),
+                        fs::read_to_string(entry.path()).unwrap(),
+                    );
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn a_link_out_of_a_skill_folder_never_reaches_the_store() {
+        let rig = Rig::new();
+        let secret = rig.root.path().join("id_ed25519");
+        fs::write(&secret, "PRIVATE KEY").unwrap();
+        let skill = rig.folder().join("leaky");
+        fs::create_dir_all(skill.join("docs")).unwrap();
+        fs::write(skill.join("SKILL.md"), "leaky").unwrap();
+        std::os::unix::fs::symlink(&secret, skill.join("docs/key")).unwrap();
+        std::os::unix::fs::symlink("../../id_ed25519", skill.join("relative")).unwrap();
+        let other = rig.folder().join("other-outside");
+        fs::create_dir_all(&other).unwrap();
+        std::os::unix::fs::symlink(&secret, other.join("SKILL.md")).unwrap();
+
+        let synced = rig.sync().unwrap();
+        assert_eq!(synced.refused.len(), 2, "{synced:?}");
+        assert!(synced.refused[0].contains("skill leaky"), "{synced:?}");
+        assert!(
+            synced.refused[1].contains("skill other-outside"),
+            "{synced:?}"
+        );
+        assert!(!rig.stored("leaky").exists());
+        assert!(!rig.stored("other-outside").exists());
+        assert_eq!(*rig.fake.imports.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_link_planted_later_keeps_the_last_good_copy() {
+        let rig = Rig::new();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "good").unwrap();
+        rig.sync().unwrap();
+        fs::write(skill.join("SKILL.md"), "edited").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", skill.join("hosts")).unwrap();
+
+        let synced = rig.sync().unwrap();
+        assert_eq!(synced.refused.len(), 1, "{synced:?}");
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "good".to_owned())])
+        );
+        assert_eq!(*rig.fake.imports.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn the_store_gets_a_real_copy_of_the_skill_folder() {
+        let rig = Rig::new();
+        // A skill kept elsewhere and linked in: its folder is the target.
+        let kept = rig.root.path().join("repo/linked");
+        fs::create_dir_all(kept.join("scripts")).unwrap();
+        fs::write(kept.join("SKILL.md"), "linked").unwrap();
+        fs::write(kept.join("scripts/run.sh"), "echo hi").unwrap();
+        std::os::unix::fs::symlink("scripts/run.sh", kept.join("run")).unwrap();
+        std::os::unix::fs::symlink(&kept, rig.folder().join("linked")).unwrap();
+
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(
+            tree(&rig.stored("linked")),
+            BTreeMap::from([
+                ("SKILL.md".to_owned(), "linked".to_owned()),
+                ("run".to_owned(), "echo hi".to_owned()),
+                ("scripts/run.sh".to_owned(), "echo hi".to_owned()),
+            ])
+        );
+        // In step: nothing to import again.
+        rig.sync().unwrap();
+        assert_eq!(*rig.fake.imports.lock().unwrap(), 1);
     }
 }
