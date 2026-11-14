@@ -4,8 +4,9 @@
 //! branch, or a Kit command started from a shell branch) mounts only its fork
 //! and its fork's Git metadata instead of the whole project: the fork, the
 //! admin `objects/` and `index` read-write; the gitfile, `config`, `HEAD`,
-//! `info/`, and `packed-refs` read-only binds; the split's `store.git` and the
-//! user's `.git/objects` read-only. Every component must be a real directory.
+//! `info/`, `packed-refs`, `commondir` (`.`) and an empty `hooks/` read-only
+//! binds; the split's `store.git` and the user's `.git/objects` read-only.
+//! Every component must be a real directory.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -141,6 +142,13 @@ pub fn branch_confinement(project: &Path, cwd: &Path) -> Result<Option<BranchCon
             (workspace.join(".git"), false),
             (split_dir.join("store.git"), false),
         ]);
+        // A fork made before these placeholders existed has neither; its
+        // admin entries are still checked at capture.
+        for placeholder in ["commondir", "hooks"] {
+            if fs::symlink_metadata(admin.join(placeholder)).is_ok() {
+                binds.push((admin.join(placeholder), false));
+            }
+        }
         if fs::symlink_metadata(project.join(".git")).is_ok_and(|m| m.is_dir()) {
             binds.push((project.join(".git/objects"), false));
         }
@@ -165,7 +173,8 @@ mod tests {
         let split = project.join(".marsh/split/abc123");
         fs::create_dir_all(project.join(".git/objects")).unwrap();
         fs::create_dir_all(split.join("fix/src")).unwrap();
-        fs::create_dir_all(split.join(".admin/fix")).unwrap();
+        fs::create_dir_all(split.join(".admin/fix/hooks")).unwrap();
+        fs::write(split.join(".admin/fix/commondir"), ".\n").unwrap();
         let confinement = branch_confinement(&project, &split.join("fix/src"))
             .unwrap()
             .unwrap();
@@ -177,7 +186,14 @@ mod tests {
             .map(|(path, _)| path.clone())
             .collect::<Vec<_>>();
         assert_eq!(writable, [split.join(".admin/fix")]);
-        for read_only in ["config", "HEAD", "info", "packed-refs"] {
+        for read_only in [
+            "config",
+            "HEAD",
+            "info",
+            "packed-refs",
+            "commondir",
+            "hooks",
+        ] {
             assert!(
                 confinement
                     .binds

@@ -1079,6 +1079,10 @@ pub fn admin_contents(git: &GitSnapshot, store: &Path) -> BTreeMap<&'static str,
         ("info/exclude", git.exclude.clone()),
         ("packed-refs", git.packed_refs.clone()),
         ("objects/info/alternates", alternates.into_bytes()),
+        // Read-only to the branch (`split_confinement`), so a planted
+        // `commondir` can't move host Git's config and hooks; `.` keeps the
+        // common dir the admin dir (an empty file stops Git).
+        ("commondir", b".\n".to_vec()),
     ])
 }
 
@@ -1112,6 +1116,7 @@ pub fn write_admin(
     fork: &Dir,
 ) -> io::Result<()> {
     let info = admin.create("info")?;
+    admin.create("hooks")?;
     let objects = admin.create("objects")?;
     objects.create("info")?;
     let refs = admin.create("refs")?;
@@ -1144,7 +1149,9 @@ pub fn gitfile(admin: &Path) -> Vec<u8> {
 }
 
 /// What may appear in a fork's admin directory after a branch ran: Git's
-/// own state files, never `commondir`, `gitdir`, `config.worktree`, or hooks.
+/// own state files, never `gitdir` or `config.worktree`. `commondir` and an
+/// empty `hooks/` are allowed only where the daemon wrote them (a digest for
+/// `commondir` is journaled).
 /// The pseudo-refs and messages that `git stash pop`, `merge`, `fetch`,
 /// `cherry-pick`, and `revert` leave behind (`AUTO_MERGE` and the rest) are
 /// plain state files that capture never executes or follows; refusing them
@@ -1191,7 +1198,14 @@ pub fn verify(
             return Err("fork .git was changed".into());
         }
         for (name, _) in admin.entries().map_err(|e| e.to_string())? {
-            if !ADMIN_ALLOWED.iter().any(|allowed| name == *allowed) {
+            let placeholder = expected.contains_key("commondir")
+                && (name == "commondir"
+                    || (name == "hooks"
+                        && admin
+                            .open("hooks")
+                            .and_then(|hooks| hooks.entries())
+                            .is_ok_and(|entries| entries.is_empty())));
+            if !placeholder && !ADMIN_ALLOWED.iter().any(|allowed| name == *allowed) {
                 return Err(format!(
                     "admin {} is not allowed",
                     Path::new(&name).display()
@@ -2385,6 +2399,65 @@ mod tests {
         assert_eq!(verdict(), Ok(()));
         fs::create_dir(admin_path.join("hooks")).unwrap();
         assert_eq!(verdict(), Err("admin hooks is not allowed".into()));
+        // A fork whose daemon wrote the placeholders: `commondir` is checked
+        // by digest, `hooks/` must stay empty.
+        let contents = BTreeMap::from([("commondir", b".\n".to_vec())]);
+        let expected = admin_digest(&contents);
+        fs::write(admin_path.join("commondir"), ".\n").unwrap();
+        let placed = || {
+            let top = Dir::open_root(&root).unwrap();
+            verify(
+                Some(&expected),
+                Some(&top.open("admin").unwrap()),
+                &admin_path,
+                &top.open("fork").unwrap(),
+            )
+        };
+        assert_eq!(placed(), Ok(()));
+        fs::write(admin_path.join("hooks/post-checkout"), "#!/bin/sh\n").unwrap();
+        assert_eq!(placed(), Err("admin hooks is not allowed".into()));
+        fs::remove_file(admin_path.join("hooks/post-checkout")).unwrap();
+        fs::write(admin_path.join("commondir"), "../../fork/cd\n").unwrap();
+        assert_eq!(placed(), Err("admin commondir was changed".into()));
+        // An older fork, journaled without one, never accepts a `commondir`.
+        fs::remove_dir(admin_path.join("hooks")).unwrap();
+        assert_eq!(verdict(), Err("admin commondir is not allowed".into()));
+    }
+
+    /// Host Git still works in a fork whose admin dir holds the `.` common
+    /// dir and empty hooks the daemon writes (an empty `commondir` stops it).
+    #[test]
+    fn host_git_reads_a_fork_with_the_admin_placeholders() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let admin = root.join("admin");
+        for dir in ["admin/refs/heads", "admin/objects", "admin/hooks", "fork"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::write(admin.join("HEAD"), format!("ref: {BRANCH_REF}\n")).unwrap();
+        fs::write(admin.join("commondir"), ".\n").unwrap();
+        fs::write(root.join("fork/.git"), gitfile(&admin)).unwrap();
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .arg("-C")
+                .arg(root.join("fork"))
+                .args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .unwrap()
+        };
+        let common = git(&["rev-parse", "--git-common-dir"]);
+        assert!(common.status.success(), "{common:?}");
+        assert_eq!(
+            fs::canonicalize(
+                root.join("fork")
+                    .join(String::from_utf8_lossy(&common.stdout).trim())
+            )
+            .unwrap(),
+            admin
+        );
+        assert!(git(&["status", "--short"]).status.success());
     }
 
     #[test]

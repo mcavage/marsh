@@ -1551,6 +1551,9 @@ impl DaemonClient for LocalDaemonClient {
             eprintln!(
                 "marsh: a lane's copy: changes you make here are captured only if made before Finish"
             );
+            eprintln!(
+                "marsh: an agent may have planted Git files here; until the lane is closed, don't run git or open an IDE on this copy from your Mac"
+            );
         }
         self.0
             .open_shell(marsh_daemon::ShellSpec {
