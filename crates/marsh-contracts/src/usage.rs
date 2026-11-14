@@ -30,6 +30,13 @@ pub const PARSERS: [&str; 3] = [CLAUDE_JSON, CODEX_JSONL, PI_JSONL];
 /// A line longer than this is not read for usage (pi's streaming updates
 /// repeat the whole message; they are skipped without being buffered).
 const MAX_LINE: usize = 8 * 1024 * 1024;
+/// The longest line the daemon reads for a job's usage
+/// ([`Collector::bounded`]): it holds one such line for every live job. A
+/// longer result line (a final answer over 1 MiB) is skipped, and the job
+/// reports no usage.
+pub const DAEMON_MAX_LINE: usize = 1024 * 1024;
+/// The longest model name kept; a longer one is not a model name.
+const MAX_MODEL: usize = 128;
 /// Bytes of a line read before deciding whether its `type` matters.
 const TYPE_PREFIX: usize = 64;
 
@@ -51,6 +58,10 @@ pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
     pub source: String,
+    /// Why some or all of the job's usage could not be read; the counts are
+    /// then what was read, possibly none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
 }
 
 // Costs are always finite (`finite_cost`), so equality is total.
@@ -58,7 +69,8 @@ impl Eq for Usage {}
 
 /// A job tree's usage: the job's own plus every descendant's that reported
 /// one. `jobs` counts the jobs that did; `cost_usd` sums the costs reported
-/// and `uncosted_jobs` counts jobs whose agent reported tokens but no cost.
+/// and `uncosted_jobs` counts jobs whose agent reported tokens but no cost;
+/// `incomplete_jobs` counts jobs whose usage could not all be read.
 /// `models` breaks the totals down by model; its entries sum to them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TreeUsage {
@@ -71,6 +83,8 @@ pub struct TreeUsage {
     pub jobs: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub uncosted_jobs: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incomplete_jobs: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, ModelUsage>,
 }
@@ -129,6 +143,9 @@ impl TreeUsage {
         if usage.cost_usd.is_none() {
             self.uncosted_jobs = self.uncosted_jobs.saturating_add(1);
         }
+        if usage.unavailable.is_some() {
+            self.incomplete_jobs = self.incomplete_jobs.saturating_add(1);
+        }
         let model = usage.model.as_deref().unwrap_or(UNKNOWN_MODEL);
         self.add_model(
             model,
@@ -146,6 +163,7 @@ impl TreeUsage {
     /// Add a child's tree.
     pub fn add_tree(&mut self, tree: &Self) {
         self.uncosted_jobs = self.uncosted_jobs.saturating_add(tree.uncosted_jobs);
+        self.incomplete_jobs = self.incomplete_jobs.saturating_add(tree.incomplete_jobs);
         for (model, share) in &tree.models {
             self.add_model(model, share);
         }
@@ -172,7 +190,10 @@ impl TreeUsage {
 
 /// Costs to a millionth of a dollar, so sums stay readable.
 fn round_cost(cost: f64) -> f64 {
-    (cost * 1_000_000.0).round() / 1_000_000.0
+    // A sum of finite costs saturates rather than reaching infinity.
+    let cost = cost.clamp(f64::MIN, f64::MAX);
+    let rounded = (cost * 1_000_000.0).round() / 1_000_000.0;
+    if rounded.is_finite() { rounded } else { cost }
 }
 
 fn finite_cost(value: Option<&serde_json::Value>) -> Option<f64> {
@@ -249,8 +270,11 @@ pub struct Captured {
 #[derive(Debug)]
 pub struct Collector {
     parser: &'static str,
+    max_line: usize,
     line: Vec<u8>,
     skipping: bool,
+    /// A line that could have carried usage was over `max_line`, unread.
+    skipped_long: bool,
     usage: Option<Usage>,
     message: Option<String>,
 }
@@ -259,11 +283,19 @@ impl Collector {
     /// A collector for `parser`, or `None` for an unknown one.
     #[must_use]
     pub fn new(parser: &str) -> Option<Self> {
+        Self::bounded(parser, MAX_LINE)
+    }
+
+    /// [`Self::new`], reading only lines of at most `max_line` bytes.
+    #[must_use]
+    pub fn bounded(parser: &str, max_line: usize) -> Option<Self> {
         let parser = PARSERS.into_iter().find(|known| *known == parser)?;
         Some(Self {
             parser,
+            max_line,
             line: Vec::new(),
             skipping: false,
+            skipped_long: false,
             usage: None,
             message: None,
         })
@@ -278,7 +310,9 @@ impl Collector {
             bytes = rest;
             if !self.skipping {
                 self.line.extend_from_slice(chunk);
-                if self.line.len() > MAX_LINE || self.uninteresting() {
+                let uninteresting = self.uninteresting();
+                if self.line.len() > self.max_line || uninteresting {
+                    self.skipped_long |= !uninteresting && self.could_carry_usage();
                     self.line.clear();
                     self.skipping = true;
                 }
@@ -300,6 +334,13 @@ impl Collector {
             let line = std::mem::take(&mut self.line);
             self.line_done(&line);
         }
+        if self.skipped_long {
+            let (parser, max_line) = (self.parser, self.max_line);
+            self.usage().unavailable = Some(format!(
+                "a {parser} line was over the {} KiB this reader takes, so it was not read",
+                max_line >> 10
+            ));
+        }
         Captured {
             usage: self.usage,
             message: self.message,
@@ -309,20 +350,34 @@ impl Collector {
     /// Whether the line so far names a `type` this parser ignores. Agents
     /// print `type` first (`{"type":"message_update",...`).
     fn uninteresting(&self) -> bool {
-        const START: &[u8] = b"{\"type\":\"";
-        if self.line.len() < TYPE_PREFIX || !self.line.starts_with(START) {
-            return false;
-        }
-        let rest = &self.line[START.len()..];
-        let Some(end) = rest.iter().position(|byte| *byte == b'"') else {
-            return false;
-        };
         let wanted: &[&[u8]] = match self.parser {
             CLAUDE_JSON => &[b"result"],
             CODEX_JSONL => &[b"turn.completed", b"item.completed"],
             _ => &[b"message_end"],
         };
-        !wanted.contains(&&rest[..end])
+        self.line_type().is_some_and(|kind| !wanted.contains(&kind))
+    }
+
+    /// Whether the line so far could carry usage: its `type` is the one
+    /// usage comes in, or could not be read.
+    fn could_carry_usage(&self) -> bool {
+        let usage: &[u8] = match self.parser {
+            CLAUDE_JSON => b"result",
+            CODEX_JSONL => b"turn.completed",
+            _ => b"message_end",
+        };
+        self.line_type().is_none_or(|kind| kind == usage)
+    }
+
+    /// The line's `type`, once its first bytes name one.
+    fn line_type(&self) -> Option<&[u8]> {
+        const START: &[u8] = b"{\"type\":\"";
+        if self.line.len() < TYPE_PREFIX || !self.line.starts_with(START) {
+            return None;
+        }
+        let rest = &self.line[START.len()..];
+        let end = rest.iter().position(|byte| *byte == b'"')?;
+        Some(&rest[..end])
     }
 
     fn line_done(&mut self, line: &[u8]) {
@@ -365,16 +420,18 @@ impl Collector {
         {
             let mut main = None::<(&str, u64)>;
             for (model, counts) in models {
-                usage.input_tokens += count(counts, "inputTokens");
-                usage.output_tokens += count(counts, "outputTokens");
-                usage.cached_tokens += count(counts, "cacheReadInputTokens");
-                usage.cache_write_tokens += count(counts, "cacheCreationInputTokens");
+                usage.add_counts(
+                    count(counts, "inputTokens"),
+                    count(counts, "outputTokens"),
+                    count(counts, "cacheReadInputTokens"),
+                    count(counts, "cacheCreationInputTokens"),
+                );
                 let output = count(counts, "outputTokens");
                 if main.is_none_or(|(_, most)| output > most) {
                     main = Some((model, output));
                 }
             }
-            usage.model = main.map(|(model, _)| model.to_owned());
+            usage.model = main.and_then(|(model, _)| model_name(model));
         } else {
             let Some(counts) = value.get("usage").filter(|usage| usage.is_object()) else {
                 return;
@@ -407,11 +464,7 @@ impl Collector {
                     .saturating_sub(cached)
                     .saturating_sub(write);
                 let output = count("output_tokens");
-                let usage = self.usage();
-                usage.input_tokens += input;
-                usage.cached_tokens += cached;
-                usage.cache_write_tokens += write;
-                usage.output_tokens += output;
+                self.usage().add_counts(input, output, cached, write);
             }
             _ => {}
         }
@@ -443,21 +496,30 @@ impl Collector {
         let (input, output) = (count("input"), count("output"));
         let (cached, write) = (count("cacheRead"), count("cacheWrite"));
         let cost = finite_cost(counts["cost"].get("total"));
-        let model = message["model"]
-            .as_str()
-            .filter(|model| !model.is_empty() && model.len() <= 128)
-            .map(str::to_owned);
+        let model = message["model"].as_str().and_then(model_name);
         let usage = self.usage();
-        usage.input_tokens += input;
-        usage.output_tokens += output;
-        usage.cached_tokens += cached;
-        usage.cache_write_tokens += write;
+        usage.add_counts(input, output, cached, write);
         if let Some(cost) = cost {
             usage.cost_usd = Some(round_cost(usage.cost_usd.unwrap_or(0.0) + cost));
         }
         if model.is_some() {
             usage.model = model;
         }
+    }
+}
+
+/// A model name an agent reported: 1 to [`MAX_MODEL`] bytes.
+fn model_name(model: &str) -> Option<String> {
+    (!model.is_empty() && model.len() <= MAX_MODEL).then(|| model.to_owned())
+}
+
+impl Usage {
+    /// Add reported counts; an agent's numbers never overflow the totals.
+    fn add_counts(&mut self, input: u64, output: u64, cached: u64, write: u64) {
+        self.input_tokens = self.input_tokens.saturating_add(input);
+        self.output_tokens = self.output_tokens.saturating_add(output);
+        self.cached_tokens = self.cached_tokens.saturating_add(cached);
+        self.cache_write_tokens = self.cache_write_tokens.saturating_add(write);
     }
 }
 
@@ -507,6 +569,7 @@ mod tests {
                 cache_write_tokens: 14502,
                 cost_usd: Some(0.072_598),
                 source: CLAUDE_JSON.into(),
+                unavailable: None,
             })
         );
         // Without `modelUsage`, the top-level `usage` counts.
@@ -532,6 +595,7 @@ mod tests {
                 cache_write_tokens: 12236,
                 cost_usd: None,
                 source: CODEX_JSONL.into(),
+                unavailable: None,
             })
         );
         let usage = read(CODEX_JSONL, CODEX_MAC).usage.unwrap();
@@ -561,6 +625,7 @@ mod tests {
                 cache_write_tokens: 4798,
                 cost_usd: Some(0.030_098),
                 source: PI_JSONL.into(),
+                unavailable: None,
             })
         );
     }
@@ -576,6 +641,86 @@ mod tests {
         assert_eq!(capture(CODEX_JSONL, b"pong\n"), Captured::default());
         assert_eq!(capture(PI_JSONL, b""), Captured::default());
         assert!(Collector::new("guess").is_none());
+    }
+
+    /// DA3-06: what a job prints cannot overflow the counts, plant an
+    /// unbounded model name, or make the daemon hold more than its line.
+    #[test]
+    fn reported_usage_is_bounded_whatever_the_job_prints() {
+        let max = u64::MAX;
+        let line = format!(
+            r#"{{"type":"result","modelUsage":{{"a":{{"inputTokens":{max},"outputTokens":1}},"b":{{"inputTokens":{max},"outputTokens":2}}}}}}"#
+        );
+        let usage = capture(CLAUDE_JSON, line.as_bytes()).usage.unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (max, 3));
+        let long = "m".repeat(MAX_MODEL + 1);
+        let line = format!(r#"{{"type":"result","modelUsage":{{"{long}":{{"outputTokens":1}}}}}}"#);
+        assert_eq!(
+            capture(CLAUDE_JSON, line.as_bytes()).usage.unwrap().model,
+            None
+        );
+        let turn = format!(r#"{{"type":"turn.completed","usage":{{"output_tokens":{max}}}}}"#);
+        let usage = capture(CODEX_JSONL, format!("{turn}\n{turn}\n").as_bytes())
+            .usage
+            .unwrap();
+        assert_eq!(usage.output_tokens, max);
+        let end = format!(
+            r#"{{"type":"message_end","message":{{"role":"assistant","usage":{{"output":{max}}}}}}}"#
+        );
+        let usage = capture(PI_JSONL, format!("{end}\n{end}\n").as_bytes())
+            .usage
+            .unwrap();
+        assert_eq!(usage.output_tokens, max);
+        // The daemon's collector buffers at most its line bound plus one
+        // chunk. A result line past it is skipped, and the usage says why,
+        // never an empty "no usage".
+        let mut collector = Collector::bounded(CLAUDE_JSON, DAEMON_MAX_LINE).unwrap();
+        collector.feed(br#"{"type":"result","result":""#);
+        let filler = vec![b'x'; 64 * 1024];
+        for _ in 0..(DAEMON_MAX_LINE / filler.len() + 2) {
+            collector.feed(&filler);
+            assert!(collector.line.len() <= DAEMON_MAX_LINE + filler.len());
+        }
+        collector.feed(br#"","usage":{"output_tokens":5}}"#);
+        collector.feed(b"\n");
+        let usage = collector.finish().usage.unwrap();
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(
+            usage.unavailable.as_deref(),
+            Some("a claude-json line was over the 1024 KiB this reader takes, so it was not read")
+        );
+        // A tree counts the job as incomplete, and so does its parent's.
+        let mut tree = TreeUsage::default();
+        tree.add_usage(&usage);
+        assert_eq!((tree.jobs, tree.incomplete_jobs), (1, 1));
+        let mut parent = TreeUsage::default();
+        parent.add_usage(&Usage::default());
+        parent.add_tree(&tree);
+        parent.add_tree(&tree);
+        assert_eq!((parent.jobs, parent.incomplete_jobs), (3, 2));
+        // A codex line over the bound that cannot carry usage (a command's
+        // large output in an `item.completed`) leaves the usage complete.
+        let mut collector = Collector::bounded(CODEX_JSONL, DAEMON_MAX_LINE).unwrap();
+        collector.feed(
+            br#"{"type":"item.completed","item":{"type":"command_execution","aggregated_output":""#,
+        );
+        for _ in 0..(DAEMON_MAX_LINE / filler.len() + 2) {
+            collector.feed(&filler);
+        }
+        collector.feed(b"\"}}\n");
+        collector.feed(br#"{"type":"turn.completed","usage":{"output_tokens":7}}"#);
+        collector.feed(b"\n");
+        let usage = collector.finish().usage.unwrap();
+        assert_eq!((usage.output_tokens, usage.unavailable), (7, None));
+        // Costs saturate too.
+        let mut tree = TreeUsage::default();
+        for _ in 0..3 {
+            tree.add_usage(&Usage {
+                cost_usd: Some(f64::MAX),
+                ..Usage::default()
+            });
+        }
+        assert_eq!(tree.cost_usd, Some(f64::MAX));
     }
 
     #[test]

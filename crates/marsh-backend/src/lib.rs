@@ -2552,10 +2552,7 @@ impl DaemonBackend for StockDaemonBackend {
         }
         // `marsh run --usage PARSER` (the task tool): the agent reports its
         // token usage on stdout; read it as the output streams past.
-        let mut usage_collector = request
-            .usage
-            .as_deref()
-            .and_then(marsh_contracts::usage::Collector::new);
+        let mut usage_collector = usage_collector(request.usage.as_deref());
         // Drop-ins are read at every job start, so an edit applies to the
         // next job (`docs/peer-review.md`). Only a root job (the agent that reports to the user) is asked for
         // a review: a reviewer or another child does not start its own.
@@ -3579,6 +3576,13 @@ fn reconcile_worker_cleanup(
 /// What a job's caller reads when one of its `cap.sock` connections was cut
 /// because the daemon fell 8 MiB behind on it.
 const CAP_CUT_NOTICE: &str = "marsh: closed one of this job's daemon connections: more than 8 MiB of its data waited while the job's output was not being read\n";
+
+/// The daemon's reader of a `--usage` job's stdout: it holds one line for
+/// every live job, so it reads lines of at most
+/// [`marsh_contracts::usage::DAEMON_MAX_LINE`].
+fn usage_collector(parser: Option<&str>) -> Option<marsh_contracts::usage::Collector> {
+    marsh_contracts::usage::Collector::bounded(parser?, marsh_contracts::usage::DAEMON_MAX_LINE)
+}
 
 /// Bridges a job's split capability connections to this daemon's endpoint
 /// with a per-attempt token that is revoked when the job ends
@@ -6180,6 +6184,29 @@ mod tests {
             vec![AttachmentFrame::Stderr {
                 bytes: CAP_CUT_NOTICE.as_bytes().to_vec()
             }]
+        );
+    }
+
+    /// DA3-06: the daemon reads a job's usage with its 1 MiB line bound: a
+    /// 2 MiB result line is not read, and the usage says so.
+    #[test]
+    fn the_daemon_reads_usage_lines_up_to_one_mebibyte() {
+        assert!(usage_collector(None).is_none());
+        let mut collector = usage_collector(Some("claude-json")).unwrap();
+        let answer = "x".repeat(2 << 20);
+        collector.feed(
+            format!(r#"{{"type":"result","result":"{answer}","usage":{{"output_tokens":5}}}}"#)
+                .as_bytes(),
+        );
+        collector.feed(b"\n");
+        let usage = collector.finish().usage.unwrap();
+        assert_eq!(usage.output_tokens, 0);
+        assert!(
+            usage
+                .unavailable
+                .as_deref()
+                .is_some_and(|why| why.contains("1024 KiB")),
+            "{usage:?}"
         );
     }
 
