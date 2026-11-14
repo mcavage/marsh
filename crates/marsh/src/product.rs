@@ -1303,6 +1303,14 @@ fn write_skills_mirror(
     for error in &mirror.errors {
         writeln!(writer, "    error:      {error}")?;
     }
+    for change in mirror.history.iter().take(5) {
+        let when = crate::job::ago(now - i64::try_from(change.at).unwrap_or(i64::MAX));
+        writeln!(
+            writer,
+            "    changed:    {} {} {when}, diff {}",
+            change.name, change.change, change.diff
+        )?;
+    }
     Ok(())
 }
 
@@ -1725,6 +1733,28 @@ mod tests {
     use super::*;
     use crate::{cli::LoadSelection, client::ExecuteRequest};
     use serde_json::json;
+
+    #[test]
+    fn status_lists_the_skills_the_mirror_changed() {
+        let mirror = marsh_daemon::SkillsMirrorStatus {
+            enabled: true,
+            history: vec![marsh_daemon::SkillChange {
+                name: "tool".into(),
+                change: "updated".into(),
+                at: 0,
+                diff: "/control/skills-history/0000000000000-tool/diff".into(),
+            }],
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        write_skills_mirror(&mut out, Some(&mirror)).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.contains("    changed:    tool updated ")
+                && out.ends_with(", diff /control/skills-history/0000000000000-tool/diff\n"),
+            "{out}"
+        );
+    }
 
     #[test]
     fn peer_review_waits_for_the_daemon_to_read_agent_descriptors() {
