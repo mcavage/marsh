@@ -2115,6 +2115,18 @@ mod tests {
         assert!(record.open().is_err());
         assert!(checkpoints.remove(Some(&project), &made.id).is_err());
         assert!(made.dir.is_dir());
+        // The right volume but another file ID (a replaced directory on a
+        // remounted volume) is not the checkpoint either.
+        let volume = made.volume.clone().unwrap();
+        edit_journal(&root, |record| {
+            record["volume"] = volume.as_str().into();
+            record["identity"][1] = (record["identity"][1].as_u64().unwrap() + 1).into();
+        });
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let record = checkpoints.list(Some(&project), None).pop().unwrap();
+        assert!(record.open().is_err());
+        assert!(checkpoints.remove(Some(&project), &made.id).is_err());
+        assert!(made.dir.is_dir());
     }
 
     /// A checkpoint recognised on a remounted volume (new device number,
