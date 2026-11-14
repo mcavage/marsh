@@ -299,10 +299,14 @@ Each change the mirror makes to the store is kept in the control home, in
 changed: `diff` (a unified diff from the store's copy to the new one),
 `before/` (the store's copy it replaced; none for a new skill) and
 `change.json`. The newest 20 changes of each skill are kept. `marsh status`
-lists the newest changes with the path of each diff. To roll a skill back,
-copy `before/` over the skill's folder on your Mac (for example
-`rm -r ~/.claude/skills/NAME && cp -R CONTROL/HASH/skills-history/AT-NAME/before ~/.claude/skills/NAME`);
-the mirror then imports it again, and records that change too.
+lists the newest changes with the path of each diff. An import that fails
+leaves no entry. To roll a skill back, copy the files in `before/` over the
+skill's real folder (for a linked-in skill, the link's target, such as
+`~/dev/tools/my-skill`, so the link stays), for example
+`cp -R CONTROL/HASH/skills-history/AT-NAME/before/. ~/dev/tools/my-skill/`
+(delete by hand any file the change added; `diff` names it); the mirror then
+imports it again, and records that change too. Big files
+(over 1 MiB) are named in the diff, not diffed.
 
 A skill with the name of one a registered Kit bundles (`agent-skill@1`) is
 never imported: the Kit's copy wins, and the name is listed as a clash
