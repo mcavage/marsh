@@ -1198,8 +1198,6 @@ pub struct StockSbx {
     /// Per-user verified local Kit image archives keyed by source
     /// fingerprint (daemon opt-in; `make dev` seeds it).
     kit_image_cache: Option<PathBuf>,
-    /// Whether published (digest) Kit images use the cache as well.
-    published_image_cache: bool,
     /// The Docker CLI marsh reads registries and builds with (`docker`).
     docker: PathBuf,
     /// Published images whose archive is being saved into the cache.
@@ -1360,7 +1358,6 @@ impl StockSbx {
             worker_init_locks: Mutex::new(BTreeMap::new()),
             installed_worker_artifacts: Mutex::new(BTreeMap::new()),
             kit_image_cache: None,
-            published_image_cache: true,
             docker: PathBuf::from("docker"),
             published_image_saves: Arc::new(Mutex::new(BTreeSet::new())),
             worker_artifact_identities: Mutex::new(BTreeMap::new()),
@@ -1483,20 +1480,10 @@ impl StockSbx {
         self
     }
 
-    /// Whether published (digest) Kit images are saved to and loaded from
-    /// the Kit image cache (default on). A nested `--dev` daemon turns it
-    /// off: its stock calls cross the dev broker, and moving an archive
-    /// through it costs more than the child VM's own registry pull.
     /// Use another Docker CLI (`MARSH_DOCKER`) for registry reads and builds.
     #[must_use]
     pub fn with_docker(mut self, docker: PathBuf) -> Self {
         self.docker = docker;
-        self
-    }
-
-    #[must_use]
-    pub fn with_published_image_cache(mut self, enabled: bool) -> Self {
-        self.published_image_cache = enabled;
         self
     }
 
@@ -4416,7 +4403,6 @@ impl StockSbx {
         let cache = self
             .kit_image_cache
             .as_deref()
-            .filter(|_| self.published_image_cache)
             .filter(|_| published_image_digest(&reference).is_some());
         if let Some(cache) = cache
             && let Some(archive) = cached_published_image(cache, &reference)
@@ -4480,11 +4466,7 @@ impl StockSbx {
         if published_image_digest(image).is_none() {
             return false;
         }
-        match self
-            .kit_image_cache
-            .as_deref()
-            .filter(|_| self.published_image_cache)
-        {
+        match self.kit_image_cache.as_deref() {
             Some(cache) => cached_published_image(cache, image).is_none(),
             None => true,
         }

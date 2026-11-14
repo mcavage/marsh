@@ -1,4 +1,4 @@
-//! Bounded stock control-plane capture, shared by source observation and brokers.
+//! Bounded stock control-plane capture, shared by source observation and cloud.
 use crate::SbxError;
 use marsh_runtime::{Attachment, CommandOutput, CommandRunner, Invocation, retain_for_reaping};
 use std::{
