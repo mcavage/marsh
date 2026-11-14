@@ -434,9 +434,10 @@ fn retained_capability_data_is_bounded_and_closes_only_the_flooding_channel() {
     drop(receive);
 }
 
-/// B-01: with the consumer stalled and the budget full, a job opening and
-/// closing channels in a loop leaves nothing queued for the consumer, and
-/// the route remembers a bounded number of closed channels.
+/// B-01: with the budget full, a job opening and closing channels in a
+/// loop has each opening refused, and the route remembers a bounded number
+/// of closed channels (what reaches the consumer is checked through the
+/// real route in `kit_lifecycle`).
 #[test]
 fn channel_churn_past_the_budget_queues_nothing_and_stays_bounded() {
     let (send, receive) = mpsc::channel();
@@ -457,7 +458,35 @@ fn channel_churn_past_the_budget_queues_nothing_and_stays_bounded() {
         }
     }
     assert!(route.closed_channels.len() <= CLOSED_CHANNELS_KEPT);
-    assert!(receive.try_recv().is_err(), "a refused opening was queued");
+    drop(receive);
+}
+
+/// B-01: an endpoint channel refused past the budget leaves nothing for the
+/// consumer, not even its end or its credit.
+#[test]
+fn a_refused_endpoint_channel_queues_nothing_for_the_consumer() {
+    let (send, _receive) = mpsc::channel();
+    let mut route = AttemptRoute::new(send, 1 << 20);
+    route.capability_bytes = RETAINED_CAPABILITY_BUFFER_BYTES;
+    let opened = route.admit(&WorkerResponse::ChanOpen {
+        attempt: "a".into(),
+        channel: 9,
+        kind: marsh_contracts::process::ChannelKind::Docker,
+    });
+    assert_eq!(opened, Admission::Refuse(9));
+    for frame in [
+        WorkerResponse::ChanEof {
+            attempt: "a".into(),
+            channel: 9,
+        },
+        WorkerResponse::ChanCredit {
+            attempt: "a".into(),
+            channel: 9,
+            chunks: 8,
+        },
+    ] {
+        assert_eq!(route.admit(&frame), Admission::Drop);
+    }
 }
 
 /// B-01: an endpoint channel that ends cleanly (both sides' `ChanEof`, no
