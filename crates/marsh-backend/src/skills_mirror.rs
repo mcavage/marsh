@@ -43,6 +43,8 @@ const RETRY: Duration = Duration::from_mins(1);
 const MAX_RECORD_BYTES: u64 = 1024 * 1024;
 const MAX_SKILL_FILES: usize = 4096;
 const MAX_SKILL_BYTES: u64 = 64 * 1024 * 1024;
+/// How many folder levels a skill may have.
+const MAX_SKILL_DEPTH: usize = 64;
 const MAX_STAMPS: usize = 65_536;
 /// How long the first sync waits for registered Kits' descriptors.
 const BUNDLED_WAIT: Duration = Duration::from_secs(30);
@@ -272,25 +274,52 @@ fn valid_name(name: &str) -> bool {
 /// whether it is executable, with its bytes.
 type Files = BTreeMap<PathBuf, (bool, Vec<u8>)>;
 
-/// Reads a skill folder by descriptor, following no link below it (a
-/// top-level link is followed: its target is the skill folder). A link
-/// inside counts as the regular file it names in the same folder, by a
-/// relative path that stays in the folder; any other link, or anything but
-/// a directory or regular file, refuses the skill. The import gets a copy
-/// of these files, never a link to the folder, so whatever stock SBX does
-/// with links, nothing outside the folder reaches the store.
+/// Reads a skill folder by descriptor. The folder's path is resolved once
+/// (a top-level link is followed: its target is the skill folder), then
+/// opened one component at a time without following links, so a folder
+/// swapped for a link after that fails instead of leading elsewhere; its
+/// `SKILL.md` must be a regular file read through that handle. The walk
+/// follows no link below the folder and is not recursive, bounded at
+/// `MAX_SKILL_DEPTH` levels and `MAX_SKILL_FILES` entries. A link inside
+/// counts as the regular file it names in the same folder, by a relative
+/// path that stays in the folder; any other link, or anything but a
+/// directory or regular file, refuses the skill. The import gets a copy of
+/// these files, never a link to the folder, so whatever stock SBX does with
+/// links, nothing outside the folder reaches the store.
 fn read_skill(root: &Path) -> Result<Files, String> {
     use rustix::fs::{Mode, OFlags};
-    let folder = rustix::fs::open(
-        root,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|error| error.to_string())?;
-    let mut files = Files::new();
-    let mut links = Vec::new();
-    let mut total = 0;
-    read_folder(&folder, &PathBuf::new(), &mut files, &mut links, &mut total)?;
+    let folder = std::rc::Rc::new(open_skill_folder(root)?);
+    let mut walk = Walk::default();
+    let mut pending = Vec::new();
+    for (name, path) in walk.read(&folder, Path::new(""))? {
+        pending.push((std::rc::Rc::clone(&folder), name, path));
+    }
+    while let Some((parent, name, path)) = pending.pop() {
+        if path.components().count() > MAX_SKILL_DEPTH {
+            return Err(format!("more than {MAX_SKILL_DEPTH} folder levels"));
+        }
+        let inner = rustix::fs::openat(
+            &*parent,
+            &name,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+        drop(parent);
+        let inner = std::rc::Rc::new(inner);
+        for (name, path) in walk.read(&inner, &path)? {
+            pending.push((std::rc::Rc::clone(&inner), name, path));
+        }
+    }
+    let Walk {
+        mut files,
+        links,
+        mut total,
+        ..
+    } = walk;
+    if !files.contains_key(Path::new("SKILL.md")) {
+        return Err("SKILL.md is not a regular file in the skill folder".into());
+    }
     for (link, target) in links {
         let Some(file) = files.get(&target).cloned() else {
             return Err(format!(
@@ -300,7 +329,7 @@ fn read_skill(root: &Path) -> Result<Files, String> {
             ));
         };
         total += file.1.len() as u64;
-        if files.len() >= MAX_SKILL_FILES || total > MAX_SKILL_BYTES {
+        if total > MAX_SKILL_BYTES {
             return Err("too big".into());
         }
         files.insert(link, file);
@@ -308,79 +337,103 @@ fn read_skill(root: &Path) -> Result<Files, String> {
     Ok(files)
 }
 
-fn read_folder(
-    folder: &std::os::fd::OwnedFd,
-    relative: &Path,
-    files: &mut Files,
-    links: &mut Vec<(PathBuf, PathBuf)>,
-    total: &mut u64,
-) -> Result<(), String> {
-    use rustix::fs::{AtFlags, FileType, Mode, OFlags};
-    use std::os::unix::ffi::OsStrExt as _;
-    let mut reader = rustix::fs::Dir::read_from(folder).map_err(|error| error.to_string())?;
-    while let Some(entry) = reader.read() {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let name = entry.file_name();
-        if matches!(name.to_bytes(), b"." | b"..") {
-            continue;
-        }
-        let path = relative.join(std::ffi::OsStr::from_bytes(name.to_bytes()));
-        let stat = rustix::fs::statat(folder, name, AtFlags::SYMLINK_NOFOLLOW)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
-        if files.len() + links.len() >= MAX_SKILL_FILES {
-            return Err("too many files".into());
-        }
-        match FileType::from_raw_mode(stat.st_mode) {
-            FileType::Directory => {
-                let inner = rustix::fs::openat(
-                    folder,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|error| format!("{}: {error}", path.display()))?;
-                read_folder(&inner, &path, files, links, total)?;
+/// Opens the folder `root` resolves to now, one component at a time, never
+/// following a link.
+fn open_skill_folder(root: &Path) -> Result<std::os::fd::OwnedFd, String> {
+    use rustix::fs::{Mode, OFlags};
+    use std::path::Component;
+    let resolved = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut folder = rustix::fs::open("/", flags, Mode::empty()).map_err(|e| e.to_string())?;
+    for component in resolved.components() {
+        match component {
+            Component::RootDir => {}
+            Component::Normal(name) => {
+                folder = rustix::fs::openat(&folder, name, flags, Mode::empty())
+                    .map_err(|error| format!("the skill folder changed while read: {error}"))?;
             }
-            FileType::RegularFile => {
-                let file = rustix::fs::openat(
-                    folder,
-                    name,
-                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(|error| format!("{}: {error}", path.display()))?;
-                let stat = rustix::fs::fstat(&file).map_err(|error| error.to_string())?;
-                if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
-                    return Err(format!("{} changed while read", path.display()));
-                }
-                let mut bytes = Vec::new();
-                fs::File::from(file)
-                    .take(MAX_SKILL_BYTES + 1 - *total)
-                    .read_to_end(&mut bytes)
-                    .map_err(|error| format!("{}: {error}", path.display()))?;
-                *total += bytes.len() as u64;
-                if *total > MAX_SKILL_BYTES {
-                    return Err("too big".into());
-                }
-                files.insert(path, (stat.st_mode & 0o111 != 0, bytes));
-            }
-            FileType::Symlink => {
-                let target = rustix::fs::readlinkat(folder, name, Vec::new())
-                    .map_err(|error| format!("{}: {error}", path.display()))?;
-                let target = Path::new(std::ffi::OsStr::from_bytes(target.as_bytes()));
-                let resolved = inside(relative, target).ok_or_else(|| {
-                    format!(
-                        "{} is a link to {}, outside the skill folder",
-                        path.display(),
-                        target.display()
-                    )
-                })?;
-                links.push((path, resolved));
-            }
-            _ => return Err(format!("{} is not a regular file", path.display())),
+            _ => return Err(format!("unexpected path {}", resolved.display())),
         }
     }
-    Ok(())
+    Ok(folder)
+}
+
+/// What a skill-folder walk found so far.
+#[derive(Default)]
+struct Walk {
+    files: Files,
+    links: Vec<(PathBuf, PathBuf)>,
+    total: u64,
+    entries: usize,
+}
+
+impl Walk {
+    /// Reads one folder's files and links; returns its subfolders.
+    fn read(
+        &mut self,
+        folder: &std::os::fd::OwnedFd,
+        relative: &Path,
+    ) -> Result<Vec<(std::ffi::CString, PathBuf)>, String> {
+        use rustix::fs::{AtFlags, FileType, Mode, OFlags};
+        use std::os::unix::ffi::OsStrExt as _;
+        let mut folders = Vec::new();
+        let mut reader = rustix::fs::Dir::read_from(folder).map_err(|error| error.to_string())?;
+        while let Some(entry) = reader.read() {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            self.entries += 1;
+            if self.entries > MAX_SKILL_FILES {
+                return Err("too many files".into());
+            }
+            let path = relative.join(std::ffi::OsStr::from_bytes(name.to_bytes()));
+            let stat = rustix::fs::statat(folder, name, AtFlags::SYMLINK_NOFOLLOW)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            match FileType::from_raw_mode(stat.st_mode) {
+                FileType::Directory => folders.push((name.to_owned(), path)),
+                FileType::RegularFile => {
+                    let file = rustix::fs::openat(
+                        folder,
+                        name,
+                        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+                    let stat = rustix::fs::fstat(&file).map_err(|error| error.to_string())?;
+                    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+                        return Err(format!("{} changed while read", path.display()));
+                    }
+                    let mut bytes = Vec::new();
+                    fs::File::from(file)
+                        .take(MAX_SKILL_BYTES + 1 - self.total)
+                        .read_to_end(&mut bytes)
+                        .map_err(|error| format!("{}: {error}", path.display()))?;
+                    self.total += bytes.len() as u64;
+                    if self.total > MAX_SKILL_BYTES {
+                        return Err("too big".into());
+                    }
+                    self.files.insert(path, (stat.st_mode & 0o111 != 0, bytes));
+                }
+                FileType::Symlink => {
+                    let target = rustix::fs::readlinkat(folder, name, Vec::new())
+                        .map_err(|error| format!("{}: {error}", path.display()))?;
+                    let target = Path::new(std::ffi::OsStr::from_bytes(target.as_bytes()));
+                    let resolved = inside(relative, target).ok_or_else(|| {
+                        format!(
+                            "{} is a link to {}, outside the skill folder",
+                            path.display(),
+                            target.display()
+                        )
+                    })?;
+                    self.links.push((path, resolved));
+                }
+                _ => return Err(format!("{} is not a regular file", path.display())),
+            }
+        }
+        Ok(folders)
+    }
 }
 
 /// Where a relative link target in `folder` leads, when that stays inside
@@ -945,6 +998,57 @@ mod tests {
             BTreeMap::from([("SKILL.md".to_owned(), "good".to_owned())])
         );
         assert_eq!(*rig.fake.imports.lock().unwrap(), 1);
+    }
+
+    /// A skill folder swapped for a link to another folder after `sources()`
+    /// saw its `SKILL.md` is not read through that link.
+    #[test]
+    fn a_folder_swapped_after_the_scan_is_not_read() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("folder");
+        let skill = folder.join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "tool").unwrap();
+        let ssh = root.path().join("ssh");
+        fs::create_dir_all(&ssh).unwrap();
+        fs::write(ssh.join("id_ed25519"), "PRIVATE KEY").unwrap();
+        let found = sources(std::slice::from_ref(&folder));
+        fs::remove_dir_all(&skill).unwrap();
+        std::os::unix::fs::symlink(&ssh, &skill).unwrap();
+        let error = read_skill(&found["tool"]).unwrap_err();
+        assert!(error.contains("SKILL.md"), "{error}");
+        // A link to SKILL.md does not make a folder a skill either.
+        std::os::unix::fs::symlink(skill.join("id_ed25519"), ssh.join("SKILL.md")).unwrap();
+        assert!(read_skill(&found["tool"]).is_err());
+    }
+
+    /// A skill folder nested deeper than any skill needs is refused, without
+    /// recursing (a deep tree once overflowed the mirror thread's stack).
+    #[test]
+    fn a_deep_tree_is_refused() {
+        use rustix::fs::{Mode, OFlags};
+        let root = tempfile::tempdir().unwrap();
+        let skill = root.path().join("deep");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "deep").unwrap();
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+        let mut folder = rustix::fs::open(&skill, flags, Mode::empty()).unwrap();
+        for _ in 0..2000 {
+            rustix::fs::mkdirat(&folder, "d", Mode::from_raw_mode(0o755)).unwrap();
+            folder = rustix::fs::openat(&folder, "d", flags, Mode::empty()).unwrap();
+        }
+        let error = read_skill(&skill).unwrap_err();
+        assert!(error.contains("folder levels"), "{error}");
+    }
+
+    #[test]
+    fn a_link_target_must_stay_in_the_folder() {
+        let at = |folder: &str, target: &str| inside(Path::new(folder), Path::new(target));
+        assert_eq!(at("a", "../x"), Some(PathBuf::from("x")));
+        assert_eq!(at("a", "./b/../c"), Some(PathBuf::from("a/c")));
+        assert_eq!(at("", "../x"), None);
+        assert_eq!(at("a", "b/../../../x"), None);
+        assert_eq!(at("a", "/etc/hosts"), None);
     }
 
     #[test]
