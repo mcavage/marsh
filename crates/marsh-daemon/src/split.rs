@@ -380,6 +380,39 @@ impl SplitLineage {
     }
 }
 
+/// Prefix of an untrusted branch's admin directory once it is hidden.
+const QUARANTINED: &str = ".untrusted-";
+
+/// Hides each untrusted branch's admin directory (`.admin/<label>` to
+/// `.admin/.untrusted-<label>`), never verified: the kept copy's gitfile
+/// then names no repository, so a host `git` or IDE in it reads nothing the
+/// branch wrote there. Running jobs keep their binds. Idempotent.
+fn quarantine_untrusted(record: &SplitRecord) {
+    let mut untrusted = record
+        .branches
+        .iter()
+        .filter(|branch| branch.trust.as_deref() == Some("untrusted"))
+        .peekable();
+    if untrusted.peek().is_none() {
+        return;
+    }
+    let Ok(admin) = record
+        .open()
+        .and_then(|split| split.open(".admin").map_err(|e| e.to_string()))
+    else {
+        return;
+    };
+    for branch in untrusted {
+        if admin.stat(&branch.label).is_ok() {
+            let _ = admin.rename(
+                &branch.label,
+                &admin,
+                format!("{QUARANTINED}{}", branch.label),
+            );
+        }
+    }
+}
+
 impl SplitRecord {
     fn out(&self) -> PathBuf {
         self.dir.join("out")
@@ -741,6 +774,7 @@ impl SplitEngine {
             for branch in &mut record.branches {
                 branch.live = 0;
             }
+            quarantine_untrusted(record);
         }
         let lineage = fs::read(journal_home.join("split-lineage.json"))
             .ok()
@@ -985,8 +1019,12 @@ impl SplitEngine {
     }
 
     fn update(&self, id: &str, change: impl FnOnce(&mut SplitRecord)) {
-        if let Some(record) = self.lock().records.get_mut(id) {
+        let changed = self.lock().records.get_mut(id).map(|record| {
             change(record);
+            record.clone()
+        });
+        if let Some(record) = changed {
+            quarantine_untrusted(&record);
         }
         self.save();
     }
@@ -1421,7 +1459,7 @@ impl SplitEngine {
                 )
             } else {
                 format!(
-                    "cancelled; kept {} because a lane job did not end; run `marsh workers reset all`, inspect, then: marsh splits rm {}",
+                    "cancelled; kept {} because a lane job did not end; run `marsh workers reset all`, inspect its files (not with Git), then: marsh splits rm {}",
                     record.dir.display(),
                     record.id
                 )
@@ -2298,7 +2336,7 @@ impl SplitEngine {
                 }
             } else {
                 format!(
-                    "{cancelled_because}; kept {} because the end of {} {} was not confirmed; run `marsh workers reset all`, inspect, then: marsh splits rm {}",
+                    "{cancelled_because}; kept {} because the end of {} {} was not confirmed; run `marsh workers reset all`, inspect its files (not with Git), then: marsh splits rm {}",
                     record.dir.display(),
                     plural(unconfirmed.len(), "branch", "branches"),
                     unconfirmed.join(", "),
@@ -3973,5 +4011,89 @@ pub(crate) fn human_duration(duration: Duration) -> String {
         format!("{}m", seconds / 60)
     } else {
         format!("{seconds}s")
+    }
+}
+
+#[cfg(test)]
+mod quarantine_tests {
+    use super::*;
+    use std::os::unix::fs::MetadataExt as _;
+
+    #[test]
+    fn an_untrusted_branch_admin_dir_is_hidden_from_host_git() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let dir = root.join(".marsh/split/s1");
+        for path in ["a", "b", ".admin/a", ".admin/b"] {
+            fs::create_dir_all(dir.join(path)).unwrap();
+        }
+        let identity = fs::metadata(&dir).map(|m| (m.dev(), m.ino())).unwrap();
+        let branch = |label: &str, trust: Option<&str>| {
+            serde_json::json!({
+                "label": label, "kind": "lane", "placement": "local",
+                "state": if trust.is_some() { "uncertain" } else { "running" },
+                "files": 0, "trust": trust, "fork": dir.join(label),
+            })
+        };
+        let record: SplitRecord = serde_json::from_value(serde_json::json!({
+            "id": "s1", "state": "kept", "creator": {"kind": "host"},
+            "session": "x", "parent": null, "depth": 1, "root": root, "dir": dir,
+            "cwd": root, "created_unix_ms": 0, "identity": identity,
+            "branches": [branch("a", Some("untrusted")), branch("b", None)],
+        }))
+        .unwrap();
+        quarantine_untrusted(&record);
+        assert!(!dir.join(".admin/a").exists());
+        assert!(dir.join(".admin/.untrusted-a").is_dir());
+        assert!(dir.join(".admin/b").is_dir());
+        quarantine_untrusted(&record);
+        assert!(dir.join(".admin/.untrusted-a").is_dir());
+    }
+
+    /// The engine hides an admin dir when a restart makes its branch
+    /// untrusted (load), and when a running engine marks one so (`update`).
+    #[test]
+    fn the_engine_quarantines_at_load_and_on_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let journal = root.join("journal");
+        fs::create_dir(&journal).unwrap();
+        let record = |id: &str, kind: &str| {
+            let dir = root.join(".marsh/split").join(id);
+            for path in ["a", ".admin/a"] {
+                fs::create_dir_all(dir.join(path)).unwrap();
+            }
+            let identity = fs::metadata(&dir).map(|m| (m.dev(), m.ino())).unwrap();
+            serde_json::json!({
+                "id": id, "state": "run", "creator": {"kind": "host"},
+                "session": "x", "parent": null, "depth": 1, "root": root, "dir": dir,
+                "cwd": root, "created_unix_ms": 0, "identity": identity,
+                "branches": [{
+                    "label": "a", "kind": kind, "placement": "local", "state": "running",
+                    "files": 0, "fork": dir.join("a"),
+                }],
+            })
+        };
+        // An argv split the restart interrupted, and an idle open lane.
+        let records = serde_json::json!({"s1": record("s1", "argv"), "s2": record("s2", "lane")});
+        fs::write(journal.join("splits.json"), records.to_string()).unwrap();
+        let client = crate::Client {
+            paths: crate::EndpointPaths {
+                runtime_directory: root.clone(),
+                socket: root.join("sock"),
+                lock: root.join("lock"),
+                token: root.join("token"),
+            },
+            token: String::new(),
+        };
+        let engine = SplitEngine::open(&journal, client, Arc::default());
+        let admin = |id: &str| root.join(".marsh/split").join(id).join(".admin");
+        assert!(admin("s1").join(".untrusted-a").is_dir());
+        assert!(!admin("s1").join("a").exists());
+        assert!(admin("s2").join("a").is_dir(), "an open lane stays usable");
+        engine.update("s2", |record| {
+            record.branches[0].trust = Some("untrusted".into());
+        });
+        assert!(admin("s2").join(".untrusted-a").is_dir());
     }
 }

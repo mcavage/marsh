@@ -302,8 +302,19 @@ public state strings.
 - **Capture verification**: the gitfile and admin files must be
   byte-identical to what the daemon wrote, and the fork may contain no
   nested `.git` entry at any depth. If either check fails, the branch is
-  rejected, so a host `git -C <fork> status` or IDE never meets a
-  branch-written `core.fsmonitor` or `hooksPath`.
+  rejected. The admin dir's `commondir` (`./`; libgit2 can't open `.`) and
+  empty `hooks/`, `modules/` and `worktrees/` are read-only binds, so a
+  branch can't move host Git's config or hooks there even before capture.
+  A fork whose admin dir lacks them (a lane kept open across an upgrade),
+  or has them changed, admits no job: close it and open a new one. An `uncertain` (untrusted) branch's admin dir is
+  renamed to `.admin/.untrusted-<label>`, so host Git finds no repository
+  in its kept copy. So a host `git -C <fork> status` or IDE never meets a
+  branch-written `core.fsmonitor` or `hooksPath` in a captured or
+  uncertain fork. **Not covered:** a live lane's copy, before `close`
+  captures it. A lane job can create a nested `sub/.git` there (only
+  capture rejects it), and a host `git -C <fork>/sub` would run what it
+  names. The lane shell banner and `split.md` say not to run Git or an IDE
+  on an open lane's copy from the Mac.
 - **Patch writer**: text hunks use `similar` in unified format with full blob
   IDs on `index` lines. Binary changes use Git's `GIT binary patch` / `literal`
   forward and reverse hunks (zlib + base85, no delta). Capture writes the changed

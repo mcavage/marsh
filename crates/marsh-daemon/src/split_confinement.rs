@@ -4,8 +4,9 @@
 //! branch, or a Kit command started from a shell branch) mounts only its fork
 //! and its fork's Git metadata instead of the whole project: the fork, the
 //! admin `objects/` and `index` read-write; the gitfile, `config`, `HEAD`,
-//! `info/`, and `packed-refs` read-only binds; the split's `store.git` and the
-//! user's `.git/objects` read-only. Every component must be a real directory.
+//! `info/`, `packed-refs`, `commondir` (`./`) and empty `hooks/`, `modules/`
+//! and `worktrees/` read-only binds; the split's `store.git` and the user's `.git/objects` read-only.
+//! Every component must be a real directory.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -59,6 +60,21 @@ fn real_directories(project: &Path, path: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Whether the admin dir holds the daemon's placeholders: `commondir` as
+/// written, and each of `ADMIN_EMPTY_DIRS` an empty real directory.
+fn placeholders_in_place(admin: &Path) -> bool {
+    let commondir = fs::symlink_metadata(admin.join("commondir"))
+        .is_ok_and(|metadata| metadata.is_file())
+        && fs::read(admin.join("commondir"))
+            .is_ok_and(|bytes| bytes == crate::split_fs::ADMIN_COMMONDIR);
+    commondir
+        && crate::split_fs::ADMIN_EMPTY_DIRS.iter().all(|name| {
+            let path = admin.join(name);
+            fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir())
+                && fs::read_dir(&path).is_ok_and(|mut entries| entries.next().is_none())
+        })
 }
 
 /// The project whose fork holds `path` (`<root>/.marsh/split/<id>/<label>/...`),
@@ -141,6 +157,17 @@ pub fn branch_confinement(project: &Path, cwd: &Path) -> Result<Option<BranchCon
             (workspace.join(".git"), false),
             (split_dir.join("store.git"), false),
         ]);
+        // A fork made before these placeholders existed (a lane kept open
+        // across an upgrade) would admit a job that plants them: refused.
+        if !placeholders_in_place(&admin) {
+            return Err(format!(
+                "split {id} was made by an older marsh and lacks Git safeguards; close it (marsh split close {id}) and open a new one"
+            ));
+        }
+        binds.push((admin.join("commondir"), false));
+        for name in crate::split_fs::ADMIN_EMPTY_DIRS {
+            binds.push((admin.join(name), false));
+        }
         if fs::symlink_metadata(project.join(".git")).is_ok_and(|m| m.is_dir()) {
             binds.push((project.join(".git/objects"), false));
         }
@@ -165,7 +192,10 @@ mod tests {
         let split = project.join(".marsh/split/abc123");
         fs::create_dir_all(project.join(".git/objects")).unwrap();
         fs::create_dir_all(split.join("fix/src")).unwrap();
-        fs::create_dir_all(split.join(".admin/fix")).unwrap();
+        for dir in crate::split_fs::ADMIN_EMPTY_DIRS {
+            fs::create_dir_all(split.join(".admin/fix").join(dir)).unwrap();
+        }
+        fs::write(split.join(".admin/fix/commondir"), "./\n").unwrap();
         let confinement = branch_confinement(&project, &split.join("fix/src"))
             .unwrap()
             .unwrap();
@@ -177,7 +207,16 @@ mod tests {
             .map(|(path, _)| path.clone())
             .collect::<Vec<_>>();
         assert_eq!(writable, [split.join(".admin/fix")]);
-        for read_only in ["config", "HEAD", "info", "packed-refs"] {
+        for read_only in [
+            "config",
+            "HEAD",
+            "info",
+            "packed-refs",
+            "commondir",
+            "hooks",
+            "modules",
+            "worktrees",
+        ] {
             assert!(
                 confinement
                     .binds
@@ -207,5 +246,44 @@ mod tests {
         // A symlinked fork is never bound.
         std::os::unix::fs::symlink(&project, split.join("evil")).unwrap();
         assert!(branch_confinement(&project, &split.join("evil")).is_err());
+        // A fork from before the placeholders, or one whose placeholders a
+        // job filled, admits no job.
+        fs::write(split.join(".admin/fix/hooks/post-checkout"), "x").unwrap();
+        assert!(branch_confinement(&project, &split.join("fix")).is_err());
+        fs::remove_file(split.join(".admin/fix/hooks/post-checkout")).unwrap();
+        fs::remove_file(split.join(".admin/fix/commondir")).unwrap();
+        let refused = branch_confinement(&project, &split.join("fix")).unwrap_err();
+        assert!(refused.contains("older marsh"), "{refused}");
+    }
+
+    /// The admin dir the daemon writes for a fork is what confinement binds:
+    /// its placeholders exist, so a job of the fork is admitted with them
+    /// read-only.
+    #[test]
+    fn a_written_admin_dir_admits_its_jobs_with_placeholders_read_only() {
+        use crate::split_fs::{Dir, GitSnapshot, admin_contents, write_admin};
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        let split = project.join(".marsh/split/abc123");
+        fs::create_dir_all(split.join("fix")).unwrap();
+        fs::create_dir_all(split.join(".admin/fix")).unwrap();
+        let git = GitSnapshot::default();
+        let root = Dir::open_root(&split).unwrap();
+        write_admin(
+            &git,
+            &admin_contents(&git, &split.join("store.git")),
+            &root.open(".admin").unwrap().open("fix").unwrap(),
+            &split.join(".admin/fix"),
+            &root.open("fix").unwrap(),
+        )
+        .unwrap();
+        let confinement = branch_confinement(&project, &split.join("fix"))
+            .unwrap()
+            .unwrap();
+        assert!(
+            confinement
+                .binds
+                .contains(&(split.join(".admin/fix/commondir"), false))
+        );
     }
 }

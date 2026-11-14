@@ -424,8 +424,14 @@ marsh split apply ID a --json          # tries a plain apply, then --3way; one J
 A command run in a lane is confined to its fork, like a `:::` branch. Only the
 split's creator can start one, and only until the split is closed. `close`
 waits up to 30 seconds for running lane jobs; a lane whose jobs are still
-running is kept as uncertain. `marsh splits cancel ID` stops the lane jobs and
-removes the split. Agents of different kinds can share one lane; `marsh fanout`
+running is kept as uncertain, and its Git metadata is hidden so Git on your
+Mac finds no repository in its copy. `marsh splits cancel ID` stops the lane jobs and
+removes the split.
+
+A lane's copy is untrusted until `close` captures it: an agent in it can
+create Git files (a nested `.git`) that run commands when Git reads them.
+Don't run `git`, a Git-aware shell prompt, or an IDE on an open lane's copy
+from your Mac; inspect the lane with `marsh split close` and its patch. Agents of different kinds can share one lane; `marsh fanout`
 from a lane's copy runs its branches as lane jobs; `marsh cloud -d -- PROGRAM`
 there writes its results back into the copy (never the project); and a
 `marsh` shell started in the copy starts in it. See [design: workspaces](design/workspaces.md#14-open-lanes-checkpoints-and-storage).
