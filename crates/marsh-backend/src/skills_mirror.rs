@@ -253,7 +253,10 @@ fn sources(folders: &[PathBuf]) -> BTreeMap<String, PathBuf> {
                 continue;
             };
             let path = entry.path();
-            if valid_name(&name) && path.join("SKILL.md").is_file() {
+            // Any `SKILL.md` (a link too, even a dangling one) makes this a
+            // skill: `read_skill` refuses a bad one, which keeps the store's
+            // last good copy instead of removing it.
+            if valid_name(&name) && fs::symlink_metadata(path.join("SKILL.md")).is_ok() {
                 found.entry(name).or_insert(path);
             }
         }
@@ -1049,6 +1052,24 @@ mod tests {
         assert_eq!(at("", "../x"), None);
         assert_eq!(at("a", "b/../../../x"), None);
         assert_eq!(at("a", "/etc/hosts"), None);
+    }
+
+    #[test]
+    fn a_dangling_skill_md_link_keeps_the_last_good_copy() {
+        let rig = Rig::new();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "good").unwrap();
+        rig.sync().unwrap();
+        fs::remove_file(skill.join("SKILL.md")).unwrap();
+        std::os::unix::fs::symlink("/nonexistent/SKILL.md", skill.join("SKILL.md")).unwrap();
+
+        let synced = rig.sync().unwrap();
+        assert_eq!(synced.refused.len(), 1, "{synced:?}");
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "good".to_owned())])
+        );
     }
 
     #[test]
