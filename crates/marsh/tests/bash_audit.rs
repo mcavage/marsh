@@ -2821,3 +2821,64 @@ fn read_timeouts_that_cannot_be_waited_for_are_rejected() {
         "{output:?}"
     );
 }
+
+/// A forked subshell runs an `EXIT` trap only if it sets one itself, at its
+/// end or when an untrapped signal ends it. The parent's is not run there
+/// because the subshell set or removed some other trap (`( trap '' INT; ... )`,
+/// or a background worker's `trap 'exit 0' TERM`), which used to delete a
+/// temporary directory the parent was still using. A subshell that sets `EXIT`
+/// again to the parent's own text runs it.
+#[test]
+fn a_forked_subshell_does_not_run_the_parents_exit_trap() {
+    for (script, stdout) in [
+        (
+            "trap 'echo parent-exit' EXIT; ( trap '' INT; true ); echo mid",
+            "mid\nparent-exit\n",
+        ),
+        (
+            "mkdir w; trap 'rm -rf w' EXIT; ( trap '' INT; : ); test -d w && echo kept",
+            "kept\n",
+        ),
+        (
+            "mkdir w; trap 'rm -rf w' EXIT
+worker() { trap 'exit 0' TERM; while :; do sleep 0.05; done; }
+worker & p=$!; sleep 0.3; kill $p; wait $p; test -d w && echo kept",
+            "kept\n",
+        ),
+        (
+            "trap 'echo parent-exit' EXIT; ( trap 'echo child-exit' EXIT; true ); ( trap - EXIT; true ); ( trap 'echo same' EXIT; trap 'echo child2' EXIT ); echo end",
+            "child-exit\nchild2\nend\nparent-exit\n",
+        ),
+        (
+            "trap 'echo parent-exit' EXIT; ( trap 'echo parent-exit' EXIT; true ); echo end",
+            "parent-exit\nend\nparent-exit\n",
+        ),
+        (
+            "trap 'echo parent-exit' EXIT; ( trap '' INT; true ) | cat; { trap '' INT; true; } & wait; echo mid",
+            "mid\nparent-exit\n",
+        ),
+        (
+            "trap 'echo parent-exit' EXIT; x=$(trap '' INT; : $BASHPID; echo v); cat <(trap '' INT; true); f() { trap '' INT; }; ( f ); coproc C { trap '' INT; true; }; wait; echo \"x=$x\"",
+            "x=v\nparent-exit\n",
+        ),
+        (
+            "trap 'echo parent-exit' EXIT; ( trap '' INT; exit 3 ); echo \"st=$?\"",
+            "st=3\nparent-exit\n",
+        ),
+        // Ended by an untrapped signal, a subshell does not run it either.
+        (
+            "trap 'echo parent-exit' EXIT; ( sleep 0.1; kill -INT $BASHPID; sleep 1; echo after ); echo \"st=$?\"",
+            "st=130\nparent-exit\n",
+        ),
+        (
+            "exec 2>/dev/null; trap 'echo parent-exit' EXIT; ( sleep 0.1; kill -HUP $BASHPID; sleep 1; echo after ); echo \"st=$?\"",
+            "st=129\nparent-exit\n",
+        ),
+        (
+            "trap 'echo parent-exit' EXIT; ( trap 'echo child-exit' EXIT; sleep 0.1; kill -INT $BASHPID; sleep 1; echo after ); echo \"st=$?\"",
+            "child-exit\nst=130\nparent-exit\n",
+        ),
+    ] {
+        differential(script, 0, stdout.as_bytes());
+    }
+}

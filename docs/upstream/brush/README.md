@@ -132,6 +132,17 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   represent waits without a deadline. Text that is not a number now gets that
   status 1, where it was a usage error with status 2. Covered by
   `read_timeouts_that_cannot_be_waited_for_are_rejected`.
+- A forked subshell (`( )`, `&`, a pipeline stage, a coprocess, `<( )`, a
+  `$( )` that mentions `BASHPID`) runs an `EXIT` trap only if it sets one itself
+  (`0002`, `0003`). The copy of the parent's table it starts with marks the
+  `EXIT` handler as inherited: listed by `trap -p`, never run, until the
+  subshell sets or removes `EXIT`. Before, any `trap` in the subshell ran the
+  parent's `EXIT` trap when it ended (a background worker's `trap 'exit 0'
+  TERM` deleted the parent's temporary directory), and so did an untrapped
+  signal that ended it. Inherited `EXIT` and signal traps stay in the child's
+  table and in `trap -p`, where Bash drops them on the subshell's first `trap`
+  (`docs/design/bash-compatibility.md`, known gaps); that is unchanged. Covered by
+  `a_forked_subshell_does_not_run_the_parents_exit_trap`.
 
 ## Retired per-fix inventory
 

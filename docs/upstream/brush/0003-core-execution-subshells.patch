@@ -740,7 +740,7 @@ index ea17b5f2..23046c66 100644
      }
  }
 diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
-index 22ab6d3c..a627d45b 100644
+index 22ab6d3c..5128ef77 100644
 --- a/brush-core/src/interp.rs
 +++ b/brush-core/src/interp.rs
 @@ -2,8 +2,10 @@ use brush_parser::ast::{self, CommandPrefixOrSuffixItem};
@@ -1053,12 +1053,12 @@ index 22ab6d3c..a627d45b 100644
 +    child_shell.set_owns_process();
 +    let forked = crate::subshell::fork(group, &signals, keep, move || async move {
 +        let mut shell = child_shell;
-+        let generation = shell.traps().generation();
++        // The parent's `EXIT` trap is not the child's to run, as in Bash: only one the child
++        // sets itself is (at its end, or when an untrapped signal ends it).
++        shell.traps_mut().inherit_exit_handler();
 +        let result = run(&mut shell, child_params).await;
 +        shell.set_last_exit_status(result.exit_code.into());
-+        if shell.traps().generation() != generation
-+            && shell.traps().handles(crate::traps::TrapSignal::Exit)
-+        {
++        if shell.traps().runs_exit_handler() {
 +            let _ = shell.on_exit().await;
 +        }
 +        i32::from(u8::from(result.exit_code))

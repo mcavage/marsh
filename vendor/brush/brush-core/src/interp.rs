@@ -509,12 +509,12 @@ pub(crate) fn fork_child<SE: extensions::ShellExtensions>(
     child_shell.set_owns_process();
     let forked = crate::subshell::fork(group, &signals, keep, move || async move {
         let mut shell = child_shell;
-        let generation = shell.traps().generation();
+        // The parent's `EXIT` trap is not the child's to run, as in Bash: only one the child
+        // sets itself is (at its end, or when an untrapped signal ends it).
+        shell.traps_mut().inherit_exit_handler();
         let result = run(&mut shell, child_params).await;
         shell.set_last_exit_status(result.exit_code.into());
-        if shell.traps().generation() != generation
-            && shell.traps().handles(crate::traps::TrapSignal::Exit)
-        {
+        if shell.traps().runs_exit_handler() {
             let _ = shell.on_exit().await;
         }
         i32::from(u8::from(result.exit_code))
