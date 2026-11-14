@@ -551,11 +551,17 @@ daemon journals each checkpoint (`checkpoints.json` in the control directory,
 with the directory's identity) and reaches its files only by descriptor.
 
 - At daemon start a record is forgotten only when its project opens and its
-  directory is missing or replaced; one it can't reach now (an unmounted
-  volume, access denied) is kept, and the orphan collector skips that
-  project while any of its checkpoints can't be reached, so their Docker
-  snapshots stay. An unreadable `checkpoints.json` is renamed to
-  `checkpoints.json.unreadable-<ms>`, and the collector does not run.
+  directory is missing. One it can't reach now (an unmounted volume, access
+  denied) or whose directory isn't the recorded one is kept, and the orphan
+  collector skips that project while any of its checkpoints can't be
+  opened, so their Docker snapshots stay. A checkpoint is recognised by its
+  directory's inode alone: an external volume's device number changes
+  between mounts.
+- An unreadable `checkpoints.json` is renamed to
+  `checkpoints.json.unreadable-<ms>` (copied, if it can't be renamed; left
+  alone and never written if neither works). The orphan collector does not
+  run while any such file is in the control directory, across restarts:
+  restore it as `checkpoints.json`, or remove it, to collect again.
 - Retention runs on every create and at daemon start: the newest 20 per
   label (unlabeled checkpoints are one label), none older than 7 days, at
   most 200 per project. A retired checkpoint goes to `.marsh/.trash`.
