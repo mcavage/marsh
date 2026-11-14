@@ -27,7 +27,7 @@ use marsh_daemon::SkillsMirrorStatus;
 use marsh_sbx::StockSbx;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -40,6 +40,9 @@ const LEGACY_RECORD_FILE: &str = "skills-mirror.json";
 /// Beside the scopes' control homes: what the mirror of every scope shares,
 /// since the store belongs to the Mac account, not to a scope.
 const ACCOUNT_DIR: &str = "skills-mirror";
+/// What `sync` fails with while another scope's mirror holds the lock: not
+/// an error to report, just a pass to try again shortly.
+const BUSY: &str = "another marsh scope is updating the skills store";
 const STAGING_DIR: &str = "skills-mirror-home";
 /// How long the folders must stay unchanged before an import.
 const SETTLE: Duration = Duration::from_secs(2);
@@ -67,6 +70,11 @@ pub(crate) struct Bundled {
 struct Record {
     #[serde(default)]
     skills: BTreeMap<String, String>,
+    /// The scope (control home name) whose mirror imported each skill. A
+    /// name one scope's Kit bundles is removed only when that scope's own
+    /// mirror imported it, never another scope's import.
+    #[serde(default)]
+    owners: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -196,6 +204,8 @@ impl Mirror {
                 state.status.last_import = Some(now_ms());
                 state.status.errors = synced.refused;
             }
+            // Another scope's mirror is syncing: try again on the next pass.
+            Err(message) if message == BUSY => return,
             Err(message) => fail(&mut state, message),
         }
         state.synced = Some(stamps);
@@ -633,29 +643,55 @@ fn read_record(control_home: &Path, store: &Path) -> (Record, Option<PathBuf>) {
         return (record, None);
     };
     for (name, digest) in old.skills {
-        record.skills.entry(name).or_insert(digest);
+        if !record.skills.contains_key(&name) {
+            record.owners.insert(name.clone(), scope_name(control_home));
+            record.skills.insert(name, digest);
+        }
     }
     (record, Some(legacy))
 }
 
+/// The name the record knows a scope by: its control home's.
+fn scope_name(control_home: &Path) -> String {
+    control_home
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Writes the record durably (synced, then renamed into place and the
+/// folder synced). A merged older record is then moved aside; if that
+/// fails it is deleted, and if that fails too the pass fails, so it is
+/// never merged again over newer entries.
 fn write_record(
     control_home: &Path,
     store: &Path,
     record: &Record,
     legacy: Option<&Path>,
 ) -> Result<(), String> {
-    let mut bytes = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
+    let mut record = record.clone();
+    let names = record.skills.clone();
+    record.owners.retain(|name, _| names.contains_key(name));
+    let mut bytes = serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    let mut temporary = tempfile::NamedTempFile::new_in(account_home(control_home))
-        .map_err(|error| error.to_string())?;
+    let home = account_home(control_home);
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(&home).map_err(|error| error.to_string())?;
     temporary
         .write_all(&bytes)
+        .and_then(|()| temporary.as_file().sync_all())
         .map_err(|error| error.to_string())?;
     temporary
         .persist(record_path(control_home, store))
         .map_err(|error| error.error.to_string())?;
-    if let Some(legacy) = legacy {
-        let _ = fs::rename(legacy, legacy.with_extension("json.migrated"));
+    fs::File::open(&home)
+        .and_then(|folder| folder.sync_all())
+        .map_err(|error| error.to_string())?;
+    if let Some(legacy) = legacy
+        && fs::rename(legacy, legacy.with_extension("json.migrated")).is_err()
+    {
+        fs::remove_file(legacy)
+            .map_err(|error| format!("cannot move {} aside: {error}", legacy.display()))?;
     }
     Ok(())
 }
@@ -718,6 +754,7 @@ struct Synced {
 }
 
 /// Brings the store in step.
+#[allow(clippy::too_many_lines)] // One locked read, plan, import, removal and record pass.
 fn sync(
     sbx: &StockSbx,
     folders: &[PathBuf],
@@ -725,7 +762,7 @@ fn sync(
     bundled: &BTreeMap<String, Vec<String>>,
 ) -> Result<Synced, String> {
     let Some(_lock) = lock_account(control_home)? else {
-        return Err("another marsh scope is updating the skills store".into());
+        return Err(BUSY.into());
     };
     let store = sbx
         .skills_store()
@@ -763,10 +800,32 @@ fn sync(
         .map(|name| (name.clone(), store_digest(name)))
         .collect();
     let (mut record, legacy) = read_record(control_home, &store.directory);
-    let plan = plan(&source_digests, &store_digests, &record.skills, bundled);
+    let scope = scope_name(control_home);
+    // A name this scope's Kits bundle but another scope's mirror imported
+    // is that scope's: this pass neither removes nor forgets it.
+    let others: BTreeSet<String> = record
+        .skills
+        .keys()
+        .filter(|name| bundled.contains_key(*name))
+        .filter(|name| {
+            record
+                .owners
+                .get(*name)
+                .is_some_and(|owner| *owner != scope)
+        })
+        .cloned()
+        .collect();
+    let visible: BTreeMap<_, _> = record
+        .skills
+        .iter()
+        .filter(|(name, _)| !others.contains(*name))
+        .map(|(name, digest)| (name.clone(), digest.clone()))
+        .collect();
+    let plan = plan(&source_digests, &store_digests, &visible, bundled);
     record.skills.retain(|name, _| {
         (found.contains_key(name) && !bundled.contains_key(name) && !plan.clashes.contains(name))
             || plan.remove.contains(name)
+            || others.contains(name)
     });
     record.skills.extend(plan.record.clone());
     let mut result = Ok(());
@@ -792,6 +851,7 @@ fn sync(
             let owned = result.is_ok() || record.skills.contains_key(*name);
             if owned && store_digest(name).as_ref() == Some(&staged) {
                 record.skills.insert((*name).clone(), staged);
+                record.owners.insert((*name).clone(), scope.clone());
             }
         }
     }
@@ -954,6 +1014,115 @@ mod tests {
         );
         assert!(b.join("skills-mirror.json.migrated").exists());
         assert!(!b.join(LEGACY_RECORD_FILE).exists());
+    }
+
+    /// A name one scope's Kit bundles is not removed by that scope's pass
+    /// when another scope's mirror imported it (review round 3 probe).
+    #[test]
+    fn a_kit_bundled_name_in_one_scope_keeps_another_scopes_import() {
+        let rig = Rig::new();
+        let (a, b) = (
+            rig.root.path().join("scopes/a"),
+            rig.root.path().join("scopes/b"),
+        );
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync_in(&b).unwrap();
+        fs::create_dir_all(&a).unwrap();
+        let bundled = BTreeMap::from([("tool".to_owned(), vec!["pix".to_owned()])]);
+        sync(&rig.sbx, &[rig.folder()], &a, &bundled).unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "scope A removed scope B's import"
+        );
+        // B still owns it: an edit is imported, not a clash.
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        assert_eq!(rig.sync_in(&b).unwrap(), Synced::default());
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "two".to_owned())])
+        );
+        // What scope A itself imported, its own Kit's name still removes.
+        let rig = Rig::new();
+        let a = rig.root.path().join("scopes/a");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync_in(&a).unwrap();
+        sync(&rig.sbx, &[rig.folder()], &a, &bundled).unwrap();
+        assert!(!rig.stored("tool").exists());
+    }
+
+    /// The lock is held while stock SBX imports, and released after.
+    #[test]
+    fn the_account_lock_is_held_through_the_import() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        let sibling = rig.root.path().join("other-control");
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            assert!(
+                lock_account(&sibling).unwrap().is_none(),
+                "lock released before the import"
+            );
+        }));
+        rig.sync().unwrap();
+        assert!(lock_account(&control).unwrap().is_some());
+    }
+
+    /// Waiting for another scope's mirror is not an error in `marsh status`.
+    #[test]
+    fn a_busy_store_is_not_reported_as_an_error() {
+        let rig = Rig::new();
+        let home = rig.root.path().join("home");
+        let skill = home.join(".claude/skills/tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "tool").unwrap();
+        let mirror = Mirror {
+            scan_home: Some(home),
+            ..Mirror::default()
+        };
+        let scope = rig.root.path().join("scope");
+        fs::create_dir_all(&scope).unwrap();
+        let control = rig.root.path().join("control");
+        fs::create_dir_all(&control).unwrap();
+        let held = lock_account(&control).unwrap().unwrap();
+        mirror.pass(&rig.sbx, &scope, &control, &Bundled::default());
+        let status = mirror.status(&scope);
+        assert!(status.errors.is_empty(), "{status:?}");
+        assert!(status.last_import.is_none());
+        drop(held);
+        mirror.pass(&rig.sbx, &scope, &control, &Bundled::default());
+        assert!(rig.stored("tool").exists());
+    }
+
+    /// When the account record and an older scope record disagree, the
+    /// account record wins.
+    #[test]
+    fn the_account_record_wins_over_an_older_scope_record() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("scopes/a");
+        fs::create_dir_all(&control).unwrap();
+        fs::create_dir_all(account_home(&control)).unwrap();
+        let store = rig.fake.store();
+        let account = Record {
+            skills: BTreeMap::from([("tool".to_owned(), "new".to_owned())]),
+            ..Record::default()
+        };
+        write_record(&control, &store, &account, None).unwrap();
+        fs::write(
+            control.join(LEGACY_RECORD_FILE),
+            r#"{"skills": {"tool": "old", "other": "o"}}"#,
+        )
+        .unwrap();
+        let (merged, legacy) = read_record(&control, &store);
+        assert_eq!(merged.skills["tool"], "new");
+        assert_eq!(merged.skills["other"], "o");
+        assert_eq!(merged.owners["other"], "a");
+        assert!(legacy.is_some());
     }
 
     /// One scope's mirror at a time changes the store.

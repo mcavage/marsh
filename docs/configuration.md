@@ -273,8 +273,11 @@ the name is listed as a clash. An `sbx skills add` skill with the same content
 as the folder's copy is left alone and stays when the folder's copy goes. What
 any scope's mirror imported, every scope's mirror may update or remove: the
 record is kept per Mac account, beside the scopes' control folders, and one
-mirror at a time changes the store (another scope's waits and tries again a
-minute later).
+mirror at a time changes the store (another scope's tries again on its next
+pass, about a second later, and reports no error for it). The record also
+names the scope that imported each skill: a scope whose Kit bundles a skill
+of the same name removes it from the store only if its own mirror imported
+it.
 
 The import gets a copy of each skill's folder, never a link to it. A skill
 folder may itself be a link (`~/.claude/skills/my-skill -> ~/dev/my-skill`),
