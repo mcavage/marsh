@@ -239,7 +239,7 @@ def rust_lanes():
 RUST_LANES = rust_lanes() if yaml else []
 
 
-PUBLISHING_SECRETS = ("DOCKERHUB_TOKEN", "HOMEBREW_TAP_TOKEN", "DOCKERHUB_PRUNE_TOKEN")
+PUBLISHING_SECRETS = ("DOCKERHUB_TOKEN", "HOMEBREW_TAP_TOKEN")
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
@@ -265,10 +265,13 @@ class PublishingSecrets(unittest.TestCase):
                     self.assertEqual(got, want, f"{path.name} job {name} on {event}")
         self.assertGreaterEqual(seen, 6)
 
-    def test_pruning_never_falls_back_to_the_push_token(self):
-        text = (WORKFLOWS / "prune-nightlies.yml").read_text()
-        self.assertIsNone(re.search(r"secrets\.DOCKERHUB_TOKEN\b", text))
-        self.assertIn("secrets.DOCKERHUB_PRUNE_TOKEN", text)
+    def test_pruning_uses_the_release_environments_token(self):
+        data = load("prune-nightlies.yml")
+        job = data["jobs"]["prune"]
+        self.assertEqual(job.get("environment"), "release")
+        text = yaml.safe_dump(job)
+        self.assertRegex(text, r"secrets\.DOCKERHUB_TOKEN\b")
+        self.assertNotIn("DOCKERHUB_PRUNE_TOKEN", text)
 
     def test_ci_never_reads_a_publishing_secret(self):
         text = (WORKFLOWS / "ci.yml").read_text()
