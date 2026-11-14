@@ -6840,6 +6840,81 @@ mod tests {
         assert!(bound_read_only(&mounts, ".marsh"), "{mounts:?}");
     }
 
+    /// A child bound through a parent view narrower than the project gets
+    /// exactly that view, and a fork job gets its confinement, never the
+    /// whole project.
+    #[test]
+    fn narrowed_and_confined_views_never_widen_to_the_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(project.join("sub")).unwrap();
+        fs::create_dir(project.join("home")).unwrap();
+        let session = SessionSpec {
+            session_id: "s".into(),
+            username: "u".into(),
+            uid: 1000,
+            gid: 1000,
+            launch_directory: project.clone(),
+            guest_home: PathBuf::from("/home/u"),
+            home_backing: project.join("home"),
+            ephemeral_home: false,
+            terminal: true,
+            terminal_size: None,
+        };
+        let grant = JobMount {
+            source: project.clone(),
+            target: project.clone(),
+            access: MountAccess::ReadWrite,
+            subpath: None,
+        };
+        let view_of = |confinement, parent: Option<(&[PublicMount], &Path)>| {
+            let Ok(view) = StockDaemonBackend::job_view(
+                &session,
+                &sbxenv::Environment::default(),
+                confinement,
+                parent,
+            ) else {
+                panic!("view refused");
+            };
+            view
+        };
+        let narrowed = [PublicMount {
+            target: project.join("sub"),
+            access: "read_only".into(),
+        }];
+        let child = view_of(None, Some((&narrowed, &project.join("sub"))));
+        let mounts = child.job_mounts(vec![grant.clone()], &project).unwrap();
+        assert_eq!(
+            mounts,
+            [JobMount {
+                source: project.clone(),
+                target: project.join("sub"),
+                access: MountAccess::ReadOnly,
+                subpath: Some("sub".into()),
+            }]
+        );
+        // A fork job: its fork and Git metadata, not the project.
+        let split = project.join(".marsh/split/abc123");
+        fs::create_dir_all(split.join("fix")).unwrap();
+        for dir in ["hooks", "modules", "worktrees"] {
+            fs::create_dir_all(split.join(".admin/fix").join(dir)).unwrap();
+        }
+        fs::write(split.join(".admin/fix/commondir"), "./\n").unwrap();
+        let confinement =
+            marsh_daemon::split_confinement::branch_confinement(&project, &split.join("fix"))
+                .unwrap()
+                .unwrap();
+        let fork = view_of(Some(&confinement), None);
+        let mounts = fork.job_mounts(vec![grant], &project).unwrap();
+        assert!(
+            mounts.iter().all(|mount| mount.target != project),
+            "{mounts:?}"
+        );
+        assert!(mounts.iter().any(
+            |mount| mount.target == split.join("fix") && mount.access == MountAccess::ReadWrite
+        ));
+    }
+
     /// `.marsh` that is not a directory marsh can make refuses the job.
     #[test]
     fn a_job_is_refused_when_marsh_is_not_a_directory() {
