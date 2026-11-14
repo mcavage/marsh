@@ -558,12 +558,19 @@ pub fn splits_dir(root: &Path, create: bool) -> io::Result<Dir> {
 /// # Errors
 /// Returns the open failure (`ELOOP`/`ENOTDIR` for a symlink).
 pub fn area(root: &Path, name: &str, create: bool) -> io::Result<Dir> {
-    let in_git = create && root.ancestors().any(|dir| dir.join(".git").exists());
-    let root = Dir::open_root(root)?;
     if !create {
-        return root.open(".marsh")?.open(name);
+        return Dir::open_root(root)?.open(".marsh")?.open(name);
     }
-    let marsh = root.ensure(".marsh")?;
+    marsh_dir(root)?.ensure(name)
+}
+
+/// `<root>/.marsh`, created as [`area`] creates it (never through a symlink).
+///
+/// # Errors
+/// Returns the open failure (`ELOOP`/`ENOTDIR` for a symlink).
+pub fn marsh_dir(root: &Path) -> io::Result<Dir> {
+    let in_git = root.ancestors().any(|dir| dir.join(".git").exists());
+    let marsh = Dir::open_root(root)?.ensure(".marsh")?;
     let mut files = vec![(".metadata_never_index", &b""[..])];
     if in_git {
         files.push((".gitignore", b"*\n"));
@@ -581,7 +588,7 @@ pub fn area(root: &Path, name: &str, create: bool) -> io::Result<Dir> {
         BACKUP_EXCLUDE,
         rustix::fs::XattrFlags::empty(),
     );
-    marsh.ensure(name)
+    Ok(marsh)
 }
 
 /// A binary property list holding the string `com.apple.backupd`.

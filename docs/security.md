@@ -13,6 +13,8 @@ and development shells have the explicit grants described below.
 | Change a skill other jobs read | Yes, when the skill's folder is in a project the job can write | The skills mirror carries the edit into the store every later job reads, in every project and scope; each change is kept with a diff ([Skills](#skills)) |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
+| Change what your Mac's `git` runs in the project | Not through `.git`'s own config, hooks or Git dirs; yes through a repository it creates in the project ([Git in jobs](#git-in-jobs)) | Read-only binds of `.git/config`, `config.worktree`, `hooks/`, `info/`, `modules/`, `worktrees/` and `commondir`, under `.git` bound onto itself |
+| Change marsh's split copies and checkpoints | No | `<project>/.marsh` is created before each job and bound read-only into it |
 | Read other jobs' logins and history | Yes, when they use the same guest home, unless the job's Kit takes no home | The persistent guest home is shared within a scope; `org.marsh/home@1` keeps it out of a Kit's VM ([Mounts](kits.md#mounts)) |
 | Start other registered commands | Yes, within limits | The job capability socket; `MARSH_SPAWN` narrows it |
 | Reach the network | As its Kit's policy allows | `sbx` enforces the policy; marsh does not inspect traffic |
@@ -90,6 +92,77 @@ VM for its Kit. A job sees:
   `sbx` proxy. Saved agent logins live in the shared guest home.
 - every skill in the Docker Sandboxes skills store, read-only: its Kit's own
   skills, and what the [skills mirror](#skills) copied there from your Mac
+
+#### Git in jobs
+
+A job (and every child job) mounts the project read-write, but what your Mac's
+`git` would read code or another Git directory from is read-only in it:
+`.git/config`, `.git/config.worktree` (when `extensions.worktreeConfig` is on),
+`.git/hooks/`, `.git/info/`, `.git/commondir`, and the submodule and linked
+worktree Git directories `.git/modules/` and `.git/worktrees/`. `.git` itself is
+bound onto itself so it can't be renamed away. A `.git` file (the project is
+itself a worktree or submodule, or was made with `--separate-git-dir`) is
+read-only. When the Git directory it names (or that directory's common
+directory) is directly in the project folder, its controls are guarded the
+same way (a linked worktree's Git directory inside such a common directory
+too). The job is refused when that directory sits deeper (a job could rename
+a directory above it and put its own in its place), or when the path to it
+passes through a symlink inside the project (which a job could re-point). When it is outside the project, only
+the `.git` file is guarded: the job doesn't see that directory unless it is
+under an extra folder or the guest home, where it is not protected; and in
+the job `git status` says `not a git repository`. A `.git` that is a
+symlink refuses the job. Before each job marsh makes
+missing ones, so a job can't plant them: empty `hooks/`, `info/`, `modules/`
+and `worktrees/` directories, empty `config` and `config.worktree` files, and
+a `commondir` containing `./` (the Git directory itself) in a repository that
+had none. `marsh` leaves them in place. The job is refused when one of them
+is a symlink or of the wrong type, or when `commondir` names another
+directory (Git would read config and hooks there).
+With that `commondir`, `git rev-parse --git-common-dir` prints an absolute
+path instead of `.git`; a script that compares it with `--git-dir` to detect
+a linked worktree is fooled. `.marsh` must be a directory marsh can make, or
+the job is refused.
+
+Inside a job, `git commit`, `branch`, `switch`, `fetch`, `status` and `diff`
+work. These fail: `git config` without `--global` (your name and email are
+already set in the guest home's `~/.gitconfig` from your Mac's, and
+`git config --global` writes there); `git branch -m` (exit 128 after renaming);
+`git branch -u`, `push -u`, and the tracking `git switch` sets up for a
+remote-only branch (it says so, but nothing is recorded); any change inside a
+submodule or an existing linked worktree, `git submodule update --init`, and
+`git worktree add`; `git lfs install`, `pre-commit install` and other tools
+that install hooks.
+
+**Known gap, not prevented: nested repositories.** `.git/index` stays
+writable so a job can commit, and so a job can create a repository anywhere
+in the project's files and stage or commit it as a submodule, or put a
+repository of its own in a submodule's directory (replacing its `.git` file,
+or in an uninitialised one). Your Mac's `git status`, `diff`, `add -A`/`-u`,
+`commit -a`, `stash`, `merge`, `diff-files` and `diff-index`, and any IDE or
+prompt that runs them, then run Git inside that repository with its config:
+its `core.fsmonitor`, or a `filter.<name>.clean` its `.gitattributes` names.
+The only full prevention is a private index per job, which marsh does not
+have yet (future work). Until then:
+
+- No setting of your Mac's Git fully helps. `diff.ignoreSubmodules` is
+  overridden by `ignore = none` in the job-written `.gitmodules`, and doesn't
+  cover `add -A`, `stash`, `merge`, `diff-files` or `diff-index`; only
+  `--ignore-submodules=all` on a single command skips submodules.
+- Run `git status` (and let your IDE or prompt run it) only in repositories
+  whose contents you trust; after an agent has worked in a project, treat it
+  as untrusted until you have reviewed its changes.
+- Consider reviewing a job's work with host Git in a separate checkout (a
+  fresh clone that fetches the job's branch), not in the project it ran in.
+
+Also not covered:
+
+- An IDE that scans one level down (VS Code by default) opens a nested
+  repository the job created even when nothing stages it.
+- A job can write interactive-rebase state (`.git/rebase-merge/`) whose
+  `exec` lines run at your next `git rebase --continue`.
+- Hooks your config points into the project (`core.hooksPath`, as husky
+  sets), which a job can edit.
+- Your own shell commands (the shell VM mounts the whole project).
 
 A job has no containerd or `sbx` socket and never a Kit VM's Docker engine.
 **Jobs of a services-enabled project get a filtered endpoint for that project's
