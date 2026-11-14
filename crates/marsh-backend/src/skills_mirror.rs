@@ -44,10 +44,15 @@ const ACCOUNT_DIR: &str = "skills-mirror";
 /// an error to report, just a pass to try again shortly.
 const BUSY: &str = "another marsh scope is updating the skills store";
 const STAGING_DIR: &str = "skills-mirror-home";
-/// Each change to the store, with the copy it replaced and a diff.
-const HISTORY_DIR: &str = "skills-history";
+/// Each change to the store, with the copy it replaced and a diff, in the
+/// account's mirror folder.
+const HISTORY_DIR: &str = "history";
 /// How many changes of one skill the history keeps.
 const HISTORY_KEEP: usize = 20;
+/// Files bigger than this are named in a history diff, not diffed.
+const MAX_DIFF_FILE: u64 = 1024 * 1024;
+/// How long one history diff may take.
+const DIFF_TIME: Duration = Duration::from_secs(1);
 /// How many changes `marsh status` lists.
 const HISTORY_SHOWN: usize = 10;
 /// How long the folders must stay unchanged before an import.
@@ -607,8 +612,13 @@ fn account_home(control_home: &Path) -> PathBuf {
 
 /// The record of one store, by its path.
 fn record_path(control_home: &Path, store: &Path) -> PathBuf {
+    account_home(control_home).join(format!("record-{}.json", store_key(store)))
+}
+
+/// What names one store in the account's mirror folder.
+fn store_key(store: &Path) -> String {
     let key = marsh_contracts::process::hex(&Sha256::digest(store.as_os_str().as_encoded_bytes()));
-    account_home(control_home).join(format!("record-{}.json", &key[..16]))
+    key[..16].to_owned()
 }
 
 /// Takes the account's mirror lock, so one scope's mirror at a time
@@ -697,6 +707,7 @@ fn write_record(
         .and_then(|folder| folder.sync_all())
         .map_err(|error| error.to_string())?;
     if let Some(legacy) = legacy
+        && fs::symlink_metadata(legacy).is_ok()
         && fs::rename(legacy, legacy.with_extension("json.migrated")).is_err()
     {
         fs::remove_file(legacy)
@@ -705,28 +716,70 @@ fn write_record(
     Ok(())
 }
 
-/// Writes a skill's files under `root`, as new regular files.
-fn write_files(root: &Path, files: &Files) -> Result<(), String> {
+/// Writes a skill's files under `root`, as new regular files; `durable`
+/// syncs each file and folder to disk.
+fn write_files(root: &Path, files: &Files, durable: bool) -> Result<(), String> {
     use std::os::unix::fs::OpenOptionsExt as _;
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let mut folders = BTreeSet::from([root.to_owned()]);
     for (relative, (executable, bytes)) in files {
         let path = root.join(relative);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            folders.extend(
+                parent
+                    .ancestors()
+                    .take_while(|at| at.starts_with(root))
+                    .map(Path::to_owned),
+            );
         }
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(if *executable { 0o755 } else { 0o644 })
             .open(&path)
-            .and_then(|mut file| file.write_all(bytes))
+            .and_then(|mut file| {
+                file.write_all(bytes)?;
+                if durable { file.sync_all() } else { Ok(()) }
+            })
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    }
+    if durable {
+        for folder in folders {
+            sync_folder(&folder)?;
+        }
     }
     Ok(())
 }
 
-/// A unified diff from `before` to `after` (either `None`: no skill).
+fn sync_folder(folder: &Path) -> Result<(), String> {
+    fs::File::open(folder)
+        .and_then(|folder| folder.sync_all())
+        .map_err(|error| format!("cannot sync {}: {error}", folder.display()))
+}
+
+/// One store's history, beside its record: a store's mirror never
+/// settles or prunes another store's entries.
+fn history_dir(control_home: &Path, store: &Path) -> PathBuf {
+    account_home(control_home)
+        .join(HISTORY_DIR)
+        .join(store_key(store))
+}
+
+/// A unified diff from `before` to `after` (either `None`: no skill). A
+/// file over `MAX_DIFF_FILE` bytes is only named, and the line diffs share
+/// a `DIFF_TIME` deadline (past it, a file's diff is coarser but correct),
+/// so a big skill edit cannot hold the mirror (and `marsh status`) up.
 fn diff(name: &str, before: Option<&Files>, after: Option<&Files>) -> String {
+    diff_until(name, before, after, Instant::now() + DIFF_TIME)
+}
+
+fn diff_until(
+    name: &str,
+    before: Option<&Files>,
+    after: Option<&Files>,
+    deadline: Instant,
+) -> String {
     use std::fmt::Write as _;
     let empty = Files::new();
     let (before, after) = (before.unwrap_or(&empty), after.unwrap_or(&empty));
@@ -748,12 +801,21 @@ fn diff(name: &str, before: Option<&Files>, after: Option<&Files>) -> String {
         let header = |file: Option<&(bool, Vec<u8>)>, side: &str| {
             file.map_or_else(|| "/dev/null".to_owned(), |_| format!("{side}/{shown}"))
         };
+        let large = |file: Option<&(bool, Vec<u8>)>| {
+            file.is_some_and(|(_, bytes)| bytes.len() as u64 > MAX_DIFF_FILE)
+        };
+        if large(old) || large(new) {
+            let _ = writeln!(out, "large file changed: {shown}");
+            continue;
+        }
         match (text(old), text(new)) {
             (Some(old_text), Some(new_text)) if old_text != new_text || old.is_none() => {
                 let _ = write!(
                     out,
                     "{}",
-                    similar::TextDiff::from_lines(&old_text, &new_text)
+                    similar::TextDiff::configure()
+                        .deadline(deadline)
+                        .diff_lines(&old_text, &new_text)
                         .unified_diff()
                         .context_radius(3)
                         .header(&header(old, "a"), &header(new, "b"))
@@ -771,30 +833,76 @@ fn diff(name: &str, before: Option<&Files>, after: Option<&Files>) -> String {
 }
 
 /// What `change.json` in a history entry holds.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct HistoryEntry {
     name: String,
     change: String,
     at: u64,
+    /// The digest of the store's copy before the change (`null` when it
+    /// added the skill), and of the copy the change installs (`null` when
+    /// it removed the skill): what recovery compares the store with.
+    #[serde(default)]
+    before: Option<String>,
+    #[serde(default)]
+    after: Option<String>,
+    /// The scope whose mirror prepared the change: a new skill recovery
+    /// takes as the mirror's is that scope's.
+    #[serde(default)]
+    scope: Option<String>,
+    /// Set right after the import, before the record is written: whether
+    /// the import succeeded and the store then held exactly the staged copy.
+    /// Only that proves a new skill's store copy is the mirror's (a failed
+    /// import beside a user's identical add leaves the same bytes).
+    #[serde(default)]
+    imported: Option<bool>,
 }
 
-/// Keeps one change in the history before the store is changed:
-/// `skills-history/AT-NAME/` holds `change.json`, `diff`, and `before/`, the
-/// store's copy it replaces (none for a new skill). The oldest beyond
-/// `HISTORY_KEEP` of that skill are dropped.
+/// Prepares one change for the history before the store is changed:
+/// `history/STORE/.pending-AT-NAME/` holds `change.json`, `diff`, and
+/// `before/`, the store's copy it replaces (none for a new skill). It is
+/// written as `.tmp-AT-NAME`, synced to disk and renamed, so a pending entry
+/// is always whole. Only once the change is made and the record written
+/// does `publish_history` move it to `AT-NAME/`; `discard_history` drops it
+/// when the store did not change, so a failing retry never adds an entry or
+/// pushes out a real one. After a crash, `recover_history` decides from
+/// the store.
 fn keep_history(
     control_home: &Path,
+    store: &Path,
     name: &str,
     before: Option<&Files>,
     after: Option<&Files>,
-) -> Result<(), String> {
-    let history = control_home.join(HISTORY_DIR);
-    fs::create_dir_all(&history).map_err(|error| error.to_string())?;
+) -> Result<PathBuf, String> {
+    keep_history_with(control_home, store, name, before, after, &mut |_| {})
+}
+
+/// `keep_history`, calling `hook` with the written entry just before it is
+/// renamed into place (tests look there).
+fn keep_history_with(
+    control_home: &Path,
+    store: &Path,
+    name: &str,
+    before: Option<&Files>,
+    after: Option<&Files>,
+    hook: &mut dyn FnMut(&Path),
+) -> Result<PathBuf, String> {
+    let history = history_dir(control_home, store);
+    fs::create_dir_all(&history)
+        .map_err(|error| format!("cannot keep the skills history: {error}"))?;
     let mut at = now_ms();
-    let entry = loop {
-        let entry = history.join(format!("{at:013}-{name}"));
-        match fs::create_dir(&entry) {
-            Ok(()) => break entry,
+    let (temporary, entry) = loop {
+        let names = [
+            format!(".tmp-{at:013}-{name}"),
+            format!(".pending-{at:013}-{name}"),
+            format!("{at:013}-{name}"),
+        ];
+        if names[1..].iter().any(|taken| history.join(taken).exists()) {
+            at += 1;
+            continue;
+        }
+        let temporary = history.join(&names[0]);
+        match fs::create_dir(&temporary) {
+            Ok(()) => break (temporary, history.join(&names[1])),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => at += 1,
             Err(error) => return Err(format!("cannot keep the skills history: {error}")),
         }
@@ -808,44 +916,210 @@ fn keep_history(
         name: name.to_owned(),
         change: change.to_owned(),
         at,
+        before: before.map(digest),
+        after: after.map(digest),
+        scope: Some(scope_name(control_home)),
+        imported: None,
     };
     let kept = (|| {
         if let Some(before) = before {
-            write_files(&entry.join("before"), before)?;
+            write_files(&temporary.join("before"), before, true)?;
         }
-        fs::write(entry.join("diff"), diff(name, before, after)).map_err(|e| e.to_string())?;
         let bytes = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
-        fs::write(entry.join("change.json"), bytes).map_err(|e| e.to_string())
+        let files = Files::from([
+            (
+                "diff".into(),
+                (false, diff(name, before, after).into_bytes()),
+            ),
+            ("change.json".into(), (false, bytes)),
+        ]);
+        write_files(&temporary, &files, true)?;
+        hook(&temporary);
+        fs::rename(&temporary, &entry).map_err(|e| e.to_string())?;
+        sync_folder(&history)
     })();
     if let Err(error) = kept {
+        let _ = fs::remove_dir_all(&temporary);
         let _ = fs::remove_dir_all(&entry);
         return Err(format!("cannot keep the skills history: {error}"));
     }
-    let mut older: Vec<_> = fs::read_dir(&history)
+    Ok(entry)
+}
+
+/// Drops prepared history entries whose change was not made.
+fn discard_history(pending: &[PathBuf]) {
+    for entry in pending {
+        let _ = fs::remove_dir_all(entry);
+    }
+}
+
+/// Moves prepared entries into the history, then keeps the newest
+/// `HISTORY_KEEP` of each skill.
+fn publish_history(control_home: &Path, store: &Path, pending: &[PathBuf]) {
+    let history = history_dir(control_home, store);
+    let mut names = BTreeSet::new();
+    for entry in pending {
+        let Some(published) = entry
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix(".pending-"))
+        else {
+            continue;
+        };
+        if fs::rename(entry, history.join(published)).is_ok()
+            && let Some((_, name)) = published.split_once('-')
+        {
+            names.insert(name.to_owned());
+        }
+    }
+    let _ = sync_folder(&history);
+    let entries: Vec<_> = fs::read_dir(&history)
         .into_iter()
         .flatten()
         .flatten()
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|entry| entry.split_once('-').is_some_and(|(_, rest)| rest == name))
         .collect();
-    older.sort();
-    let excess = older.len().saturating_sub(HISTORY_KEEP);
-    for old in &older[..excess] {
-        let _ = fs::remove_dir_all(history.join(old));
+    for name in names {
+        let mut older: Vec<_> = entries
+            .iter()
+            .filter(|entry| !entry.starts_with('.'))
+            .filter(|entry| entry.split_once('-').is_some_and(|(_, rest)| rest == name))
+            .collect();
+        older.sort();
+        let excess = older.len().saturating_sub(HISTORY_KEEP);
+        for old in &older[..excess] {
+            let _ = fs::remove_dir_all(history.join(old));
+        }
     }
-    Ok(())
 }
 
-/// The changes in the history, newest first.
+/// How a pending entry left by a crash is settled.
+#[derive(Debug, Eq, PartialEq)]
+enum Settled {
+    /// The store holds what the change installed (or the removal is done).
+    Made,
+    /// The store holds something else: a partial import, a copy it cannot
+    /// read, or a user's replacement. The entry is kept as evidence, and
+    /// the store's copy is not taken as the mirror's.
+    Uncertain,
+    /// The store still holds what the change replaced: nothing happened.
+    NotMade,
+}
+
+/// How the store, as listed now (`now`: the name's digest, `None` for a
+/// copy it cannot read; absent: no such skill), settles `change`.
+fn settle(change: &HistoryEntry, now: Option<&Option<String>>) -> Settled {
+    match (now, change.change.as_str()) {
+        (None, "removed") => Settled::Made,
+        (None, _) if change.before.is_none() => Settled::NotMade,
+        (Some(Some(now)), _) if Some(now) == change.before.as_ref() => Settled::NotMade,
+        (Some(Some(now)), _) if Some(now) == change.after.as_ref() => Settled::Made,
+        _ => Settled::Uncertain,
+    }
+}
+
+/// After a crash: drops half-written entries (no change was made before
+/// every entry was whole), drops each pending entry whose change was not
+/// made, and returns the rest with how each settled. The caller updates the
+/// record, writes it, and only then publishes them.
+fn recover_history(
+    control_home: &Path,
+    store: &Path,
+    now: &BTreeMap<String, Option<String>>,
+) -> Vec<(PathBuf, HistoryEntry, Settled)> {
+    let history = history_dir(control_home, store);
+    let mut settled = Vec::new();
+    for entry in fs::read_dir(&history).into_iter().flatten().flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        if file.starts_with(".tmp-") {
+            let _ = fs::remove_dir_all(entry.path());
+            continue;
+        }
+        if !file.starts_with(".pending-") {
+            continue;
+        }
+        let Some(change) = read_change(&entry.path()) else {
+            continue;
+        };
+        match settle(&change, now.get(&change.name)) {
+            Settled::NotMade => discard_history(&[entry.path()]),
+            how => settled.push((entry.path(), change, how)),
+        }
+    }
+    settled
+}
+
+/// What a change made before a crash means for the record: the record
+/// follows a change only when it owned the copy the change replaced (or
+/// already holds what it installed); a skill the change added becomes the
+/// mirror's, and the preparing scope's, only when the entry says the import
+/// succeeded with exactly that copy. An update moves the record, and the
+/// ownership to the scope that prepared it (as a normal import does), only
+/// when the entry names that scope and does not say the import failed; it
+/// never leaves the copy owned by a scope that did not import it. An
+/// uncertain change never moves the record.
+fn follow(record: &mut Record, change: &HistoryEntry, how: &Settled) {
+    if *how != Settled::Made {
+        return;
+    }
+    let name = &change.name;
+    let held = record.skills.get(name);
+    let owned = held.is_some() && (held == change.before.as_ref() || held == change.after.as_ref());
+    match (&change.after, change.before.is_none()) {
+        (None, _) if owned => {
+            record.skills.remove(name);
+        }
+        (Some(after), false) if owned => {
+            if let (false, Some(scope)) = (change.imported == Some(false), &change.scope) {
+                record.skills.insert(name.clone(), after.clone());
+                record.owners.insert(name.clone(), scope.clone());
+            }
+        }
+        (Some(after), true) if held.is_none() || held == Some(after) => {
+            if let (Some(true), Some(scope)) = (change.imported, &change.scope) {
+                record.skills.insert(name.clone(), after.clone());
+                record.owners.insert(name.clone(), scope.clone());
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Replaces an entry's `change.json`, durably.
+fn rewrite_change(entry: &Path, change: &HistoryEntry) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(change).map_err(|e| e.to_string())?;
+    let temporary = entry.join(".change.json");
+    let _ = fs::remove_file(&temporary);
+    write_files(
+        entry,
+        &Files::from([(".change.json".into(), (false, bytes))]),
+        true,
+    )?;
+    fs::rename(&temporary, entry.join("change.json")).map_err(|e| e.to_string())?;
+    sync_folder(entry)
+}
+
+fn read_change(entry: &Path) -> Option<HistoryEntry> {
+    let mut bytes = Vec::new();
+    fs::File::open(entry.join("change.json"))
+        .ok()?
+        .take(4096)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// The changes in every store's history, newest first.
 fn history(control_home: &Path) -> Vec<SkillChange> {
-    let history = control_home.join(HISTORY_DIR);
-    let mut found: Vec<_> = fs::read_dir(&history)
+    let stores = account_home(control_home).join(HISTORY_DIR);
+    let mut found: Vec<_> = fs::read_dir(&stores)
         .into_iter()
         .flatten()
         .flatten()
+        .flat_map(|store| fs::read_dir(store.path()).into_iter().flatten().flatten())
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .filter_map(|entry| {
-            let bytes = fs::read(entry.path().join("change.json")).ok()?;
-            let change: HistoryEntry = serde_json::from_slice(&bytes).ok()?;
+            let change = read_change(&entry.path())?;
             Some(SkillChange {
                 name: change.name,
                 change: change.change,
@@ -874,7 +1148,7 @@ fn stage(
     let skills = staging.join(".agents/skills");
     fs::create_dir_all(&skills).map_err(|error| error.to_string())?;
     for (name, files) in chosen {
-        write_files(&skills.join(name), files)?;
+        write_files(&skills.join(name), files, false)?;
     }
     let parent = store
         .parent()
@@ -902,8 +1176,12 @@ struct Synced {
     refused: Vec<String>,
 }
 
+fn entries(pending: &[(&str, PathBuf, Option<String>)]) -> Vec<PathBuf> {
+    pending.iter().map(|(_, entry, _)| entry.clone()).collect()
+}
+
 /// Brings the store in step.
-#[allow(clippy::too_many_lines)] // One locked read, plan, import, removal and record pass.
+#[allow(clippy::too_many_lines)] // One ordered read, history, import, removal and record pass.
 fn sync(
     sbx: &StockSbx,
     folders: &[PathBuf],
@@ -950,6 +1228,25 @@ fn sync(
         .collect();
     let (mut record, legacy) = read_record(control_home, &store.directory);
     let scope = scope_name(control_home);
+    // Changes a crash left pending: the record follows them, is written,
+    // and only then are their entries published.
+    let recovered = recover_history(control_home, &store.directory, &store_digests);
+    if !recovered.is_empty() {
+        for (path, change, how) in &recovered {
+            follow(&mut record, change, how);
+            // A change that may never have happened is not shown as one.
+            if *how == Settled::Uncertain {
+                let kept = HistoryEntry {
+                    change: "uncertain".into(),
+                    ..change.clone()
+                };
+                let _ = rewrite_change(path, &kept);
+            }
+        }
+        write_record(control_home, &store.directory, &record, None)?;
+        let paths: Vec<_> = recovered.iter().map(|(path, _, _)| path.clone()).collect();
+        publish_history(control_home, &store.directory, &paths);
+    }
     // A name this scope's Kits bundle but another scope's mirror imported
     // is that scope's: this pass neither removes nor forgets it.
     let others: BTreeSet<String> = record
@@ -987,20 +1284,69 @@ fn sync(
         let home = sbx
             .stock_home()
             .ok_or_else(|| "the stock SBX HOME is unknown".to_owned())?;
+        // Each change's history is prepared first (none is made when that
+        // fails); after the import the record is written, and only then
+        // are the entries of the skills whose store copy changed published.
+        let mut pending = Vec::new();
         for (name, files) in &chosen {
             let before = store
                 .skills
                 .contains(name)
                 .then(|| read_skill(&store.directory.join(name)))
                 .transpose()
-                .map_err(|error| format!("cannot read the store's copy of {name}: {error}"))?;
-            keep_history(control_home, name, before.as_ref(), Some(files))?;
+                .map_err(|error| format!("cannot read the store's copy of {name}: {error}"));
+            let kept = before.and_then(|before| {
+                let entry = keep_history(
+                    control_home,
+                    &store.directory,
+                    name,
+                    before.as_ref(),
+                    Some(files),
+                )?;
+                Ok((name.as_str(), entry, before.as_ref().map(digest)))
+            });
+            match kept {
+                Ok(kept) => pending.push(kept),
+                Err(error) => {
+                    discard_history(&entries(&pending));
+                    return Err(error);
+                }
+            }
         }
-        let staging = stage(control_home, &home, &store.directory, &chosen)?;
+        let staging = match stage(control_home, &home, &store.directory, &chosen) {
+            Ok(staging) => staging,
+            Err(error) => {
+                discard_history(&entries(&pending));
+                return Err(error);
+            }
+        };
         result = sbx
             .skills_import(&staging)
             .map_err(|error| format!("sbx skills import failed: {error}"));
         let _ = fs::remove_dir_all(&staging);
+        let (changed, unchanged): (Vec<_>, Vec<_>) = pending
+            .into_iter()
+            .partition(|(name, _, before)| store_digest(&(*name).to_owned()) != *before);
+        discard_history(&entries(&unchanged));
+        // Say in each entry whether this import put its copy there, before
+        // the record is written: recovery trusts only that.
+        for (name, entry, _) in &changed {
+            let staged = read
+                .get(*name)
+                .and_then(|files| files.as_ref().ok())
+                .map(digest);
+            let imported =
+                result.is_ok() && staged.is_some() && store_digest(&(*name).to_owned()) == staged;
+            if let Some(change) = read_change(entry) {
+                rewrite_change(
+                    entry,
+                    &HistoryEntry {
+                        imported: Some(imported),
+                        ..change
+                    },
+                )?;
+            }
+        }
         // Only what this import put there is recorded: never a copy that
         // appeared beside a failed import (an `sbx skills add`, even of the
         // same content). A failed import takes no name it did not own.
@@ -1012,19 +1358,51 @@ fn sync(
                 record.owners.insert((*name).clone(), scope.clone());
             }
         }
+        // A crash or failure from here on leaves the entries pending, and
+        // the next pass settles them against the record written here.
+        write_record(control_home, &store.directory, &record, legacy.as_deref())?;
+        publish_history(control_home, &store.directory, &entries(&changed));
     }
     if result.is_ok() && !plan.remove.is_empty() {
+        let mut pending = Vec::new();
+        let mut removing = Vec::new();
         for name in &plan.remove {
             let before = read_skill(&store.directory.join(name))
-                .map_err(|error| format!("cannot read the store's copy of {name}: {error}"))?;
-            keep_history(control_home, name, Some(&before), None)?;
+                .map_err(|error| format!("cannot read the store's copy of {name}: {error}"));
+            // Changed since the plan (a user's edit): not the mirror's now.
+            if let Ok(before) = &before
+                && record.skills.get(name) != Some(&digest(before))
+            {
+                continue;
+            }
+            let kept = before.and_then(|before| {
+                keep_history(control_home, &store.directory, name, Some(&before), None)
+            });
+            match kept {
+                Ok(entry) => {
+                    removing.push(name.clone());
+                    pending.push((name.as_str(), entry, None));
+                }
+                Err(error) => {
+                    discard_history(&entries(&pending));
+                    return Err(error);
+                }
+            }
         }
-        result = sbx
-            .skills_remove(&plan.remove)
-            .map_err(|error| format!("sbx skills rm failed: {error}"));
-        if result.is_ok() {
-            record.skills.retain(|name, _| !plan.remove.contains(name));
+        if !removing.is_empty() {
+            result = sbx
+                .skills_remove(&removing)
+                .map_err(|error| format!("sbx skills rm failed: {error}"));
         }
+        let (gone, kept): (Vec<_>, Vec<_>) = pending
+            .into_iter()
+            .partition(|(name, _, _)| fs::symlink_metadata(store.directory.join(name)).is_err());
+        discard_history(&entries(&kept));
+        record
+            .skills
+            .retain(|name, _| !gone.iter().any(|(gone, _, _)| *gone == name.as_str()));
+        write_record(control_home, &store.directory, &record, legacy.as_deref())?;
+        publish_history(control_home, &store.directory, &entries(&gone));
     }
     write_record(control_home, &store.directory, &record, legacy.as_deref())?;
     result?;
@@ -1363,6 +1741,7 @@ mod tests {
         /// The next import fails after this skill (name, `SKILL.md`)
         /// appeared in the store, as an `sbx skills add` meanwhile would.
         added_during_import: Mutex<Option<(String, String)>>,
+        fail_import: Mutex<bool>,
     }
 
     impl FakeSbx {
@@ -1429,9 +1808,12 @@ mod tests {
                     if let Some(change) = self.during_import.lock().unwrap().take() {
                         change();
                     }
-                    if let Some((name, body)) = self.added_during_import.lock().unwrap().take() {
-                        fs::create_dir_all(store.join(&name)).unwrap();
-                        fs::write(store.join(&name).join("SKILL.md"), body).unwrap();
+                    let added = self.added_during_import.lock().unwrap().take();
+                    if let Some((name, body)) = &added {
+                        fs::create_dir_all(store.join(name)).unwrap();
+                        fs::write(store.join(name).join("SKILL.md"), body).unwrap();
+                    }
+                    if added.is_some() || *self.fail_import.lock().unwrap() {
                         return Ok(marsh_runtime::CommandOutput {
                             exit_code: Some(1),
                             stdout: Vec::new(),
@@ -1495,6 +1877,7 @@ mod tests {
                 imports: Mutex::new(0),
                 during_import: Mutex::new(None),
                 added_during_import: Mutex::new(None),
+                fail_import: Mutex::new(false),
             });
             fs::create_dir_all(root.path().join("control")).unwrap();
             fs::create_dir_all(root.path().join("folder")).unwrap();
@@ -1689,14 +2072,20 @@ mod tests {
 
     #[test]
     fn the_history_keeps_the_newest_changes_of_each_skill() {
-        let control = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        // The history is beside the control home: keep it in `root`.
+        let control = root.path().join("control");
         let files = |body: &str| Files::from([("SKILL.md".into(), (false, body.into()))]);
-        keep_history(control.path(), "other", None, Some(&files("o"))).unwrap();
+        let keep = |name: &str, before: Option<&Files>, after: &Files| {
+            let store = Path::new("/store");
+            let entry = keep_history(&control, store, name, before, Some(after)).unwrap();
+            publish_history(&control, store, &[entry]);
+        };
+        keep("other", None, &files("o"));
         for round in 0..=HISTORY_KEEP {
-            let before = files(&round.to_string());
-            keep_history(control.path(), "tool", Some(&before), Some(&files("x"))).unwrap();
+            keep("tool", Some(&files(&round.to_string())), &files("x"));
         }
-        let changes = history(control.path());
+        let changes = history(&control);
         let tool: Vec<_> = changes.iter().filter(|c| c.name == "tool").collect();
         assert_eq!(tool.len(), HISTORY_KEEP);
         assert_eq!(changes.iter().filter(|c| c.name == "other").count(), 1);
@@ -1705,6 +2094,80 @@ mod tests {
             fs::read_to_string(oldest.join("before/SKILL.md")).unwrap(),
             "1"
         );
+    }
+
+    /// When the history cannot be written the store is not changed.
+    #[test]
+    fn an_unwritable_history_leaves_the_store_alone() {
+        let rig = Rig::new();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        let history = history_dir(&rig.root.path().join("control"), &rig.fake.store());
+        fs::remove_dir_all(&history).unwrap();
+        fs::write(&history, "not a folder").unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+
+        let error = rig.sync().unwrap_err();
+        assert!(error.contains("cannot keep the skills history"), "{error}");
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "one".to_owned())])
+        );
+        assert_eq!(*rig.fake.imports.lock().unwrap(), 1);
+        fs::remove_dir_all(&skill).unwrap();
+        assert!(rig.sync().is_err());
+        assert!(rig.stored("tool").exists());
+    }
+
+    /// A failing import leaves no history entry, however often it is
+    /// retried, so the real rollback points are never pushed out.
+    #[test]
+    fn a_failed_import_adds_no_history() {
+        let rig = Rig::new();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        *rig.fake.fail_import.lock().unwrap() = true;
+        for _ in 0..=HISTORY_KEEP {
+            assert!(rig.sync().is_err());
+        }
+        let control = rig.root.path().join("control");
+        let changes = |history: Vec<SkillChange>| {
+            history
+                .into_iter()
+                .map(|change| change.change)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(changes(history(&control)), ["added"]);
+        assert_eq!(
+            fs::read_dir(history_dir(&control, &rig.fake.store()))
+                .unwrap()
+                .count(),
+            1,
+            "no pending entries left"
+        );
+        *rig.fake.fail_import.lock().unwrap() = false;
+        rig.sync().unwrap();
+        assert_eq!(changes(history(&control)), ["updated", "added"]);
+    }
+
+    #[test]
+    fn a_large_file_is_named_not_diffed() {
+        let big = |byte: u8| {
+            Files::from([(
+                "data.txt".into(),
+                (
+                    false,
+                    vec![byte; usize::try_from(MAX_DIFF_FILE).unwrap() + 1],
+                ),
+            )])
+        };
+        let diff = diff("tool", Some(&big(b'a')), Some(&big(b'b')));
+        assert_eq!(diff, "large file changed: tool/data.txt\n");
     }
 
     #[test]
@@ -1872,6 +2335,755 @@ mod tests {
         let error = read_source(&skill).unwrap_err();
         assert_eq!(error, "notes has other hard links");
         assert!(read_skill(&skill).is_ok());
+    }
+
+    fn skill_md(body: &str) -> Files {
+        Files::from([("SKILL.md".into(), (false, body.into()))])
+    }
+
+    /// A crash after the import but before the entry was published keeps
+    /// the rollback copy, and the change stays the mirror's.
+    #[test]
+    fn a_crash_after_the_import_keeps_the_rollback_copy() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        // The pass that crashed: entry prepared, store changed, nothing more.
+        keep_history(
+            &control,
+            &rig.fake.store(),
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        fs::write(rig.stored("tool").join("SKILL.md"), "two").unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+
+        rig.sync().unwrap();
+        let changes = history(&control);
+        assert_eq!(
+            changes
+                .iter()
+                .map(|c| c.change.as_str())
+                .collect::<Vec<_>>(),
+            ["updated", "added"]
+        );
+        let before = Path::new(&changes[0].diff).parent().unwrap().join("before");
+        assert_eq!(fs::read_to_string(before.join("SKILL.md")).unwrap(), "one");
+        fs::write(skill.join("SKILL.md"), "three").unwrap();
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(
+            tree(&rig.stored("tool")),
+            BTreeMap::from([("SKILL.md".to_owned(), "three".to_owned())])
+        );
+    }
+
+    /// A crash before the import drops its prepared entry, and a
+    /// half-written one, without touching published ones.
+    #[test]
+    fn a_crash_before_the_import_leaves_no_entry() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        keep_history(
+            &control,
+            &rig.fake.store(),
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        let half = history_dir(&control, &rig.fake.store()).join(".tmp-0000000000001-tool");
+        fs::create_dir_all(half.join("before")).unwrap();
+
+        // The store still holds "one": the change was never made.
+        rig.sync().unwrap();
+        assert_eq!(
+            history(&control)
+                .iter()
+                .map(|c| c.change.as_str())
+                .collect::<Vec<_>>(),
+            ["added"]
+        );
+        assert_eq!(
+            fs::read_dir(history_dir(&control, &rig.fake.store()))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    fn changes(control: &Path) -> Vec<String> {
+        history(control).iter().map(|c| c.change.clone()).collect()
+    }
+
+    /// A rig whose store holds `tool` = "one", imported by the mirror.
+    fn imported_rig() -> (Rig, PathBuf, PathBuf) {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        (rig, control, skill)
+    }
+
+    fn stored_text(rig: &Rig) -> String {
+        fs::read_to_string(rig.stored("tool").join("SKILL.md")).unwrap()
+    }
+
+    /// Crash after a removal, before its entry was published (review
+    /// round 3 probe).
+    #[test]
+    fn a_crash_after_a_removal_publishes_it_and_forgets_the_skill() {
+        let (rig, control, skill) = imported_rig();
+        let store = rig.fake.store();
+        keep_history(&control, &store, "tool", Some(&skill_md("one")), None).unwrap();
+        fs::remove_dir_all(rig.stored("tool")).unwrap();
+        fs::remove_dir_all(&skill).unwrap();
+        rig.sync().unwrap();
+        assert_eq!(changes(&control), ["removed", "added"]);
+        let (record, _) = read_record(&control, &store);
+        assert!(record.skills.is_empty(), "{record:?}");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "again").unwrap();
+        rig.sync().unwrap();
+        assert_eq!(stored_text(&rig), "again");
+    }
+
+    /// Crash after the entry was published but before the record was
+    /// written: the record order makes this the pending case, which the
+    /// next pass settles (review round 3 probes, Claude and GPT).
+    #[test]
+    fn a_crash_between_the_import_and_the_record_keeps_ownership() {
+        let (rig, control, skill) = imported_rig();
+        let store = rig.fake.store();
+        // What sync leaves at that point now: the entry still pending.
+        keep_history(
+            &control,
+            &store,
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        fs::write(rig.stored("tool").join("SKILL.md"), "two").unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        rig.sync().unwrap();
+        fs::write(skill.join("SKILL.md"), "three").unwrap();
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(stored_text(&rig), "three");
+        assert_eq!(changes(&control), ["updated", "updated", "added"]);
+    }
+
+    /// When the record cannot be written after an import, the entry stays
+    /// pending (it is published only after the record), so the next pass
+    /// still finds the change and keeps the skill the mirror's.
+    #[test]
+    fn an_unwritten_record_leaves_the_entry_pending() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let (rig, control, skill) = imported_rig();
+        let home = account_home(&control);
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o500)).unwrap();
+        let failed = rig.sync();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err(), "{failed:?}");
+        assert_eq!(stored_text(&rig), "two");
+        assert_eq!(changes(&control), ["added"]);
+        rig.sync().unwrap();
+        assert_eq!(changes(&control), ["updated", "added"]);
+        fs::write(skill.join("SKILL.md"), "three").unwrap();
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(stored_text(&rig), "three");
+    }
+
+    /// A failure after a successful import (here, preparing a removal's
+    /// history) keeps the import's record (review round 3 probe).
+    #[test]
+    fn a_failure_after_the_import_keeps_its_record() {
+        let rig = Rig::new();
+        let (tool, gone) = (rig.folder().join("tool"), rig.folder().join("gone"));
+        for (folder, body) in [(&tool, "one"), (&gone, "g")] {
+            fs::create_dir_all(folder).unwrap();
+            fs::write(folder.join("SKILL.md"), body).unwrap();
+        }
+        rig.sync().unwrap();
+        fs::remove_dir_all(&gone).unwrap();
+        fs::write(tool.join("SKILL.md"), "two").unwrap();
+        let victim = rig.stored("gone").join("SKILL.md");
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::remove_file(&victim).unwrap();
+        }));
+        let error = rig.sync().unwrap_err();
+        assert!(error.contains("store's copy of gone"), "{error}");
+        fs::write(tool.join("SKILL.md"), "three").unwrap();
+        let synced = rig.sync().unwrap();
+        assert_eq!(synced.clashes, [] as [String; 0], "{synced:?}");
+    }
+
+    /// Recovery never takes a user's replacement of a skill as the
+    /// mirror's, so never deletes it (review round 3 probe, GPT).
+    #[test]
+    fn recovery_never_adopts_a_users_replacement() {
+        let (rig, control, skill) = imported_rig();
+        keep_history(
+            &control,
+            &rig.fake.store(),
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        fs::write(rig.stored("tool").join("SKILL.md"), "user-added").unwrap();
+        fs::remove_dir_all(&skill).unwrap();
+        rig.sync().unwrap();
+        assert_eq!(stored_text(&rig), "user-added");
+        // The rollback copy is kept as evidence.
+        assert_eq!(changes(&control), ["uncertain", "added"]);
+    }
+
+    /// One store's recovery never settles another store's pending entry
+    /// (review round 3 probe, GPT).
+    #[test]
+    fn another_stores_pass_leaves_this_stores_history_alone() {
+        let a = Rig::new();
+        let b = Rig::new();
+        let control_a = a.root.path().join("scopes/a");
+        let control_b = a.root.path().join("scopes/b");
+        let skill = a.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        a.sync_in(&control_a).unwrap();
+        let pending = keep_history(
+            &control_a,
+            &a.fake.store(),
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        fs::write(a.stored("tool").join("SKILL.md"), "two").unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        b.sync_in(&control_b).unwrap();
+        assert!(pending.exists(), "store B settled store A's entry");
+        a.sync_in(&control_a).unwrap();
+        assert_eq!(
+            history(&control_a)
+                .iter()
+                .filter(|c| c.change == "updated")
+                .count(),
+            1
+        );
+    }
+
+    /// A store copy recovery cannot read is uncertain: the entry is kept,
+    /// and the record does not follow.
+    #[test]
+    fn recovery_keeps_an_entry_when_the_store_copy_is_unreadable() {
+        let (rig, control, _skill) = imported_rig();
+        let store = rig.fake.store();
+        keep_history(
+            &control,
+            &store,
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+        )
+        .unwrap();
+        fs::remove_file(rig.stored("tool").join("SKILL.md")).unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", rig.stored("tool").join("SKILL.md")).unwrap();
+        rig.sync().unwrap();
+        assert_eq!(changes(&control), ["uncertain", "added"]);
+        // Not taken as the mirror's: it shows as a clash, and stays.
+        let (record, _) = read_record(&control, &store);
+        assert!(!record.skills.contains_key("tool"), "{record:?}");
+        assert!(rig.stored("tool").join("SKILL.md").is_symlink());
+    }
+
+    /// The record follows a change made before a crash only when it owned
+    /// what the change replaced.
+    #[test]
+    fn recovery_does_not_take_a_skill_the_record_did_not_own() {
+        let mut record = Record::default();
+        let change = |change: &str, before: Option<&str>, after: Option<&str>| HistoryEntry {
+            name: "tool".into(),
+            change: change.into(),
+            before: before.map(str::to_owned),
+            after: after.map(str::to_owned),
+            ..HistoryEntry::default()
+        };
+        follow(
+            &mut record,
+            &change("updated", Some("1"), Some("2")),
+            &Settled::Made,
+        );
+        assert!(record.skills.is_empty());
+        follow(
+            &mut record,
+            &change("removed", Some("1"), None),
+            &Settled::Made,
+        );
+        assert!(record.skills.is_empty());
+        // A new skill needs proof the import put it there, and its scope.
+        let proven = HistoryEntry {
+            scope: Some("b".into()),
+            imported: Some(true),
+            ..change("added", None, Some("2"))
+        };
+        let scopeless = HistoryEntry {
+            scope: None,
+            ..proven.clone()
+        };
+        follow(&mut record, &scopeless, &Settled::Made);
+        assert!(record.skills.is_empty());
+        follow(&mut record, &proven, &Settled::Uncertain);
+        assert!(record.skills.is_empty());
+        follow(
+            &mut record,
+            &change("added", None, Some("2")),
+            &Settled::Made,
+        );
+        assert!(record.skills.is_empty());
+        let failed = HistoryEntry {
+            imported: Some(false),
+            ..proven.clone()
+        };
+        follow(&mut record, &failed, &Settled::Made);
+        assert!(record.skills.is_empty());
+        follow(&mut record, &proven, &Settled::Made);
+        assert_eq!(record.skills["tool"], "2");
+        assert_eq!(record.owners["tool"], "b");
+        // An owned update follows, and goes to the scope that prepared it,
+        // unless the entry says its import failed or names no scope.
+        record.skills.insert("tool".into(), "1".into());
+        record.owners.insert("tool".into(), "a".into());
+        let update = HistoryEntry {
+            scope: Some("b".into()),
+            imported: Some(true),
+            ..change("updated", Some("1"), Some("2"))
+        };
+        let failed = HistoryEntry {
+            imported: Some(false),
+            ..update.clone()
+        };
+        follow(&mut record, &failed, &Settled::Made);
+        let nameless = HistoryEntry {
+            scope: None,
+            ..update.clone()
+        };
+        follow(&mut record, &nameless, &Settled::Made);
+        assert_eq!(record.skills["tool"], "1");
+        assert_eq!(record.owners["tool"], "a");
+        let unmarked = HistoryEntry {
+            imported: None,
+            ..update.clone()
+        };
+        follow(&mut record, &unmarked, &Settled::Made);
+        assert_eq!(record.skills["tool"], "2");
+        assert_eq!(record.owners["tool"], "b");
+        record.skills.insert("tool".into(), "other".into());
+        follow(
+            &mut record,
+            &change("updated", Some("1"), Some("2")),
+            &Settled::Made,
+        );
+        assert_eq!(record.skills["tool"], "other");
+        follow(
+            &mut record,
+            &change("removed", Some("1"), None),
+            &Settled::Made,
+        );
+        assert_eq!(record.skills["tool"], "other");
+    }
+
+    /// The settling rules, case by case.
+    #[test]
+    fn recovery_settles_by_what_the_store_holds() {
+        let change = |change: &str, before: Option<&str>, after: Option<&str>| HistoryEntry {
+            name: "tool".into(),
+            change: change.into(),
+            at: 0,
+            before: before.map(str::to_owned),
+            after: after.map(str::to_owned),
+            ..HistoryEntry::default()
+        };
+        let now = |digest: &str| Some(digest.to_owned());
+        let update = change("updated", Some("1"), Some("2"));
+        assert_eq!(settle(&update, Some(&now("1"))), Settled::NotMade);
+        assert_eq!(settle(&update, Some(&now("2"))), Settled::Made);
+        assert_eq!(settle(&update, Some(&now("3"))), Settled::Uncertain);
+        assert_eq!(settle(&update, Some(&None)), Settled::Uncertain);
+        assert_eq!(settle(&update, None), Settled::Uncertain);
+        let add = change("added", None, Some("2"));
+        assert_eq!(settle(&add, None), Settled::NotMade);
+        assert_eq!(settle(&add, Some(&now("2"))), Settled::Made);
+        assert_eq!(settle(&add, Some(&now("half"))), Settled::Uncertain);
+        let remove = change("removed", Some("1"), None);
+        assert_eq!(settle(&remove, None), Settled::Made);
+        assert_eq!(settle(&remove, Some(&now("1"))), Settled::NotMade);
+        assert_eq!(settle(&remove, Some(&now("3"))), Settled::Uncertain);
+    }
+
+    /// A crash during a new skill's import that left a partial copy: the
+    /// copy is never taken as the mirror's (it shows as a clash), and the
+    /// entry is kept.
+    #[test]
+    fn a_half_imported_new_skill_is_not_trusted() {
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "whole").unwrap();
+        fs::create_dir_all(rig.fake.store()).unwrap();
+        keep_history(
+            &control,
+            &rig.fake.store(),
+            "tool",
+            None,
+            Some(&skill_md("whole")),
+        )
+        .unwrap();
+        fs::create_dir_all(rig.stored("tool")).unwrap();
+        fs::write(rig.stored("tool").join("SKILL.md"), "who").unwrap();
+        let synced = rig.sync().unwrap();
+        assert_eq!(synced.clashes, ["tool"]);
+        assert_eq!(stored_text(&rig), "who");
+        assert_eq!(changes(&control), ["uncertain"]);
+    }
+
+    /// An entry is whole before it is pending: it is written under a
+    /// temporary name and renamed.
+    #[test]
+    fn a_history_entry_is_written_whole_before_it_is_pending() {
+        let root = tempfile::tempdir().unwrap();
+        let control = root.path().join("control");
+        let store = Path::new("/store");
+        let mut seen = None;
+        let entry = keep_history_with(
+            &control,
+            store,
+            "tool",
+            Some(&skill_md("one")),
+            Some(&skill_md("two")),
+            &mut |written| {
+                let names: Vec<_> = fs::read_dir(history_dir(&control, store))
+                    .unwrap()
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect();
+                seen = Some((names, written.join("change.json").exists()));
+            },
+        )
+        .unwrap();
+        let (names, whole) = seen.unwrap();
+        assert_eq!(names.len(), 1);
+        assert!(names[0].starts_with(".tmp-"), "{names:?}");
+        assert!(whole);
+        assert!(
+            entry
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".pending-")
+        );
+    }
+
+    /// Past its deadline the line diff is coarser, but still correct: one
+    /// hunk spanning both changes instead of two.
+    #[test]
+    fn the_diff_stops_refining_at_its_deadline() {
+        let lines = |changed: &[usize]| {
+            let text: String = (0..2000)
+                .map(|n| {
+                    if changed.contains(&n) {
+                        format!("changed {n}\n")
+                    } else {
+                        format!("line {n}\n")
+                    }
+                })
+                .collect();
+            Files::from([("SKILL.md".into(), (false, text.into_bytes()))])
+        };
+        let (old, new) = (lines(&[]), lines(&[100, 1900]));
+        let fine = diff("tool", Some(&old), Some(&new));
+        assert_eq!(fine.matches("@@ ").count(), 2, "{fine}");
+        let coarse = diff_until("tool", Some(&old), Some(&new), Instant::now());
+        assert!(coarse.contains("-line 1000\n"), "{coarse}");
+    }
+
+    #[test]
+    fn recovery_keeps_the_importing_scope() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let rig = Rig::new();
+        let a = rig.root.path().join("scopes/a");
+        let b = rig.root.path().join("scopes/b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        fs::create_dir_all(account_home(&b)).unwrap();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        // Drive B's real sync: successful import, but record writing fails.
+        let home = account_home(&b);
+        let fail_home = home.clone();
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::set_permissions(&fail_home, fs::Permissions::from_mode(0o500)).unwrap();
+        }));
+        let failed = rig.sync_in(&b);
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err());
+        assert_eq!(stored_text(&rig), "one");
+        assert_eq!(history(&b), []);
+        // Scope A recovers first; its Kit bundles that same name.
+        let bundled = BTreeMap::from([("tool".to_owned(), vec!["pix".to_owned()])]);
+        sync(&rig.sbx, &[rig.folder()], &a, &bundled).unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "recovery relabelled B's import as A's and removed it"
+        );
+        let (record, _) = read_record(&a, &rig.fake.store());
+        assert_eq!(record.owners.get("tool").map(String::as_str), Some("b"));
+    }
+
+    #[test]
+    fn a_failed_import_then_a_failed_record_never_adopts_a_user_add() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "mine").unwrap();
+        // Let preparation work, but fail the record write after sbx returns.
+        let home = account_home(&control);
+        let fail_home = home.clone();
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::set_permissions(&fail_home, fs::Permissions::from_mode(0o500)).unwrap();
+        }));
+        *rig.fake.added_during_import.lock().unwrap() = Some(("tool".into(), "mine".into()));
+        let failed = rig.sync();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err());
+        assert_eq!(stored_text(&rig), "mine");
+        assert!(history(&control).is_empty(), "entry must still be pending");
+        fs::remove_dir_all(&skill).unwrap();
+        rig.sync().unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "recovery claimed and deleted a user add after a failed import"
+        );
+    }
+
+    #[test]
+    fn recovery_leaves_entries_pending_until_its_record_is_written() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let (rig, control, skill) = imported_rig();
+        let home = account_home(&control);
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o500)).unwrap();
+        let first = rig.sync();
+        let first_history = changes(&control);
+        // A second pass now takes the separate recovery branch.
+        let recovered = rig.sync();
+        let recovered_history = changes(&control);
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(first.is_err());
+        assert_eq!(first_history, ["added"]);
+        assert!(recovered.is_err());
+        assert_eq!(
+            recovered_history,
+            ["added"],
+            "recovery published before its record could be saved"
+        );
+        fs::write(skill.join("SKILL.md"), "three").unwrap();
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(stored_text(&rig), "three");
+    }
+
+    #[test]
+    fn a_failed_import_then_a_failed_publication_never_adopts_a_user_add() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "mine").unwrap();
+        let history_home = history_dir(&control, &rig.fake.store());
+        let fail_history = history_home.clone();
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::set_permissions(&fail_history, fs::Permissions::from_mode(0o500)).unwrap();
+        }));
+        *rig.fake.added_during_import.lock().unwrap() = Some(("tool".into(), "mine".into()));
+        let failed = rig.sync();
+        fs::set_permissions(&history_home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.unwrap_err().contains("sbx skills import failed"));
+        let (record, _) = read_record(&control, &rig.fake.store());
+        assert!(
+            record.skills.is_empty(),
+            "the completed failed-import pass did not own it"
+        );
+        assert_eq!(history(&control), []);
+        fs::remove_dir_all(&skill).unwrap();
+        rig.sync().unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "a failed history rename made recovery adopt and delete a user add"
+        );
+    }
+
+    /// The record forgets a removed skill, so a user's identical add
+    /// afterwards stays (review round 4 probe, Claude).
+    #[test]
+    fn an_identical_add_after_a_removal_is_kept() {
+        let (rig, _control, skill) = imported_rig();
+        fs::remove_dir_all(&skill).unwrap();
+        rig.sync().unwrap();
+        assert!(!rig.stored("tool").exists());
+        fs::create_dir_all(rig.stored("tool")).unwrap();
+        fs::write(rig.stored("tool").join("SKILL.md"), "one").unwrap();
+        rig.sync().unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "user's identical skill removed"
+        );
+    }
+
+    /// A store copy changed after the plan (a user's edit during the
+    /// pass) is not removed: it is no longer what the mirror imported.
+    #[test]
+    fn a_store_copy_edited_during_the_pass_is_not_removed() {
+        let rig = Rig::new();
+        let (tool, gone) = (rig.folder().join("tool"), rig.folder().join("gone"));
+        let other = rig.folder().join("other");
+        for (folder, body) in [(&tool, "one"), (&gone, "g"), (&other, "o")] {
+            fs::create_dir_all(folder).unwrap();
+            fs::write(folder.join("SKILL.md"), body).unwrap();
+        }
+        rig.sync().unwrap();
+        fs::remove_dir_all(&gone).unwrap();
+        fs::remove_dir_all(&other).unwrap();
+        fs::write(tool.join("SKILL.md"), "two").unwrap();
+        let edited = rig.stored("gone").join("SKILL.md");
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::write(&edited, "the user's edit").unwrap();
+        }));
+        rig.sync().unwrap();
+        assert_eq!(
+            fs::read_to_string(rig.stored("gone").join("SKILL.md")).unwrap(),
+            "the user's edit"
+        );
+        // The other removal in the same pass still happens.
+        assert!(!rig.stored("other").exists());
+    }
+
+    /// A removal whose record cannot be written stays pending, and the
+    /// next pass publishes it and forgets the skill.
+    #[test]
+    fn an_unwritten_record_leaves_a_removal_pending() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let (rig, control, skill) = imported_rig();
+        let home = account_home(&control);
+        fs::remove_dir_all(&skill).unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o500)).unwrap();
+        let failed = rig.sync();
+        let after_failure = changes(&control);
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err(), "{failed:?}");
+        assert!(!rig.stored("tool").exists());
+        assert_eq!(after_failure, ["added"], "published before the record");
+        rig.sync().unwrap();
+        assert_eq!(changes(&control), ["removed", "added"]);
+        let (record, _) = read_record(&control, &rig.fake.store());
+        assert!(record.skills.is_empty(), "{record:?}");
+    }
+
+    /// A new skill whose import succeeded but whose record was not
+    /// written is the mirror's after recovery: the entry says so.
+    #[test]
+    fn a_proven_new_import_is_recovered_as_the_mirrors() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let rig = Rig::new();
+        let control = rig.root.path().join("control");
+        fs::create_dir_all(account_home(&control)).unwrap();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        let home = account_home(&control);
+        let fail_home = home.clone();
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::set_permissions(&fail_home, fs::Permissions::from_mode(0o500)).unwrap();
+        }));
+        let failed = rig.sync();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err());
+        rig.sync().unwrap();
+        assert_eq!(changes(&control), ["added"]);
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        assert_eq!(rig.sync().unwrap(), Synced::default());
+        assert_eq!(stored_text(&rig), "two");
+    }
+
+    #[test]
+    fn recovery_gives_an_update_to_the_scope_that_imported_it() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes a read-only folder anyway.
+        }
+        let rig = Rig::new();
+        let a = rig.root.path().join("scopes/a");
+        let b = rig.root.path().join("scopes/b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let skill = rig.folder().join("tool");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "one").unwrap();
+        rig.sync_in(&a).unwrap();
+        fs::write(skill.join("SKILL.md"), "two").unwrap();
+        let home = account_home(&b);
+        let fail_home = home.clone();
+        *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
+            fs::set_permissions(&fail_home, fs::Permissions::from_mode(0o500)).unwrap();
+        }));
+        let failed = rig.sync_in(&b);
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(failed.is_err());
+        assert_eq!(stored_text(&rig), "two");
+        let bundled = BTreeMap::from([("tool".to_owned(), vec!["pix".to_owned()])]);
+        sync(&rig.sbx, &[rig.folder()], &a, &bundled).unwrap();
+        assert!(
+            rig.stored("tool").exists(),
+            "recovery retained the old importing scope and deleted B's update"
+        );
+        let (record, _) = read_record(&a, &rig.fake.store());
+        assert_eq!(record.owners.get("tool").map(String::as_str), Some("b"));
     }
 
     #[test]

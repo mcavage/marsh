@@ -435,9 +435,17 @@ refused by the spawn set), and is counted in `marsh status`
   takes no name it did not own); an entry with the folder's
   content that it did not import is left alone, and any other entry (an
   `sbx skills add`) is a clash that `marsh status` names.
-  Before it imports or removes a skill it keeps the store's copy and a diff
-  in `skills-history/` in the control home, and changes nothing when it
-  cannot.
+  Before it imports or removes a skill it writes, syncs and renames into
+  place a pending entry with the store's copy and a diff in
+  `skills-mirror/history/STORE/`, and changes nothing when it cannot; after
+  the import it marks in each entry whether it put that copy there, writes
+  the record, then publishes the entries of the skills the store shows
+  changed. A crash leaves entries pending, and the next pass settles each
+  by the store: made (published; the record follows only a change of what
+  it owned, for the scope that prepared it, and takes a new skill, for the scope that prepared it, only
+  when the entry is marked imported), not made (dropped), or uncertain
+  (published as `uncertain`, never owned). Before `sbx skills rm` it checks
+  each copy again against the record.
   It never imports a name a registered Kit bundles (`agent-skill@1`, read
   from the descriptors the daemon caches; the first sync waits up to 30 s
   for them) and removes one it imported earlier. Stock SBX refuses a create
