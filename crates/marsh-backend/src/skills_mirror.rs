@@ -6,8 +6,9 @@
 //! Once the folders change and settle, the daemon imports the skills whose
 //! store copy differs, and removes the ones it imported whose source is gone.
 //! It only ever replaces or removes a store entry it put there itself: one
-//! whose content is what it last imported (its record in the control home)
-//! or what the folder holds now. Anything else (an `sbx skills add`) is a
+//! whose content is what it last imported (its record in the control home).
+//! An entry with the folder's content that it did not import is left alone
+//! and never recorded; one with other content (an `sbx skills add`) is a
 //! clash: the store's copy wins and `marsh status` names it. `sbx skills ls`
 //! does not say where a skill came from, so the content is the evidence.
 //!
@@ -542,16 +543,17 @@ fn plan(
         match store.get(name) {
             None => plan.import.push(name.clone()),
             Some(current) => {
-                let ours = current.is_some()
-                    && (current.as_ref() == recorded || current.as_ref() == Some(source));
-                if !ours {
-                    plan.clashes.push(name.clone());
-                    continue;
-                }
-                if current.as_ref() != Some(source) {
+                // Only what the mirror imported is its own: the same content
+                // from `sbx skills add` stays the user's, in step or not.
+                let ours = current.is_some() && current.as_ref() == recorded;
+                if current.as_ref() == Some(source) {
+                    if ours {
+                        plan.record.insert(name.clone(), source.clone());
+                    }
+                } else if ours {
                     plan.import.push(name.clone());
-                } else if let Some(current) = current {
-                    plan.record.insert(name.clone(), current.clone());
+                } else {
+                    plan.clashes.push(name.clone());
                 }
             }
         }
@@ -768,6 +770,7 @@ mod tests {
         ]);
         let record = BTreeMap::from([
             ("edited".to_owned(), "e1".to_owned()),
+            ("same".to_owned(), "s".to_owned()),
             ("gone".to_owned(), "g".to_owned()),
             ("changed-since".to_owned(), "c".to_owned()),
         ]);
@@ -776,6 +779,23 @@ mod tests {
         assert_eq!(plan.remove, ["gone"]);
         assert_eq!(plan.clashes, ["added"]);
         assert_eq!(plan.record, BTreeMap::from([("same".into(), "s".into())]));
+    }
+
+    /// An `sbx skills add` copy that happens to match a folder's skill is
+    /// never adopted, so it stays when that folder's skill goes.
+    #[test]
+    fn an_added_skill_with_the_same_content_is_never_removed() {
+        let store = map(&[("added", Some("same"))]);
+        let bundled = BTreeMap::new();
+        let first = plan(
+            &map(&[("added", Some("same"))]),
+            &store,
+            &BTreeMap::new(),
+            &bundled,
+        );
+        assert_eq!(first, Plan::default());
+        let gone = plan(&BTreeMap::new(), &store, &first.record, &bundled);
+        assert!(gone.remove.is_empty(), "{gone:?}");
     }
 
     #[test]

@@ -430,8 +430,9 @@ refused by the spawn set), and is counted in `marsh status`
   those skills (read by descriptor: a link inside a skill's folder that leads
   out of it keeps that skill out of the store), and removes the ones it imported whose source is gone. It
   replaces or removes only an entry whose content is what it last imported
-  (`skills-mirror.json` in the control home) or what the folder holds now;
-  any other entry (an `sbx skills add`) is a clash that `marsh status` names.
+  (`skills-mirror.json` in the control home); an entry with the folder's
+  content that it did not import is left alone, and any other entry (an
+  `sbx skills add`) is a clash that `marsh status` names.
   It never imports a name a registered Kit bundles (`agent-skill@1`, read
   from the descriptors the daemon caches; the first sync waits up to 30 s
   for them) and removes one it imported earlier. Stock SBX refuses a create

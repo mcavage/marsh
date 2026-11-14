@@ -267,9 +267,10 @@ scans on your Mac (`~/.agents/skills`, `~/.claude/skills`, and the others its
 `--help` lists): once at start, then about two seconds after a change there it
 runs `sbx skills import --force --no-input` for the skills whose store copy
 differs, and `sbx skills rm --force` for the skills it imported whose folder
-is gone. It never replaces or removes a skill it did not put there: when a
-name is already taken by a skill from `sbx skills add`, that skill wins and the
-name is listed as a clash.
+is gone. It never replaces or removes a skill it did not import itself: when
+a name is already taken by a skill from `sbx skills add`, that skill wins and
+the name is listed as a clash. An `sbx skills add` skill with the same content
+as the folder's copy is left alone and stays when the folder's copy goes.
 
 The import gets a copy of each skill's folder, never a link to it. A skill
 folder may itself be a link (`~/.claude/skills/my-skill -> ~/dev/my-skill`),
