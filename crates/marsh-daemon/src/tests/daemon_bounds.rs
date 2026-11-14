@@ -929,3 +929,72 @@ fn a_connection_holds_no_more_descriptors_than_the_cap_allows_for() {
     release.store(true, Ordering::Release);
     drop((small, large));
 }
+
+/// Argv branches that each create `0` empty files in their fork, then end.
+#[derive(Debug)]
+struct Filler(usize);
+
+impl DaemonBackend for Filler {
+    fn registered_commands(&self) -> Result<Vec<String>, DaemonError> {
+        Ok(vec!["fixture".into()])
+    }
+
+    fn prepare(
+        &self,
+        _: &LoadSelection,
+        _: &SessionSpec,
+        _: PreparationProgress,
+        _: DaemonStore,
+    ) -> Result<PreparationResult, DaemonError> {
+        Ok(PreparationResult::default())
+    }
+
+    fn execute(
+        &self,
+        request: ExecuteSpec,
+        attachment: ServerAttachment,
+        _: DaemonStore,
+    ) -> Result<(), DaemonError> {
+        let fork = request.working_directory.unwrap();
+        for index in 0..self.0 {
+            fs::write(fork.join(format!("empty-{index}")), "")?;
+        }
+        attachment.send(&AttachmentFrame::Exited { code: 0 })
+    }
+
+    fn open_shell(
+        &self,
+        _: ShellSpec,
+        _: ServerAttachment,
+        _: DaemonStore,
+    ) -> Result<(), DaemonError> {
+        Err(DaemonError::InvalidState("no shells here".into()))
+    }
+}
+
+/// A-06: a branch that makes more empty files than a capture may record
+/// fails its capture (the bound is lowered here from 100 000); the split
+/// ends and the daemon still answers.
+#[test]
+fn a_branch_past_the_change_bound_fails_its_capture_and_the_daemon_serves_on() {
+    split_fs::TEST_CHANGE_LIMIT.store(50, Ordering::Release);
+    let daemon = Daemon::start(|server| server.with_backend(Arc::new(Filler(51))));
+    let mut stream = daemon
+        .client()
+        .open_request(PublicRequest::SplitCreate(daemon.spec(1, daemon.session())))
+        .unwrap();
+    stream.set_read_timeout(Some(PATIENCE)).unwrap();
+    write_frame(&mut stream, &AttachmentFrame::StdinEof).unwrap();
+    let PublicReply::SplitStarted { id } = read_frame(&mut stream).unwrap() else {
+        panic!("split refused")
+    };
+    let finished = read_frame::<PublicReply>(&mut stream).unwrap();
+    assert!(
+        matches!(finished, PublicReply::SplitFinished { status, .. } if status != 0),
+        "{finished:?}"
+    );
+    let shown = daemon.server.splits.record(&id).unwrap();
+    let status = shown.branches[0].status.clone().unwrap_or_default();
+    assert!(status.contains("capture limit: more than"), "{status}");
+    daemon.answers();
+}

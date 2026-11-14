@@ -285,8 +285,10 @@ A file included in the snapshot is always compared, even if a branch adds an
 ignore rule that matches it. Ignore filtering applies only to Git projects;
 a plain directory's `.gitignore` does not exclude files.
 
-Capture allows 32 MiB per changed file and 256 MiB of changed bytes per branch,
-with a five-second deadline per text diff. Exceeding a capture limit rejects
+Capture allows 32 MiB per changed file, 256 MiB of changed bytes per branch
+(each changed path, empty files and symlinks included, also counts 256 bytes),
+and 100,000 changed paths per branch, with a five-second deadline per text
+diff. Exceeding a capture limit rejects
 that branch's result. `.marsh`, nested `.git` entries, and special files are
 excluded from the initial snapshot; creating a nested `.git` in a fork causes
 capture to reject it.

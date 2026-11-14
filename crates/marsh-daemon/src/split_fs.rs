@@ -27,6 +27,58 @@ pub(crate) const SMALL_LIMIT: u64 = 1 << 20;
 /// Capture bounds (M1): one file, all changed bytes, one text diff.
 pub const FILE_LIMIT: u64 = 32 << 20;
 pub const CAPTURE_LIMIT: u64 = 256 << 20;
+/// Changed paths one capture may record, whatever their size (an empty file
+/// or a symlink reads no bytes but still costs a listing and patch headers).
+pub const CHANGE_LIMIT: usize = 100_000;
+/// Entries one walk of a snapshot or fork may hold in memory.
+pub const TREE_LIMIT: usize = 1_000_000;
+/// What each changed path counts toward [`CAPTURE_LIMIT`] beyond the bytes
+/// read for it: its listing and patch headers.
+const CHANGE_OVERHEAD: u64 = 256;
+
+/// The bounds of one capture ([`CHANGE_LIMIT`], [`TREE_LIMIT`]; tests
+/// lower them).
+#[derive(Clone, Copy, Debug)]
+struct Bounds {
+    changes: usize,
+    entries: usize,
+    /// Bytes read for changed files and link targets, overhead included
+    /// ([`CAPTURE_LIMIT`]).
+    read: u64,
+}
+
+impl Bounds {
+    const DEFAULT: Self = Self {
+        changes: CHANGE_LIMIT,
+        entries: TREE_LIMIT,
+        read: CAPTURE_LIMIT,
+    };
+
+    #[cfg(not(test))]
+    const fn current() -> Self {
+        Self::DEFAULT
+    }
+
+    /// A test's lowered change bound (each test is its own process).
+    #[cfg(test)]
+    fn current() -> Self {
+        match TEST_CHANGE_LIMIT.load(std::sync::atomic::Ordering::Acquire) {
+            0 => Self::DEFAULT,
+            changes => Self {
+                changes,
+                ..Self::DEFAULT
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) static TEST_CHANGE_LIMIT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+fn too_many(limit: usize) -> String {
+    format!("capture limit: more than {limit} entries")
+}
 const DIFF_DEADLINE: Duration = Duration::from_secs(5);
 /// The branch ref a fork's `HEAD` names, so commits never write `HEAD`.
 pub const BRANCH_REF: &str = "refs/heads/marsh-split";
@@ -1060,7 +1112,7 @@ impl Entry {
     }
 }
 
-fn tree(root: &Dir, skip_gitfile: bool) -> Result<BTreeMap<Vec<u8>, Entry>, String> {
+fn tree(root: &Dir, skip_gitfile: bool, limit: usize) -> Result<BTreeMap<Vec<u8>, Entry>, String> {
     let mut entries = BTreeMap::new();
     let mut stack = vec![(root.dup().map_err(|e| e.to_string())?, PathBuf::new())];
     while let Some((dir, relative)) = stack.pop() {
@@ -1070,6 +1122,9 @@ fn tree(root: &Dir, skip_gitfile: bool) -> Result<BTreeMap<Vec<u8>, Entry>, Stri
             }
             let path = relative.join(&name);
             let key = path.as_os_str().as_bytes().to_vec();
+            if entries.len() >= limit {
+                return Err(too_many(limit));
+            }
             match kind {
                 FileType::Directory => {
                     stack.push((dir.open(&name).map_err(|e| e.to_string())?, path));
@@ -1132,6 +1187,7 @@ fn fork_tree(
     fork: &Dir,
     before: &BTreeMap<Vec<u8>, Entry>,
     exclude: &[u8],
+    limit: usize,
 ) -> Result<BTreeMap<Vec<u8>, Entry>, String> {
     let mut rules = Rules(Vec::new());
     if let Some(global) = Some(ignore::gitignore::Gitignore::global().0).filter(|g| !g.is_empty()) {
@@ -1142,7 +1198,14 @@ fn fork_tree(
     }
     let untracked = Untracked::new(before);
     let mut entries = BTreeMap::new();
-    walk_fork(fork, Path::new(""), &mut rules, &untracked, &mut entries)?;
+    walk_fork(
+        fork,
+        Path::new(""),
+        &mut rules,
+        &untracked,
+        &mut entries,
+        limit,
+    )?;
     Ok(entries)
 }
 
@@ -1152,6 +1215,7 @@ fn walk_fork(
     rules: &mut Rules,
     untracked: &Untracked<'_>,
     entries: &mut BTreeMap<Vec<u8>, Entry>,
+    limit: usize,
 ) -> Result<(), String> {
     let io = |e: io::Error| e.to_string();
     let pushed = dir
@@ -1171,6 +1235,9 @@ fn walk_fork(
         {
             continue;
         }
+        if entries.len() >= limit {
+            return Err(too_many(limit));
+        }
         match kind {
             FileType::Directory => {
                 walk_fork(
@@ -1179,6 +1246,7 @@ fn walk_fork(
                     rules,
                     untracked,
                     entries,
+                    limit,
                 )?;
             }
             FileType::Symlink => {
@@ -1248,10 +1316,46 @@ pub fn capture(
     forked_ns: i128,
     skip: &[String],
 ) -> Result<Vec<Change>, String> {
-    let mut before = tree(base, false)?;
+    capture_within(
+        base,
+        fork,
+        exclude,
+        out,
+        store,
+        forked_ns,
+        skip,
+        Bounds::current(),
+    )
+}
+
+/// What exceeds the bytes read for changed files and link targets.
+fn read_past(total: u64, bounds: &Bounds) -> Option<String> {
+    (total > bounds.read).then(|| {
+        format!(
+            "capture limit: changed bytes exceed {} MiB",
+            bounds.read >> 20
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)] // `capture`, with its bounds.
+fn capture_within(
+    base: &Dir,
+    fork: &Dir,
+    exclude: Option<&[u8]>,
+    out: &Dir,
+    store: &Dir,
+    forked_ns: i128,
+    skip: &[String],
+    bounds: Bounds,
+) -> Result<Vec<Change>, String> {
+    let mut before = tree(base, false, bounds.entries)?;
+    // More fork entries than the snapshot's plus the change bound is more
+    // changes than may be captured.
+    let fork_limit = before.len().saturating_add(bounds.changes);
     let mut after = match exclude {
-        Some(exclude) => fork_tree(fork, &before, exclude)?,
-        None => tree(fork, false)?,
+        Some(exclude) => fork_tree(fork, &before, exclude, fork_limit)?,
+        None => tree(fork, false, fork_limit)?,
     };
     for path in skip {
         before.remove(path.as_bytes());
@@ -1279,18 +1383,25 @@ pub fn capture(
             | (Some(Entry::File { .. }), Some(Entry::Link(_))) => 'T',
             _ => 'M',
         };
+        let over = |total: u64| read_past(total, &bounds);
         let mut read =
             |root: &Dir, entry: Option<&Entry>| -> Result<Option<(u32, Vec<u8>)>, String> {
                 Ok(match entry {
                     None => None,
-                    Some(Entry::Link(target)) => Some((0o120_000, target.clone())),
+                    Some(Entry::Link(target)) => {
+                        total += target.len() as u64;
+                        if let Some(error) = over(total) {
+                            return Err(error);
+                        }
+                        Some((0o120_000, target.clone()))
+                    }
                     Some(Entry::File { executable, .. }) => {
                         let bytes = read_at(root, &path, FILE_LIMIT).map_err(|e| {
                             format!("capture limit: {}: {e}", String::from_utf8_lossy(&path))
                         })?;
                         total += bytes.len() as u64;
-                        if total > CAPTURE_LIMIT {
-                            return Err("capture limit: changed bytes exceed 256 MiB".into());
+                        if let Some(error) = over(total) {
+                            return Err(error);
                         }
                         Some((if *executable { 0o100_755 } else { 0o100_644 }, bytes))
                     }
@@ -1300,6 +1411,16 @@ pub fn capture(
         let new = read(fork, new)?;
         if kind == 'M' && old == new {
             continue;
+        }
+        if changes.len() >= bounds.changes {
+            return Err(format!(
+                "capture limit: more than {} changed paths",
+                bounds.changes
+            ));
+        }
+        total += CHANGE_OVERHEAD;
+        if let Some(error) = over(total) {
+            return Err(error);
         }
         for (_, bytes) in old.iter().chain(new.iter()) {
             write_blob(store, bytes)?;
@@ -1630,6 +1751,113 @@ mod tests {
             0,
             &[],
         )
+    }
+
+    fn capture_bounded(split: &Split, bounds: Bounds) -> Result<Vec<Change>, String> {
+        capture_bounded_in(split, None, bounds)
+    }
+
+    fn capture_bounded_in(
+        split: &Split,
+        exclude: Option<&[u8]>,
+        bounds: Bounds,
+    ) -> Result<Vec<Change>, String> {
+        let root = Dir::open_root(&split.root).unwrap();
+        capture_within(
+            &root.open("base").unwrap(),
+            &root.open("fork").unwrap(),
+            exclude,
+            &root.open("out").unwrap(),
+            &root.open("store").unwrap(),
+            0,
+            &[],
+            bounds,
+        )
+    }
+
+    /// A-06: entries that read no bytes (empty files, symlinks) still count.
+    /// A fork with more new entries than the change bound is refused while
+    /// it is walked, before its tree, listing or patch is built; a snapshot
+    /// past the tree bound likewise. At the bound, capture succeeds.
+    #[test]
+    fn capture_bounds_entries_that_read_no_bytes() {
+        let split = split();
+        fs::write(split.base.join("kept"), "x\n").unwrap();
+        copy_tree(&split.base, &split.fork);
+        for index in 0..10 {
+            fs::write(split.fork.join(format!("empty-{index}")), "").unwrap();
+            symlink("kept", split.fork.join(format!("link-{index}"))).unwrap();
+        }
+        let bounds = |changes, entries| Bounds {
+            changes,
+            entries,
+            ..Bounds::DEFAULT
+        };
+        let refused = capture_bounded(&split, bounds(19, 100)).unwrap_err();
+        assert!(refused.starts_with("capture limit: more than"), "{refused}");
+        assert!(!split.root.join("out/files").exists());
+        let refused = capture_bounded(&split, bounds(100, 0)).unwrap_err();
+        assert_eq!(refused, "capture limit: more than 0 entries");
+        let changes = capture_bounded(&split, bounds(20, 100)).unwrap();
+        assert_eq!(changes.len(), 20);
+        // The Git walk is bounded the same way.
+        let refused = capture_bounded_in(&split, Some(b""), bounds(19, 100)).unwrap_err();
+        assert_eq!(refused, "capture limit: more than 20 entries");
+    }
+
+    /// A-06: edits of existing files, which add no entry, are bounded by
+    /// the change count itself.
+    #[test]
+    fn edits_past_the_change_bound_are_refused() {
+        let split = split();
+        for index in 0..30 {
+            fs::write(split.base.join(format!("file-{index}")), "old\n").unwrap();
+        }
+        copy_tree(&split.base, &split.fork);
+        for index in 0..30 {
+            fs::write(split.fork.join(format!("file-{index}")), "new!\n").unwrap();
+        }
+        let bounds = Bounds {
+            changes: 20,
+            ..Bounds::DEFAULT
+        };
+        assert_eq!(
+            capture_bounded(&split, bounds).unwrap_err(),
+            "capture limit: more than 20 changed paths"
+        );
+    }
+
+    /// A-06: symlink targets, and a flat overhead per changed path, count
+    /// toward the changed bytes.
+    #[test]
+    fn link_targets_and_path_overhead_count_toward_the_changed_bytes() {
+        let split = split();
+        copy_tree(&split.base, &split.fork);
+        let target = "t".repeat(1000);
+        for index in 0..20 {
+            symlink(&target, split.fork.join(format!("link-{index}"))).unwrap();
+        }
+        let bounds = |read| Bounds {
+            read,
+            ..Bounds::DEFAULT
+        };
+        // 20 000 target bytes, 5 120 of overhead.
+        let refused = capture_bounded(&split, bounds(15_000)).unwrap_err();
+        assert_eq!(refused, "capture limit: changed bytes exceed 0 MiB");
+        assert_eq!(capture_bounded(&split, bounds(25_120)).unwrap().len(), 20);
+        let split = split_with_empty_files(100);
+        // 100 empty files read no bytes; their overhead is 25 600.
+        let refused = capture_bounded(&split, bounds(20_000)).unwrap_err();
+        assert_eq!(refused, "capture limit: changed bytes exceed 0 MiB");
+    }
+
+    fn split_with_empty_files(count: usize) -> Split {
+        let split = split();
+        copy_tree(&split.base, &split.fork);
+        for index in 0..count {
+            fs::write(split.fork.join(format!("empty-{index}")), "").unwrap();
+        }
+        split
     }
 
     #[test]
