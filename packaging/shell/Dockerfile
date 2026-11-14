@@ -1,12 +1,9 @@
 # syntax=docker/dockerfile:1
 # The one shell VM template: the DHI Debian base (its -dev variant: the shell
-# user has sudo and apt for their own tools) with Docker Engine, the build
-# tools `make dev` needs (gcc, make, git, python3, node, npm), zsh, Vim and
-# terminal-only Emacs, the pinned Rust 1.99 toolchain with the aarch64 gnu and
-# musl targets `make dev-inner`
-# needs, and the Pi coding agent (`pi-dev`, locked by
-# pi/package-lock.json). `marsh --dev` uses this same image; it only adds the
-# dev broker. The caller supplies the exact reviewed upstream DHI digest. The
+# user has sudo and apt for their own tools) with Docker Engine, build tools
+# (gcc, make, git, python3, node, npm), zsh, Vim and terminal-only Emacs, and
+# the pinned Rust 1.99 toolchain with the aarch64 gnu and musl targets, so a
+# shell can build Rust projects, glibc or static. The caller supplies the exact reviewed upstream DHI digest. The
 # exported reference names this image, never the upstream input. No agent
 # image, host profile or credential is a build input.
 ARG SHELL_BASE_IMAGE
@@ -130,11 +127,6 @@ COPY --from=rust /usr/local/rustup/ /usr/local/rustup/
 RUN chmod -R a+rwX /usr/local/cargo /usr/local/rustup \
  && RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
     /usr/local/cargo/bin/cargo --version
-WORKDIR /opt/marsh/pi
-COPY pi/package.json pi/package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
- && test "$(node_modules/.bin/pi --version)" = "$(node -p 'require("./package.json").dependencies["@earendil-works/pi-coding-agent"]')"
-COPY --chmod=0755 pi/pi-dev /usr/local/bin/pi-dev
 
 USER agent
 RUN HOME=/home/agent vim --version \
