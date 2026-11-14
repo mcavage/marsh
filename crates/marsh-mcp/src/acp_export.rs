@@ -102,11 +102,16 @@ impl AcpDeclaration {
     }
 }
 
+// The busy message names this bound.
+const _: () = assert!(crate::MAX_OPERATIONS == 4);
+
 #[derive(Clone)]
 pub struct AcpExportMcp {
     home: PathBuf,
     declaration_path: PathBuf,
     declaration: AcpDeclaration,
+    /// Calls running at once, at most [`crate::MAX_OPERATIONS`].
+    permits: Arc<tokio::sync::Semaphore>,
 }
 
 impl AcpExportMcp {
@@ -126,11 +131,17 @@ impl AcpExportMcp {
         if AcpDeclaration::load_private(&declaration_path)? != declaration {
             return Err("ACP publication changed".into());
         }
-        Ok(Self {
+        Ok(Self::checked(home, declaration_path, declaration))
+    }
+
+    /// The exporter for a declaration already checked.
+    fn checked(home: PathBuf, declaration_path: PathBuf, declaration: AcpDeclaration) -> Self {
+        Self {
             home,
             declaration_path,
             declaration,
-        })
+            permits: Arc::new(tokio::sync::Semaphore::new(crate::MAX_OPERATIONS)),
+        }
     }
 
     fn current(&self) -> bool {
@@ -358,6 +369,12 @@ impl ServerHandler for AcpExportMcp {
         if request.name != self.declaration.tool_name {
             return Ok(tool_error("unknown ACP tool"));
         }
+        // Each call takes a blocking thread and a daemon connection.
+        let Ok(_permit) = self.permits.try_acquire() else {
+            return Ok(tool_error(
+                "ACP tool capacity is busy: at most 4 calls run at once; retry after one completes",
+            ));
+        };
         let args = request.arguments.unwrap_or_default();
         let server = self.clone();
         let result = tokio::task::spawn_blocking(move || server.invoke(&args))
@@ -401,6 +418,7 @@ fn tool_error(error: &str) -> CallToolResponse {
         "Cursor is outside",
         "Turn receipt",
         "ACP daemon is",
+        "ACP tool capacity is busy",
     ]
     .iter()
     .any(|prefix| error.starts_with(prefix))
@@ -413,4 +431,58 @@ fn tool_error(error: &str) -> CallToolResponse {
     let mut result = CallToolResult::structured(json!({"ok":false,"error":safe}));
     result.is_error = Some(true);
     result.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::ServiceExt as _;
+
+    /// D-01: the ACP exporter runs at most 4 calls at once: with its 4
+    /// places taken, a call is answered busy before anything starts.
+    #[tokio::test]
+    async fn the_acp_exporter_refuses_a_call_past_four_at_once() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let exporter = AcpExportMcp::checked(
+            home.clone(),
+            home.join("publication.json"),
+            AcpDeclaration {
+                schema_version: AcpDeclaration::SCHEMA_VERSION.into(),
+                tool_name: "fixture_tool".into(),
+                agent_session_id: Uuid::new_v4().to_string(),
+                generation: Uuid::new_v4().to_string(),
+                canonical_workspace: home.clone(),
+            },
+        );
+        let places = Arc::clone(&exporter.permits);
+        let (server, client) = tokio::net::UnixStream::pair().unwrap();
+        let serving =
+            tokio::spawn(async move { exporter.serve(server).await.unwrap().waiting().await });
+        let peer = ().serve(client).await.unwrap();
+        let call = || async {
+            let reply = peer
+                .call_tool(
+                    CallToolRequestParams::new("fixture_tool")
+                        .with_arguments(json!({"action": "status"}).as_object().unwrap().clone()),
+                )
+                .await
+                .unwrap();
+            reply.structured_content.unwrap()["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let held = Arc::clone(&places).try_acquire_many_owned(4).unwrap();
+        assert_eq!(
+            call().await,
+            "ACP tool capacity is busy: at most 4 calls run at once; retry after one completes"
+        );
+        drop(held);
+        // With a place free the call runs (and fails on its own: there is
+        // no publication here).
+        assert!(!call().await.contains("capacity is busy"));
+        drop(peer);
+        let _ = serving.await;
+    }
 }

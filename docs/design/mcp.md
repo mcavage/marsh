@@ -239,7 +239,7 @@ sbx mcp load marsh-dev-qualify --sandbox TRUSTED_SANDBOX_NAME
 All tools return structured JSON with bounded byte-faithful output encoded as
 base64 where command streams are present. Server errors are typed and fail
 closed. Stdio frames are capped at 1 MiB, output is
-bounded, and one global subprocess cap applies across all operations; capacity
+bounded, and one subprocess cap per server applies across all its operations; capacity
 exhaustion is a typed response, never an unbounded host process queue. Tool
 names and fields below are the public contract. Missing required fields are
 rejected; only fields marked optional may be omitted.
@@ -393,6 +393,11 @@ Host terminals can still load or revoke an **existing** publication in the same
 project and selected home. The authenticated shell session sends a typed request
 to the host daemon; Kit jobs have no publication token. The host owns the registration
 and declaration, and pins the attached project's path and file identity.
+
+An export server (`export-serve`, and `acp-export-serve` for a published ACP
+session) runs at most 4 tool calls at once, as the development server does;
+one more is answered at once with a "capacity is busy" tool error, before any
+host process, daemon connection, or job starts.
 
 With neither `--kit` nor `--sandbox` the publication is a *default*: after the
 publish commits, the daemon records the stock server name, declaration path,

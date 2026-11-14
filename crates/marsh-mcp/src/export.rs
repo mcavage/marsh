@@ -34,7 +34,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, Semaphore};
 use tokio::{io::AsyncWriteExt, process::Command};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -587,6 +587,9 @@ pub struct ExportMcp {
     config: Arc<ExportConfig>,
     in_flight: Arc<TokioMutex<HashMap<u64, CancellationToken>>>,
     next_exec_id: Arc<AtomicU64>,
+    /// Calls running at once on this server (a bundle shares one), at most
+    /// [`crate::MAX_OPERATIONS`], as on the development server.
+    permits: Arc<Semaphore>,
 }
 
 /// One protocol connection for several owner-declared tools. This multiplexes
@@ -619,12 +622,14 @@ impl ExportBundle {
         }
         let in_flight = Arc::new(TokioMutex::new(HashMap::new()));
         let next_exec_id = Arc::new(AtomicU64::new(1));
+        let permits = Arc::new(Semaphore::new(crate::MAX_OPERATIONS));
         let mut exports = BTreeMap::new();
         for config in configs {
             let name = config.declaration.tool_name.clone();
             let mut export = ExportMcp::new(config);
             export.in_flight = Arc::clone(&in_flight);
             export.next_exec_id = Arc::clone(&next_exec_id);
+            export.permits = Arc::clone(&permits);
             if exports.insert(name.clone(), export).is_some() {
                 return Err(format!("duplicate declared tool name '{name}'"));
             }
@@ -655,6 +660,7 @@ impl ExportMcp {
             config: Arc::new(config),
             in_flight: Arc::new(TokioMutex::new(HashMap::new())),
             next_exec_id: Arc::new(AtomicU64::new(1)),
+            permits: Arc::new(Semaphore::new(crate::MAX_OPERATIONS)),
         }
     }
 
@@ -1948,6 +1954,18 @@ impl ServerHandler for ExportMcp {
             }
         };
 
+        // Refused before any host process or job starts.
+        let Ok(_permit) = self.permits.try_acquire() else {
+            let mut res = CallToolResult::structured(json!({
+                "ok": false,
+                "error": format!(
+                    "export capacity is busy: at most {} calls run at once; retry after one completes",
+                    crate::MAX_OPERATIONS
+                )
+            }));
+            res.is_error = Some(true);
+            return Ok(res.into());
+        };
         let exec_id = self.next_exec_id.fetch_add(1, Ordering::Relaxed);
         let exec_cancel = CancellationToken::new();
         {
