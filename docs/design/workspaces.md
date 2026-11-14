@@ -164,7 +164,7 @@ Frames are credited per attempt.
   The socket has no token and dies with the container. Its split verbs are
   `SplitCreate` (creator = this job) and `SplitJoin` (only
   for splits this job created), alongside the process requests. Jobs get no
-  Docker, containerd, or SBX socket and cannot use the dev shell's relay.
+  Docker, containerd, or SBX socket and cannot use the shell's relay.
   Ending the job or restarting the daemon revokes its capability.
 
 ## 5. Results: `out/` layout and lineage

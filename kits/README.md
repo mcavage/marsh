@@ -31,7 +31,7 @@ home. marsh refuses overlapping mounts to keep trusted Kit declarations out of
 guest write access. Edit source in your checkout, then install or copy a
 candidate snapshot into a separate host-owned directory before registering
 it. For these packaged Kits, run `make install` on the Mac and launch the
-installed marsh from the checkout; [the development guide](../docs/design/self-development.md)
+installed marsh from the checkout; [the dev install](../docs/design/dev-install.md)
 explains the complete loop.
 
 The directory basename is the Kit identity for local v3 source. Packaged

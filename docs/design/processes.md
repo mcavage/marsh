@@ -75,7 +75,7 @@ session ─ job ─ job ...            (registered name or marsh run: own contai
 | `ProcessShow`, `Jobs`, `ShowJob` | session-authorized job inspection | the job's own subtree |
 | `SplitShow` (`marsh splits`) | yes | no (a job sees its splits in `marsh jobs --tree`) |
 | `SplitCancel`, `jobs cancel`, `splits rm` | yes, within its tree | no (drop the stream instead) |
-| everything else (MCP, ACP, dev broker, lifecycle) | request-specific session grants; dev broker only for `--dev` | refused |
+| everything else (MCP, ACP, lifecycle) | request-specific session grants | refused |
 
 **`ProcessRun`** is admission (section 6), then an internal `Execute`
 through the daemon's own endpoint (as split argv branches do in `split.rs`),
@@ -355,11 +355,10 @@ refused by the spawn set), and is counted in `marsh status`
   in-memory VM quarantine is not restored from receipts (`results.md`). The root client
   attached to an in-flight tree exits 125 with `job uncertain`; its
   children are listed uncertain.
-- **Restart under `--dev`.** `make dev` reinstalls and restarts `marshd`.
+- **Restart under `make dev`.** `make dev` reinstalls and restarts `marshd`.
   Jobs that were running, nested ones included, become uncertain and hold
   their slots until `marsh workers reset KIT`. Stop agent trees before
-  reinstalling. The dev broker's grants are revoked at restart
-  (`self-development.md`).
+  reinstalling (`dev-install.md`).
 
 ## 9. Lineage and awareness
 

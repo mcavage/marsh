@@ -50,7 +50,7 @@ project/home mount that contains a source directory or is inside one. To edit
 a Kit in the project, copy or install its candidate source into a separate
 host-owned directory, then map that snapshot. When developing the packaged
 Kits in this repository, `make install` copies them outside the checkout; see
-[the self-development workflow](self-development.md).
+[the dev install](dev-install.md).
 
 The referenced native workload is the sole authority for the image config,
 entrypoint, command, static environment, user, workdir, capabilities, network

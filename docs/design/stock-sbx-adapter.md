@@ -42,7 +42,7 @@ CLI) in the session's launch directory or workspace.
 
 Before it leaves its launch directory, marshd makes its path settings
 absolute against it (`--home`, `MARSH_HOME`, `MARSH_GUEST_ARTIFACTS`,
-`MARSH_KIT_IMAGE_CACHE`, `MARSH_OWNERSHIP_MIRROR`, `MARSH_DEV_CACHE_ROOT`),
+`MARSH_KIT_IMAGE_CACHE`, `MARSH_OWNERSHIP_MIRROR`),
 and resolves its program settings. A value with a `/` is a path, made
 absolute the same way. A bare name is never looked up in the launch
 directory: `MARSH_SBX` (also when unset, as `sbx`) and `MARSH_OPEN_COMMAND`

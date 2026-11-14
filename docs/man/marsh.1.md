@@ -12,7 +12,7 @@ marsh, msh - shell for composing agents
 
 # SYNOPSIS
 
-**marsh** [**--shell** **bash**|**zsh**|**marsh**] [**--load** *KIT*[,*KIT*...]|**all**] [**--ephemeral-home**] [**--dev**] [*SHELL_ARGS*...]
+**marsh** [**--shell** **bash**|**zsh**|**marsh**] [**--load** *KIT*[,*KIT*...]|**all**] [**--ephemeral-home**] [*SHELL_ARGS*...]
 
 **marsh** *COMMAND* [*ARGS*...]
 
@@ -77,11 +77,6 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **--ephemeral-home**
 : Use a blank, private guest home that is not kept after the shell exits. If it
   cannot be released, the slot is retained; see **recover-home**.
-
-**--dev**
-: Open a development shell whose **sbx** is a scoped host broker. Its grant
-  belongs to the shell, not Kit jobs. For developing marsh itself; requires a
-  development-enabled install or daemon.
 
 **-h**, **--help**
 : Print a summary of commands and exit.

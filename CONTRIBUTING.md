@@ -30,13 +30,8 @@ make dev
 ~/.marsh-dev/bin/marsh                 # run it from any project
 ```
 
-That install also enables `marsh --dev`. Its shell gets a scoped host `sbx`
-broker so you can build and test marsh from inside marsh
-([design/self-development.md](docs/design/self-development.md)):
-
-```sh
-~/.marsh-dev/bin/marsh --dev -c pi-dev # Pi, in a dev shell, in this checkout
-```
+[design/dev-install.md](docs/design/dev-install.md) describes what it builds
+and its Kit image cache.
 
 The sbx-backed tests need the fixture Kit, which release CI publishes:
 
