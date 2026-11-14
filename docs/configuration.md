@@ -175,9 +175,10 @@ An `additionalWorkspaces` folder inside the project is already visible at the
 same path, so marsh skips it with a one-line note
 (`marsh: ~/dev/pack is inside the project; already visible`). With
 `readOnly: true` each registered command's job instead binds it read-only over
-the project (`marsh: ~/dev/pack is inside the project; jobs see it read-only`),
-unless a path component is a symlink. Your own shell commands can still write
-it. A folder that
+the project (`marsh: ~/dev/pack is inside the project; jobs see it read-only`);
+a folder reached through a symlink, or missing, refuses the job, and the
+project itself with `readOnly: true` is refused. Your own shell commands can
+still write it. A folder that
 contains the project, or overlaps the managed HOME, is refused with a message
 naming the file and entry to change.
 

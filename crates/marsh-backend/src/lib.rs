@@ -2140,14 +2140,6 @@ impl DaemonBackend for StockDaemonBackend {
         // never recomputed from the session (`Attenuation`); only a split
         // branch narrows a view.
         let child_view = link.parent_job.as_ref().filter(|_| !link.branch);
-        // Fails closed before any VM effect: no job mounts the project
-        // without its `.marsh` and Git guards.
-        let guards = if confinement.is_none() {
-            project_guards(&request.session.launch_directory)
-                .map_err(|reason| DaemonError::Refused(format!("{}: {reason}", request.command)))?
-        } else {
-            Vec::new()
-        };
         let extra_environment = if request.session.ephemeral_home || confinement.is_some() {
             sbxenv::Environment::default()
         } else if let Some(parent) = child_view {
@@ -2163,27 +2155,21 @@ impl DaemonBackend for StockDaemonBackend {
                 false,
             );
         }
+        // Fails closed before any VM effect: no job mounts the project
+        // without its `.marsh` and Git guards, nor a `readOnly` extra folder
+        // inside it read-write (a child inherits those in its parent's view).
+        let guards = Self::job_guards(
+            &request.session,
+            &extra_environment,
+            confinement.is_some(),
+            child_view.is_some(),
+        )?;
         // Validate every added source before VM preparation or MCP effects.
-        let inside_read_only = if child_view.is_none() && confinement.is_none() {
-            Self::read_only_inside(&request.session, &extra_environment)
-        } else {
-            Vec::new()
-        };
         let extra_environment = Self::session_environment(&request.session, &extra_environment)?;
         let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
         let mut mounts = match child_view {
             None => {
                 let mut mounts = public_mounts(&request.session, confinement.as_ref(), &guards);
-                for target in
-                    read_only_overlays(&request.session.launch_directory, &inside_read_only)
-                {
-                    if !mounts.iter().any(|mount| mount.target == target) {
-                        mounts.push(PublicMount {
-                            target,
-                            access: "read_only".into(),
-                        });
-                    }
-                }
                 mounts.extend(extra_environment.mounts.iter().map(|source| {
                     PublicMount {
                         target: source.path.clone(),
@@ -2485,7 +2471,6 @@ impl DaemonBackend for StockDaemonBackend {
                 &request.session.launch_directory,
                 confinement.as_ref(),
                 &guards,
-                &inside_read_only,
             )
         };
         // Wall time is the Kit's own limit or the parent's remaining time,
@@ -4660,6 +4645,36 @@ fn guard_git_dir(git: &Path) -> Result<(Guards, Option<PathBuf>), String> {
     Ok((guards, other.then(|| git.join(common))))
 }
 
+impl StockDaemonBackend {
+    /// Every bind laid over a job's whole-project mount: [`project_guards`]
+    /// and the `readOnly` extra folders inside the project. None for a job
+    /// confined to a fork; a child's read-only folders come with its
+    /// parent's view.
+    ///
+    /// # Errors
+    /// Refuses the job when a guard can't be prepared or a read-only folder
+    /// can't be bound.
+    fn job_guards(
+        session: &SessionSpec,
+        environment: &sbxenv::Environment,
+        confined: bool,
+        child: bool,
+    ) -> Result<Vec<(PathBuf, bool)>, DaemonError> {
+        if confined {
+            return Ok(Vec::new());
+        }
+        let project = &session.launch_directory;
+        let inside = if child {
+            Vec::new()
+        } else {
+            Self::read_only_inside(session, environment)?
+        };
+        project_guards(project)
+            .and_then(|guards| with_read_only_overlays(project, guards, &inside))
+            .map_err(DaemonError::Refused)
+    }
+}
+
 /// A child job's view: its parent's, plus every guard of `project` the
 /// parent's view lacks (a split area made after the parent started), never
 /// wider than the parent's project mount.
@@ -4694,25 +4709,40 @@ fn guard_view(
 /// Replaces the whole-project mount with subpath binds of the same prepared
 /// grant: the fork read-write plus its Git metadata binds
 /// (`docs/design/workspaces.md` section 8). Every other mount is unchanged.
-/// `readOnly` extra folders inside the project that can be bound over it:
-/// real directories (never through a symlink), not the project itself.
-fn read_only_overlays(project: &Path, inside: &[PathBuf]) -> Vec<PathBuf> {
-    inside
-        .iter()
-        .filter(|path| {
-            path.strip_prefix(project).is_ok_and(|relative| {
-                !relative.as_os_str().is_empty()
-                    && relative
-                        .ancestors()
-                        .filter(|part| !part.as_os_str().is_empty())
-                        .all(|part| {
-                            std::fs::symlink_metadata(project.join(part))
-                                .is_ok_and(|metadata| metadata.is_dir())
-                        })
-            })
-        })
-        .cloned()
-        .collect()
+/// Adds each `readOnly` extra folder inside the project to `guards` as a
+/// read-only bind, read-only winning where it names a guard already there.
+///
+/// # Errors
+/// Refuses a folder that can't be bound safely: the project itself, or one
+/// that is missing or reached through a symlink.
+fn with_read_only_overlays(
+    project: &Path,
+    mut guards: Vec<(PathBuf, bool)>,
+    inside: &[PathBuf],
+) -> Result<Vec<(PathBuf, bool)>, String> {
+    for path in inside {
+        let bindable = path.strip_prefix(project).is_ok_and(|relative| {
+            !relative.as_os_str().is_empty()
+                && relative
+                    .ancestors()
+                    .filter(|part| !part.as_os_str().is_empty())
+                    .all(|part| {
+                        std::fs::symlink_metadata(project.join(part))
+                            .is_ok_and(|metadata| metadata.is_dir())
+                    })
+        });
+        if !bindable {
+            return Err(format!(
+                "the read-only extra folder {} can't be bound read-only (missing, the project itself, or reached through a symlink); change or remove that entry",
+                path.display()
+            ));
+        }
+        match guards.iter_mut().find(|(target, _)| target == path) {
+            Some((_, write)) => *write = false,
+            None => guards.push((path.clone(), false)),
+        }
+    }
+    Ok(guards)
 }
 
 fn confine_job_mounts(
@@ -4720,7 +4750,6 @@ fn confine_job_mounts(
     project: &Path,
     confinement: Option<&marsh_daemon::split_confinement::BranchConfinement>,
     guards: &[(PathBuf, bool)],
-    inside_read_only: &[PathBuf],
 ) -> Vec<JobMount> {
     let Some(confinement) = confinement else {
         // An ordinary job never writes split workspaces or checkpoints, nor
@@ -4732,13 +4761,7 @@ fn confine_job_mounts(
             .find(|mount| mount.target == project && mount.subpath.is_none())
             .cloned()
         {
-            let overlays = read_only_overlays(project, inside_read_only)
-                .into_iter()
-                .map(|target| (target, false));
-            for (target, write) in guards.iter().cloned().chain(overlays) {
-                if mounts.iter().any(|mount| mount.target == target) {
-                    continue;
-                }
+            for (target, write) in guards.iter().cloned() {
                 let Ok(subpath) = target.strip_prefix(project).map(Path::to_path_buf) else {
                     continue;
                 };
@@ -6387,8 +6410,10 @@ mod tests {
             access: MountAccess::ReadWrite,
             subpath: None,
         };
-        let guards = project_guards(project).unwrap();
-        confine_job_mounts(vec![whole], project, None, &guards, inside_read_only)
+        let guards =
+            with_read_only_overlays(project, project_guards(project).unwrap(), inside_read_only)
+                .unwrap();
+        confine_job_mounts(vec![whole], project, None, &guards)
             .into_iter()
             .map(|mount| (mount.target, mount.access, mount.subpath))
             .collect()
@@ -6423,39 +6448,44 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let project = fs::canonicalize(temp.path()).unwrap();
         fs::create_dir_all(project.join("vendor/sdk")).unwrap();
-        std::os::unix::fs::symlink(project.join("vendor"), project.join("link")).unwrap();
-        let inside = [
-            project.join("vendor/sdk"),
-            project.join("link/sdk"),
-            project.clone(),
-        ];
-        let mounts = direct_job_mounts_with(&project, &inside);
+        fs::create_dir_all(project.join(".git/objects")).unwrap();
+        let mounts = direct_job_mounts_with(&project, &[project.join("vendor/sdk")]);
         assert!(mounts.contains(&(
             project.join("vendor/sdk"),
             MountAccess::ReadOnly,
             Some("vendor/sdk".into())
         )));
-        assert!(
-            !mounts
+        // One that names a guard makes it read-only, and is bound once.
+        for (guard, relative) in [
+            (project.join(".git"), ".git"),
+            (project.join(".marsh"), ".marsh"),
+        ] {
+            let mounts = direct_job_mounts_with(&project, std::slice::from_ref(&guard));
+            let bound = mounts
                 .iter()
-                .any(|(target, ..)| target == &project.join("link/sdk"))
-        );
-        assert_eq!(
-            mounts
-                .iter()
-                .filter(|(target, ..)| target == &project)
-                .count(),
-            1
-        );
-        // One already guarded (`.marsh`) is not bound twice.
-        let mounts = direct_job_mounts_with(&project, &[project.join(".marsh")]);
-        assert_eq!(
-            mounts
-                .iter()
-                .filter(|(target, ..)| target == &project.join(".marsh"))
-                .count(),
-            1
-        );
+                .filter(|(target, ..)| target == &guard)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                bound,
+                [&(guard.clone(), MountAccess::ReadOnly, Some(relative.into()))]
+            );
+        }
+        // Never silently skipped: through a symlink, missing, or the project
+        // itself, the job is refused.
+        std::os::unix::fs::symlink(project.join("vendor"), project.join("link")).unwrap();
+        for unbindable in [
+            project.join("link/sdk"),
+            project.join("absent"),
+            project.clone(),
+        ] {
+            let guards = project_guards(&project).unwrap();
+            assert!(
+                with_read_only_overlays(&project, guards, std::slice::from_ref(&unbindable))
+                    .is_err(),
+                "{}",
+                unbindable.display()
+            );
+        }
     }
 
     #[test]
