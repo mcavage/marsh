@@ -120,9 +120,7 @@ help:
 		'make man               Render man pages into $$(MAN_DIR)' \
 		'make site              Build the runmar.sh site into $$(SITE_DIR) and check its links' \
 		'make site-check        make site, plus every relative link in tracked Markdown' \
-		'make dist              Package a release tarball (needs pinned KIT_COMMANDS and shell-image)' \
-		'make dev-inner         Inside marsh --dev: build a Linux candidate into $$MARSH_DEV_SCRATCH/artifacts' \
-		'make dev-inner-run CMD=...  Inside marsh --dev: run the inner candidate via the broker'
+		'make dist              Package a release tarball (needs pinned KIT_COMMANDS and shell-image)'
 
 build: build-host build-linux
 
@@ -491,11 +489,11 @@ perf:
 		--sbx "$(SBX_EXECUTABLE)" --kit "$(PERF_KIT)" \
 		--samples "$(PERF_SAMPLES)" --warmups "$(PERF_WARMUPS)" --output "$$output"
 
-# Developer loop: `make dev` builds host, guest, the shell image (which carries
-# the dev tooling) and packaged source Kits (parallel, incremental) and installs
-# a ready dev product outside the checkout in DEV_PREFIX. The install's
-# libexec/marsh/dev-enabled marker enables `marsh --dev` (the dev broker) on its
-# daemon; no environment variables are needed.
+# Developer loop: `make dev` builds host, guest, the shell image and packaged
+# source Kits (parallel, incremental) and installs a ready dev product outside
+# the checkout in DEV_PREFIX. The install's libexec/marsh/dev-enabled marker
+# marks a dev build: `marsh --version` says so, its daemon follows no release
+# channel, and `marshd --check-config` accepts source Kits.
 DEV_PREFIX ?= $(HOME)/.marsh-dev
 # Cargo features for the host and Linux builds, e.g. DEV_FEATURES=test-breaks
 # (docs/design/test-breaks.md). Empty by default.
@@ -531,7 +529,7 @@ dev-guest:
 		--target export --output "type=local,dest=$(DEV_GUEST)" \
 		-f packaging/linux-arm64/Dockerfile .
 	$(INSTALL) -m 644 "$(KIT_COMMANDS)" "$(DEV_GUEST)/commands.json"
-	@rm -f "$(DEV_GUEST)"/dev-shell-image*; : > "$(DEV_GUEST)/dev-enabled"
+	@: > "$(DEV_GUEST)/dev-enabled"
 
 # Image targets rebuild only when their inputs change; delete the file to force
 # a re-import.
@@ -557,7 +555,7 @@ dev-install:
 	ln -sfn marsh "$$prefix/bin/msh"; \
 	rsync -a --delete --exclude '.kits*' "$(DEV_GUEST)/" "$$prefix/libexec/marsh/"; \
 	printf 'marsh dev product: %s\n' "$$prefix"; \
-	printf 'Run: %s/bin/marsh --dev -c pi-dev\n' "$$prefix"
+	printf 'Run: %s/bin/marsh\n' "$$prefix"
 
 # Packaged Kit job images through the daemon's own Buildx path into the
 # per-user Kit image cache (~/Library/Caches/marsh/kit-images), keyed by source
@@ -626,49 +624,3 @@ services-e2e:
 # DRY_RUN=1 only reports. A run never removes another run's resources; this does, once their run is dead.
 services-e2e-gc:
 	@$(PYTHON) tests/acceptance/services/services_uat.py --gc --sbx "$(SBX_EXECUTABLE)" --lock-wait "$(LOCK_WAIT)" $(if $(DRY_RUN),--dry-run)
-
-.PHONY: dev-inner dev-inner-run dev-inner-stop
-
-# Inside `marsh --dev` (Linux): build a candidate into the host scratch and run
-# it. Its daemon reaches stock SBX only through the session's `sbx` shim; the
-# Mac target/ is never written. Artifacts and the VM-local cargo target persist.
-DEV_SCRATCH ?= $(MARSH_DEV_SCRATCH)
-DEV_INNER_ARTIFACTS ?= $(DEV_SCRATCH)/artifacts
-DEV_INNER_TARGET ?= /var/tmp/marsh-dev-target
-DEV_INNER_ENV = RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo RUSTUP_TOOLCHAIN=1.99.1 \
-	CARGO_TARGET_DIR="$(DEV_INNER_TARGET)" CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_DEBUG=0
-DEV_INNER_RUN_ENV = env -u MARSH_DAEMON_SOCKET -u MARSH_DAEMON_TOKEN -u MARSH_EXTERNAL_SESSION \
-	MARSH_HOME="$(DEV_SCRATCH)/home" MARSH_CONTROL_HOME="$(DEV_SCRATCH)/control" \
-	MARSH_SBX="$(DEV_SCRATCH)/tmp/bin/sbx" TMPDIR="$(DEV_SCRATCH)/tmp" MARSH_ENABLE_DEV_SCOPES=1
-CMD ?= true
-DEV_INNER_FLAGS ?=
-
-dev-inner:
-	@test "$$(uname -s)" = Linux -a -n "$(DEV_SCRATCH)" || { echo 'make dev-inner: run inside marsh --dev' >&2; exit 1; }
-	$(DEV_INNER_ENV) cargo build --locked --release \
-		-p marsh --bin marsh --bin marsh-local -p marsh-daemon --bin marsh-relay -p marsh-backend --bin marshd
-	$(DEV_INNER_ENV) CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$$(RUSTUP_HOME=/usr/local/rustup RUSTUP_TOOLCHAIN=1.99.1 rustc --print sysroot)/lib/rustlib/aarch64-unknown-linux-gnu/bin/rust-lld" \
-		RUSTFLAGS='-C target-feature=+crt-static' cargo build --locked --release --target aarch64-unknown-linux-musl \
-		-p marsh-worker --bin marsh-worker -p marsh-runtime --bin marsh-byte-exec
-	@set -eu; out="$(DEV_INNER_ARTIFACTS)"; rel="$(DEV_INNER_TARGET)/release"; musl="$(DEV_INNER_TARGET)/aarch64-unknown-linux-musl/release"; \
-	mkdir -p "$$out/bin" "$$out/libexec/marsh"; \
-	install -m 755 "$$rel/marsh" "$$out/bin/marsh"; install -m 755 "$$rel/marshd" "$$out/bin/marshd"; \
-	install -m 755 "$$rel/marsh" "$$out/libexec/marsh/marsh-linux-arm64"; \
-	install -m 755 "$$rel/marsh-local" "$$out/libexec/marsh/marsh-local-linux-arm64"; \
-	install -m 755 "$$rel/marsh-relay" "$$out/libexec/marsh/marsh-relay-linux-arm64"; \
-	install -m 755 "$$rel/marshd" "$$out/libexec/marsh/marshd-linux-arm64"; \
-	install -m 755 "$$musl/marsh-worker" "$$out/libexec/marsh/marsh-worker-linux-arm64"; \
-	install -m 755 "$$musl/marsh-byte-exec" "$$out/libexec/marsh/marsh-byte-exec-linux-arm64"; \
-	python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); k=sys.argv[2]; c.update({"fixture": k} if k else {}); json.dump(c, open(sys.argv[3],"w"), indent=2)' \
-		"$(KIT_COMMANDS)" "$(DEV_KIT)" "$$out/libexec/marsh/commands.json"; \
-	python3 scripts/stage-kits.py --commands "$(KIT_COMMANDS)" --output "$$out/libexec/marsh"; \
-	printf '%s\n' "$$MARSH_DEV_SHELL_TEMPLATE" > "$$out/libexec/marsh/shell-image"; \
-	echo "dev-inner: candidate in $$out (prefix $$MARSH_VM_PREFIX)"
-
-dev-inner-run:
-	@test -x "$(DEV_INNER_ARTIFACTS)/bin/marsh" || { echo 'make dev-inner-run: run make dev-inner first' >&2; exit 1; }
-	@mkdir -p "$(DEV_SCRATCH)/home" "$(DEV_SCRATCH)/control"
-	cd "$(CURDIR)" && $(DEV_INNER_RUN_ENV) "$(DEV_INNER_ARTIFACTS)/bin/marsh" $(DEV_INNER_FLAGS) -c '$(CMD)'
-
-dev-inner-stop:
-	-cd "$(CURDIR)" && $(DEV_INNER_RUN_ENV) "$(DEV_INNER_ARTIFACTS)/bin/marsh" stop
