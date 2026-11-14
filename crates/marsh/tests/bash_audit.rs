@@ -2799,3 +2799,25 @@ z z Z\n\
 still running\n",
     );
 }
+
+/// `read -t` rejects a timeout it cannot wait for (infinite, NaN, negative,
+/// not a decimal number) with status 1 and a message; these panicked converting
+/// the value to a `Duration`. A finite timeout too long to represent waits
+/// without a deadline (Bash on macOS fails those with `EINVAL`, so the Bash
+/// oracle is used only for the invalid ones).
+#[test]
+fn read_timeouts_that_cannot_be_waited_for_are_rejected() {
+    differential(
+        r#"for t in inf -inf +inf Infinity nan NaN 1e400 abc 0x10 1:2 -1; do echo x | { read -t "$t" v 2>/dev/null; echo "$t: rc=$? v=$v"; }; done"#,
+        0,
+        b"inf: rc=1 v=\n-inf: rc=1 v=\n+inf: rc=1 v=\nInfinity: rc=1 v=\nnan: rc=1 v=\nNaN: rc=1 v=\n1e400: rc=1 v=\nabc: rc=1 v=\n0x10: rc=1 v=\n1:2: rc=1 v=\n-1: rc=1 v=\n",
+    );
+    let script = r#"for t in 9223372036854775807 99999999999999999999 1e300; do echo x | { read -t "$t" v; echo "$t: rc=$? v=$v"; }; done"#;
+    let output = run(env!("CARGO_BIN_EXE_marsh-local"), script, false);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        output.stdout,
+        b"9223372036854775807: rc=0 v=x\n99999999999999999999: rc=0 v=x\n1e300: rc=0 v=x\n",
+        "{output:?}"
+    );
+}

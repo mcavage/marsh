@@ -123,6 +123,13 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   upstream `c324f295`): the word stays text, as in Bash. This is the first
   change to `braceexpansion.rs`, which `0004` now carries. Covered by
   `brace_sequence_increments_out_of_range_do_not_panic`.
+- `read -t` rejects a timeout it cannot wait for (infinite, NaN, `1e400`,
+  negative, or not a decimal number) with `read: VALUE: invalid timeout
+  specification` and status 1, instead of panicking converting it to a
+  `Duration` (`0005`; upstream `e201ca27`). A finite timeout too long to
+  represent waits without a deadline. Text that is not a number now gets that
+  status 1, where it was a usage error with status 2. Covered by
+  `read_timeouts_that_cannot_be_waited_for_are_rejected`.
 
 ## Retired per-fix inventory
 

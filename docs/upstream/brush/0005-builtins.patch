@@ -2527,7 +2527,7 @@ index a102229d..9fe313ba 100644
          Ok(ExecutionResult::success())
      }
 diff --git a/brush-builtins/src/read.rs b/brush-builtins/src/read.rs
-index 644209c2..213d38d2 100644
+index 644209c2..c56b28b0 100644
 --- a/brush-builtins/src/read.rs
 +++ b/brush-builtins/src/read.rs
 @@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
@@ -2538,7 +2538,12 @@ index 644209c2..213d38d2 100644
  
  /// Exit code returned when `read` times out.
  /// This is 128 + SIGALRM (14) = 142, matching bash behavior.
-@@ -71,7 +70,7 @@ pub(crate) struct ReadCommand {
+@@ -67,11 +66,11 @@ pub(crate) struct ReadCommand {
+     /// Specify timeout in seconds; fail if the timeout elapses before
+     /// input is completed.
+     #[clap(short = 't', value_name = "SECONDS", allow_hyphen_values = true)]
+-    timeout_in_seconds: Option<f64>,
++    timeout_in_seconds: Option<String>,
  
      /// File descriptor to read from instead of stdin.
      #[clap(short = 'u', name = "FD")]
@@ -2547,7 +2552,31 @@ index 644209c2..213d38d2 100644
  
      /// Optionally, names of variables to receive read input.
      variable_names: Vec<String>,
-@@ -105,9 +104,17 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+@@ -94,9 +93,20 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+         }
+ 
+         // Validate timeout value if provided.
+-        if let Some(result) = self.validate_timeout(&context)? {
+-            return Ok(result);
+-        }
++        let timeout = match self.timeout_in_seconds.as_deref() {
++            None => None,
++            Some(spec) => {
++                let Some(timeout) = parse_timeout(spec) else {
++                    writeln!(
++                        context.stderr(),
++                        "{}: {spec}: invalid timeout specification",
++                        context.command_name
++                    )?;
++                    return Ok(brush_core::ExecutionResult::general_error());
++                };
++                Some(timeout)
++            }
++        };
+ 
+         // Find the input stream to use.
+         let fd_num = self.fd_num_to_read.map_or(
+@@ -105,20 +115,33 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
          );
  
          // Retrieve the file.
@@ -2568,9 +2597,12 @@ index 644209c2..213d38d2 100644
  
          // Retrieve effective value of IFS for splitting.
          // We convert to owned String to release the borrow before the mutable borrow
-@@ -118,7 +125,15 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
-         let timeout = self.timeout_in_seconds.map(Duration::from_secs_f64);
+         // needed for variable assignment.
+         let ifs = context.shell.ifs().into_owned();
  
+-        // Convert timeout to Duration.
+-        let timeout = self.timeout_in_seconds.map(Duration::from_secs_f64);
+-
          // Perform the read operation (potentially with timeout).
 -        let read_result = self.read_line(input_stream, context.stderr(), timeout)?;
 +        let mut escaped = vec![];
@@ -2585,7 +2617,7 @@ index 644209c2..213d38d2 100644
  
          // Determine whether to skip IFS splitting (for -N option).
          let skip_ifs_splitting = self.return_after_n_chars_no_delimiter.is_some();
-@@ -130,25 +145,36 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+@@ -130,25 +153,36 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
                  Some(line.clone()),
                  brush_core::ExecutionResult::general_error(),
              ),
@@ -2628,7 +2660,7 @@ index 644209c2..213d38d2 100644
  
          Ok(result)
      }
-@@ -160,35 +186,50 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+@@ -160,35 +194,50 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
  /// - Array mode (`-a`): Split input by IFS and assign to array elements
  /// - Named variables: Split input by IFS and assign to each variable, with remainder to last
  /// - Default (`REPLY`): Assign entire input line to the `REPLY` variable
@@ -2695,7 +2727,7 @@ index 644209c2..213d38d2 100644
  }
  
  /// Assigns split fields to named variables.
-@@ -196,13 +237,14 @@ fn assign_input_to_variables(
+@@ -196,13 +245,14 @@ fn assign_input_to_variables(
  /// Fields are assigned one per variable, with any remaining fields joined by space
  /// and assigned to the last variable. If there are more variables than fields,
  /// the extra variables are set to empty strings.
@@ -2713,7 +2745,7 @@ index 644209c2..213d38d2 100644
      let mut fields =
          build_variable_fields(input_line, ifs, skip_ifs_splitting, variable_names.len());
  
-@@ -218,43 +260,77 @@ fn assign_to_named_variables(
+@@ -218,43 +268,77 @@ fn assign_to_named_variables(
              fields.pop_front().unwrap_or_default()
          };
  
@@ -2804,7 +2836,7 @@ index 644209c2..213d38d2 100644
      ifs: &str,
      skip_ifs_splitting: bool,
      num_variables: usize,
-@@ -262,13 +338,88 @@ fn build_variable_fields(
+@@ -262,13 +346,88 @@ fn build_variable_fields(
      match input_line {
          Some(line) if skip_ifs_splitting => {
              // With -N, don't split - put entire input in first variable.
@@ -2895,7 +2927,7 @@ index 644209c2..213d38d2 100644
  /// Result of a `read` operation.
  ///
  /// This enum clearly represents all possible outcomes of `read_line()`,
-@@ -295,15 +446,11 @@ enum ReadResult {
+@@ -295,15 +454,11 @@ enum ReadResult {
  struct InputReader {
      /// The input source.
      input: std::io::BufReader<PolledInput>,
@@ -2916,7 +2948,7 @@ index 644209c2..213d38d2 100644
  }
  
  /// Events that can occur when reading input.
-@@ -326,6 +473,7 @@ impl InputReader {
+@@ -326,17 +481,19 @@ impl InputReader {
          input: brush_core::openfiles::OpenFile,
          timeout: Option<Duration>,
          term_mode: Option<brush_core::terminal::AutoModeGuard>,
@@ -2924,8 +2956,12 @@ index 644209c2..213d38d2 100644
      ) -> Self {
          Self {
              input: std::io::BufReader::with_capacity(
-@@ -335,8 +483,8 @@ impl InputReader {
-                     deadline: timeout.map(|t| Instant::now() + t),
+                 1,
+                 PolledInput {
+                     input,
+-                    deadline: timeout.map(|t| Instant::now() + t),
++                    // A deadline too far off to represent is no deadline at all.
++                    deadline: timeout.and_then(|t| Instant::now().checked_add(t)),
                  },
              ),
 -            pending: VecDeque::new(),
@@ -2935,7 +2971,7 @@ index 644209c2..213d38d2 100644
          }
      }
  
-@@ -347,38 +495,28 @@ impl InputReader {
+@@ -347,38 +504,28 @@ impl InputReader {
              .unwrap_or(false)
      }
  
@@ -2989,7 +3025,7 @@ index 644209c2..213d38d2 100644
              _ => InputEvent::Char(ch),
          })
      }
-@@ -411,6 +549,11 @@ impl Read for PolledInput {
+@@ -411,6 +558,11 @@ impl Read for PolledInput {
      }
  }
  
@@ -3001,7 +3037,7 @@ index 644209c2..213d38d2 100644
  /// Configuration for line reading behavior.
  struct LineReaderConfig {
      /// Character that terminates input (None for -N mode).
-@@ -433,13 +576,21 @@ struct LineReaderConfig {
+@@ -433,13 +585,21 @@ struct LineReaderConfig {
  fn read_line_with_reader(
      reader: &mut InputReader,
      config: &LineReaderConfig,
@@ -3023,7 +3059,7 @@ index 644209c2..213d38d2 100644
      loop {
          let event = reader.read_event()?;
  
-@@ -493,6 +644,8 @@ fn read_line_with_reader(
+@@ -493,6 +653,8 @@ fn read_line_with_reader(
                          }
  
                          // For other chars, add char literally (backslash consumed).
@@ -3032,7 +3068,7 @@ index 644209c2..213d38d2 100644
                          line.push(ch);
                          output_chars += 1;
  
-@@ -518,11 +671,12 @@ fn read_line_with_reader(
+@@ -518,11 +680,12 @@ fn read_line_with_reader(
                      return Ok(ReadResult::Line(line));
                  }
  
@@ -3047,7 +3083,7 @@ index 644209c2..213d38d2 100644
                  line.push(ch);
                  output_chars += 1;
  
-@@ -549,6 +703,7 @@ impl ReadCommand {
+@@ -549,6 +712,7 @@ impl ReadCommand {
          input_file: brush_core::openfiles::OpenFile,
          mut stderr_file: impl std::io::Write,
          timeout: Option<Duration>,
@@ -3055,7 +3091,7 @@ index 644209c2..213d38d2 100644
      ) -> Result<ReadResult, brush_core::Error> {
          let term_mode = self.setup_terminal_settings(&input_file)?;
  
-@@ -564,10 +719,11 @@ impl ReadCommand {
+@@ -564,10 +728,11 @@ impl ReadCommand {
          let delimiter = if self.return_after_n_chars_no_delimiter.is_some() {
              None
          } else if let Some(delimiter_str) = &self.delimiter {
@@ -3071,7 +3107,7 @@ index 644209c2..213d38d2 100644
              }
          } else {
              Some(DEFAULT_DELIMITER)
-@@ -578,7 +734,10 @@ impl ReadCommand {
+@@ -578,7 +743,10 @@ impl ReadCommand {
              .or(self.return_after_n_chars);
  
          // Create the input reader.
@@ -3083,7 +3119,7 @@ index 644209c2..213d38d2 100644
  
          // Handle -t 0 special case: just check if input is available without reading.
          if timeout == Some(Duration::ZERO) {
-@@ -596,7 +755,16 @@ impl ReadCommand {
+@@ -596,7 +764,16 @@ impl ReadCommand {
              process_escapes: !self.raw_mode,
          };
  
@@ -3101,8 +3137,33 @@ index 644209c2..213d38d2 100644
      }
  
      fn setup_terminal_settings(
-@@ -641,87 +809,6 @@ impl ReadCommand {
+@@ -616,110 +793,21 @@ impl ReadCommand {
+ 
+         Ok(mode)
      }
+-
+-    /// Validates the timeout value and returns an error result if invalid.
+-    ///
+-    /// Returns `Ok(Some(result))` if the timeout is invalid (caller should return early),
+-    /// `Ok(None)` if the timeout is valid or not specified.
+-    ///
+-    /// TODO(read): Bash uses $TMOUT as a default timeout for `read` when -t is not specified.
+-    fn validate_timeout(
+-        &self,
+-        context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
+-    ) -> Result<Option<brush_core::ExecutionResult>, brush_core::Error> {
+-        if let Some(timeout) = self.timeout_in_seconds {
+-            if timeout < 0.0 {
+-                writeln!(
+-                    context.stderr(),
+-                    "{}: -t: invalid timeout specification",
+-                    context.command_name
+-                )?;
+-                return Ok(Some(brush_core::ExecutionResult::general_error()));
+-            }
+-        }
+-        Ok(None)
+-    }
  }
  
 -/// Splits a line by IFS (Internal Field Separator) according to shell rules.
@@ -3113,7 +3174,8 @@ index 644209c2..213d38d2 100644
 -/// - Consecutive IFS whitespace chars act as a single delimiter
 -/// - Non-whitespace IFS chars each act as individual delimiters
 -/// - Trailing non-whitespace delimiter does NOT create an empty final field
--///
++/// Parses a `-t` timeout given in seconds, returning `None` if it isn't a valid timeout.
+ ///
 -/// # Arguments
 -/// * `ifs` - The IFS string (typically " \t\n")
 -/// * `line` - The input line to split
@@ -3176,20 +3238,26 @@ index 644209c2..213d38d2 100644
 -            prev_was_non_ws_delim = false;
 -        }
 -    }
--
++/// TODO(read): Bash uses $TMOUT as a default timeout for `read` when -t is not specified.
++fn parse_timeout(spec: &str) -> Option<Duration> {
++    let secs: f64 = spec.parse().ok()?;
+ 
 -    // Finalize: push last field unless it's empty AND we ended with non-ws delimiter.
 -    // e.g., "a,b,c," with IFS="," gives ["a", "b", "c"], not ["a", "b", "c", ""].
 -    if !current_field.is_empty() || !prev_was_non_ws_delim {
 -        fields.push_back(current_field);
--    }
--
++    // -0 is a zero timeout; other negatives, infinities and NaN are invalid.
++    if !secs.is_finite() || secs < 0.0 {
++        return None;
+     }
+ 
 -    fields
--}
--
++    // A timeout too long to represent is as good as one that never expires.
++    Some(Duration::try_from_secs_f64(secs).unwrap_or(Duration::MAX))
+ }
+ 
  #[cfg(test)]
- mod tests {
-     use itertools::assert_equal;
-@@ -742,7 +829,7 @@ mod tests {
+@@ -742,7 +830,7 @@ mod tests {
          let (rx, mut tx) = std::io::pipe().unwrap();
          tx.write_all(b"\xc3").unwrap();
  
@@ -3198,7 +3266,7 @@ index 644209c2..213d38d2 100644
          let config = LineReaderConfig {
              delimiter: Some(DEFAULT_DELIMITER),
              char_limit: None,
-@@ -751,106 +838,19 @@ mod tests {
+@@ -751,106 +839,19 @@ mod tests {
  
          // Holding `tx` means the continuation byte never arrives, so the deadline has to
          // be enforced on it and not just on the byte that started the sequence.
@@ -3310,7 +3378,7 @@ index 644209c2..213d38d2 100644
          assert_eq!(
              result,
              vec![
-@@ -864,7 +864,7 @@ mod tests {
+@@ -864,7 +865,7 @@ mod tests {
      #[test]
      fn test_build_array_fields_skip_splitting() {
          // With -N option, entire input goes as single element.
@@ -3319,7 +3387,7 @@ index 644209c2..213d38d2 100644
          assert_eq!(result, vec![(None, "a b c".to_string())]);
      }
  
-@@ -878,21 +878,21 @@ mod tests {
+@@ -878,21 +879,21 @@ mod tests {
  
      #[test]
      fn test_build_variable_fields_basic() {
