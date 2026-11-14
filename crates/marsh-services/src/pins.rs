@@ -10,7 +10,9 @@
 //! `.git` and `.marsh` are protected: a pin of either (or inside either) is
 //! read-only, and a pin of the project root carries them as read-only
 //! sub-mounts. Pins are recreated from the ledger by [`restore_all`] before the
-//! production engine starts.
+//! production engine starts. A recreated pin follows its recorded name, so a
+//! directory renamed into that name while the engine was down is what it
+//! binds; if that is `.git` or `.marsh` (or inside one), the pin is read-only.
 // Pedantic lints this module trades for readability: the HTTP and policy code is
 // long, table-like and full of one-letter names for a request, a head and a
 // connection.
@@ -362,6 +364,21 @@ mod imp {
         Ok((st.st_dev as u64, st.st_ino as u64))
     }
 
+    /// A re-made pin's access: what was recorded, or read-only when the
+    /// name now leads into `.git` or `.marsh` (a directory renamed into the
+    /// pinned name while the engine was down) (DA2-01).
+    pub(super) fn restored_read_only(
+        root: &ProjectRoot,
+        fd: &OwnedFd,
+        rec: &PinRec,
+        known: &[ProtectedId],
+    ) -> Result<bool, PinError> {
+        if rec.read_only || break_mode("protected-subpin-off") {
+            return Ok(rec.read_only);
+        }
+        inside_protected(root, fd, rec.is_dir, &rec.rel, &protected_set(root, known)?)
+    }
+
     /// Is the target a protected tree, or inside one? The target is compared by
     /// identity, and so is every ancestor: for a directory by walking up from
     /// the handle itself (`..`, so a rename of an ancestor after the open
@@ -693,7 +710,8 @@ mod imp {
             } else {
                 rec.subs.clone()
             };
-            self.attach(&root, &fd, &path, rec.is_dir, rec.read_only, &subs)
+            let read_only = restored_read_only(&root, &fd, rec, known)?;
+            self.attach(&root, &fd, &path, rec.is_dir, read_only, &subs)
                 .map(|_| ())
         }
 
@@ -962,6 +980,47 @@ mod tests {
         let linked = project.join("linked");
         std::os::unix::fs::symlink(&project, &linked).unwrap();
         assert!(ProjectRoot::open(&linked).is_ok());
+        std::fs::remove_dir_all(&project).unwrap();
+    }
+
+    /// DA2-01: a read-write pin of `foo`, re-made after `.git` was renamed
+    /// to `foo` while the engine was down, is read-only.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_restored_pin_renamed_into_git_is_read_only() {
+        use rustix::fs::{CWD, Mode, OFlags, openat};
+        let project = std::env::temp_dir().join(format!("pin-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(project.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(project.join("foo")).unwrap();
+        let project = std::fs::canonicalize(&project).unwrap();
+        let root = ProjectRoot::open(&project).unwrap();
+        let known = observe(&root).unwrap();
+        let rec = crate::ledger::PinRec {
+            scope: "s".into(),
+            project_root: project.to_string_lossy().into_owned(),
+            rel: "foo".into(),
+            read_only: false,
+            is_dir: true,
+            subs: Vec::new(),
+            dev: 0,
+            ino: 0,
+            created: 0,
+            failed: false,
+        };
+        let open = || {
+            openat(
+                CWD,
+                project.join("foo"),
+                OFlags::PATH | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .unwrap()
+        };
+        assert!(!imp::restored_read_only(&root, &open(), &rec, &known).unwrap());
+        std::fs::rename(project.join("foo"), project.join("foo.x")).unwrap();
+        std::fs::rename(project.join(".git"), project.join("foo")).unwrap();
+        assert!(imp::restored_read_only(&root, &open(), &rec, &known).unwrap());
         std::fs::remove_dir_all(&project).unwrap();
     }
 }
