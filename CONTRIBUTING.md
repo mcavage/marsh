@@ -113,8 +113,8 @@ CI splits `make test` into its pieces (`make lint`, `test-unit`,
 and runs them as parallel jobs; `CI passed` is the one required check. A pull
 request and a push to main run only the lanes their changed files need
 (`scripts/ci-changes.sh`). Documentation runs the docs/link checks; image inputs
-run image builds and tooling tests, and the Kits and command tables also run
-the Rust lanes (the Rust tests read them); Rust
+run image builds, tooling tests and the Rust lanes (the Rust tests check the
+Kits, and a Kit moves to stable only after they pass on its commit); Rust
 changes run the Linux and macOS code lanes. Linux runs the full workspace and Bash differential
 tests (against GNU Bash 5.3). macOS PR jobs split the host tests between two
 runners; selected macOS jobs on main also run the platform-neutral workspace
@@ -123,7 +123,8 @@ makes on the commit it is about to build (below). A push to `main` runs only
 the lanes its diff selects, so "CI passed" on a `main` commit does not mean
 `make test` passed on it. Stable, nightly and rehearsal builds re-run every
 lane on the commit they build (a nightly still picks its commit from push CI);
-per-commit Kit images follow the push run.
+per-commit Kit images follow the push run, and move a Kit's stable tag only
+when that run passed the Rust lanes.
 
 TLA+ checks run when specs, configs, their runner or shared build/CI inputs
 change. Normal CI excludes the huge configs; those run weekly and in
@@ -276,7 +277,8 @@ Mac, not a release gate.
   builds and publishes the Kit images (`:nightly`, and the stable `:latest`
   when the rule at the top of `release.yml` allows), so agent updates reach
   users the same day. That run follows the push CI run's image job instead of
-  a full CI run. It does not build marsh, publish a prerelease, or touch
+  a full CI run, and moves `:latest` only when that run also passed every
+  Rust lane. It does not build marsh, publish a prerelease, or touch
   Homebrew.
 - **Stable.** Push a tag `vX.Y.Z` on a commit on `main`. The tag is the
   version. The Release workflow refuses a tag that is not on `main` or not

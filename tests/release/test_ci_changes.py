@@ -67,14 +67,21 @@ class CiChanges(unittest.TestCase):
             self.check([path], "model")
         self.check([".github/workflows/model.yml"], "tools", "model")
 
-    def test_image_only_updates_skip_rust_and_models(self):
-        self.check(["packaging/shell/Dockerfile", "tests/acceptance/fixture/fixture.dockerfile"], "tools", "images")
-        self.check(["scripts/publish-kits.py"], "tools", "images")
+    def test_image_updates_also_run_the_rust_lanes_but_not_the_model(self):
+        # A per-commit run promotes a Kit only if its CI run passed the Rust
+        # lanes (release.yml), so every image input selects them.
+        for path in ("packaging/shell/Dockerfile", "tests/acceptance/fixture/fixture.dockerfile",
+                     "packaging/image-base/docker-compose.sh", "packaging/dhi-notices/x",
+                     "packaging/notice-overrides/x", "packaging/agents.json", "scripts/publish-kits.py",
+                     "scripts/requirements-publish.txt", "tests/acceptance/acp-fixture/agent.mjs"):
+            self.check([path], "code", "host", "tools", "images")
         self.check(["scripts/third-party-notices.py"], "tools")
 
     def test_services_engine_inputs_build_the_engine_image(self):
+        # Image inputs also run the Rust lanes
+        # (test_image_updates_also_run_the_rust_lanes_but_not_the_model).
         for path in ("packaging/svc-engine/Dockerfile", "scripts/prepare-svc-engine-image.py"):
-            self.check([path], "tools", "images")
+            self.check([path], "code", "host", "tools", "images")
         workflow = (SCRIPT.parents[1] / ".github/workflows/ci.yml").read_text()
         job = re.search(r"(?ms)^  images:\n(.*?)(?=^  \S)", workflow)
         self.assertIsNotNone(job, "ci.yml has no images job")
