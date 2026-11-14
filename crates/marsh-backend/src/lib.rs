@@ -1627,7 +1627,9 @@ impl DaemonBackend for StockDaemonBackend {
     }
 
     fn skills_mirror_status(&self) -> Option<marsh_daemon::SkillsMirrorStatus> {
-        let mut status = self.skills_mirror.status(&self.config.daemon_home);
+        let mut status = self
+            .skills_mirror
+            .status(&self.config.daemon_home, &self.config.control_home);
         for withheld in self.sbx.withheld_skills().into_values() {
             let kits = self.kit_names_for_workload(&withheld.kit);
             let kit = if kits.is_empty() {

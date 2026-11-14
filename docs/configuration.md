@@ -135,6 +135,7 @@ When unset, control directories are in
 |---|---|
 | `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), whether marsh mirrors your skills folders into the Docker Sandboxes skills store, set by `marsh config skills-mirror on\|off` (default on), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3), job limits (`limits`), set by `marsh config limit NAME VALUE\|default`, and the [services VM](design/services.md) settings: `services_projects`, the projects services are on for, set by `marsh config services on\|off` in a project's folder (default none; per project, never per home), `services_disk_size`, set by `marsh config services-disk-size SIZE` (default `40g`), and `services_idle_seconds`, set by `marsh config services-idle-seconds SECONDS` (default 900). Default path `~/.marsh/config.json`. |
 | `CONTROL/skills-mirror/` | Shared by every scope's skills mirror, since the Docker Sandboxes store belongs to your Mac account: `record-*.json`, the skills a mirror put in the store, with a digest of each (only these are ever replaced or removed), and `lock`, held while one scope's mirror changes the store. An older marsh's `CONTROL/HASH/skills-mirror.json` is merged in and renamed `skills-mirror.json.migrated`. |
+| `CONTROL/HASH/skills-history/` | One folder for each change the skills mirror made to the Docker Sandboxes store, `AT-NAME/`: `change.json`, `diff`, and `before/`, the store's copy it replaced. The newest 20 changes of each skill are kept. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
@@ -293,6 +294,16 @@ can keep that skill from updating by hard-linking one of its files, until
 you remove the extra link. And a skill kept in a hard-linked package store
 (as pnpm makes) is refused.
 
+Each change the mirror makes to the store is kept in the control home, in
+`CONTROL/HASH/skills-history/AT-NAME/` (AT is unix ms), before the store is
+changed: `diff` (a unified diff from the store's copy to the new one),
+`before/` (the store's copy it replaced; none for a new skill) and
+`change.json`. The newest 20 changes of each skill are kept. `marsh status`
+lists the newest changes with the path of each diff. To roll a skill back,
+copy `before/` over the skill's folder on your Mac (for example
+`rm -r ~/.claude/skills/NAME && cp -R CONTROL/HASH/skills-history/AT-NAME/before ~/.claude/skills/NAME`);
+the mirror then imports it again, and records that change too.
+
 A skill with the name of one a registered Kit bundles (`agent-skill@1`) is
 never imported: the Kit's copy wins, and the name is listed as a clash
 `NAME (bundled by KIT)`. One an earlier marsh imported is removed from the
@@ -314,9 +325,11 @@ pass. `marsh status` shows the last import, clashes, and errors. `marsh status
 `enabled` (bool), `last_import` (unix ms of the last finished import or
 removal, or `null`), `errors` (strings from the last pass; empty when it
 succeeded, plus a line for each skill kept out of the store and each Kit VM
-running without the store), and
+running without the store),
 `clashes` (skill names where the `sbx skills add` skill won, and
-`NAME (bundled by KIT)` for those a Kit bundles).
+`NAME (bundled by KIT)` for those a Kit bundles), and `history` (the newest
+changes to the store, newest first, each with `name`, `change` (`added`,
+`updated` or `removed`), `at` (unix ms) and `diff` (the diff's path)).
 `sbx settings set skills.defaultMode off` keeps the store out of new Kit VMs;
 jobs then see only the Kit's own skills.
 
