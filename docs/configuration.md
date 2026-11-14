@@ -306,13 +306,23 @@ compares the store with each entry still pending:
 
 - the store holds what the change installed (or the removal is done): the
   entry is kept, and the record follows the change when the mirror owned
-  the copy it replaced (a new skill becomes the mirror's when the store
-  holds exactly what was imported);
+  the copy it replaced. A new skill becomes the mirror's, and the scope's
+  that imported it, only when the entry says the import succeeded with
+  exactly that copy (marsh writes that into the entry right after the
+  import, before the record);
 - the store still holds what the change replaced: the entry is dropped;
 - the store holds something else (a partial import, a copy marsh cannot
-  read, or your own replacement): the entry is kept as a rollback copy, and
-  the store's copy is never taken as the mirror's. It shows as a clash and
-  is left alone until you remove it (`sbx skills rm NAME`).
+  read, or your own replacement): the entry is kept as a rollback copy,
+  shown as `uncertain` (the change may never have happened), and the
+  store's copy is never taken as the mirror's. It shows as a clash and is
+  left alone until you remove it (`sbx skills rm NAME`).
+
+One case cannot be told apart. If marsh stops after an import but
+before its record, and you then `sbx skills add` a skill with exactly the
+content the mirror was importing (or the content it replaced), marsh treats
+your copy as the mirror's, and may later replace or remove it. A different
+copy is never touched. Before it removes a skill, marsh checks again that
+the store's copy is still the one it imported, and leaves it if not.
 
 The newest 20 changes of each skill are kept, and `marsh status` lists the
 newest with the path of each diff. Big files (over 1 MiB) are named in the
@@ -357,7 +367,9 @@ running without the store),
 `clashes` (skill names where the `sbx skills add` skill won, and
 `NAME (bundled by KIT)` for those a Kit bundles), and `history` (the newest
 changes to the store, newest first, each with `name`, `change` (`added`,
-`updated` or `removed`), `at` (unix ms) and `diff` (the diff's path)).
+`updated`, `removed`, or `uncertain` for a rollback copy kept after a crash
+whose change may not have happened), `at` (unix ms) and `diff` (the diff's
+path)).
 `sbx settings set skills.defaultMode off` keeps the store out of new Kit VMs;
 jobs then see only the Kit's own skills.
 

@@ -2148,8 +2148,10 @@ pub struct SkillsMirrorStatus {
     pub history: Vec<SkillChange>,
 }
 
-/// One change the skills mirror made to the store: `added`, `updated` or
-/// `removed`, when (unix ms), and the diff, kept with the copy it replaced
+/// One change the skills mirror made to the store: `added`, `updated`,
+/// `removed`, or `uncertain` (a rollback copy kept after a crash whose
+/// change may not have happened), when (unix ms), and the diff, kept with
+/// the copy it replaced
 /// in the control home (`docs/configuration.md#skills-mirror`).
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SkillChange {
