@@ -1112,14 +1112,22 @@ mod tests {
             .unwrap(),
             std::slice::from_ref(&inside)
         );
-        // What a job binds over the project: the guards and that folder.
-        let guards = StockDaemonBackend::job_guards(
+        // What a top-level job's view binds over the project: the guards
+        // and that folder.
+        let Ok(view) = StockDaemonBackend::job_view(
             &session(&project, &home),
             &configured.environment("pi"),
-            false,
-            false,
-        )
-        .unwrap();
+            None,
+            None,
+        ) else {
+            panic!("view refused");
+        };
+        assert!(
+            view.mounts
+                .iter()
+                .any(|mount| mount.target == inside && mount.access == "read_only")
+        );
+        let guards = view.guards;
         assert!(guards.contains(&(inside.clone(), false)));
         assert!(guards.contains(&(project.join(".marsh"), false)));
         let guards_of = |confined, child| {
