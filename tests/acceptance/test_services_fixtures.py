@@ -20,6 +20,9 @@ class FixtureSelfChecks(unittest.TestCase):
         unexpected = [line for line in done.stdout.splitlines() if line.startswith("NOT ") or "NOT AS EXPECTED" in line]
         self.assertEqual(done.returncode, 0, "\n".join(unexpected) + "\n" + done.stdout[-3000:] + done.stderr[-1000:])
         self.assertIn("self-checks as expected", done.stdout)
+        skipped = [line for line in done.stdout.splitlines() if line.startswith("SKIPPED ")]
+        if skipped:
+            self.skipTest("the other checks passed; not run: " + "; ".join(skipped))
 
 
 if __name__ == "__main__":

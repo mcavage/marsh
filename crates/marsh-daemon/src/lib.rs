@@ -5093,6 +5093,8 @@ pub struct Server {
     backend: Arc<dyn DaemonBackend>,
     build_identity: String,
     shutdown_requested: Arc<AtomicBool>,
+    /// Connections the accept loop has admitted and not yet finished.
+    open_connections: Arc<AtomicUsize>,
     scope_lifecycle_timeout: Duration,
     acp: Arc<AcpSessionManager>,
     mcp_host: Option<McpHostControl>,
@@ -5204,6 +5206,7 @@ impl Server {
             backend: Arc::new(UnavailableBackend),
             build_identity,
             shutdown_requested: Arc::new(AtomicBool::new(false)),
+            open_connections: Arc::new(AtomicUsize::new(0)),
             scope_lifecycle_timeout: SCOPE_LIFECYCLE_EXECUTION_TIMEOUT,
             acp: Arc::new(AcpSessionManager::new()?),
             mcp_host: None,
@@ -5443,6 +5446,12 @@ impl Server {
         self.store.clone()
     }
 
+    /// How many connections the accept loop has admitted that are still open.
+    #[cfg(test)]
+    pub(crate) fn open_connections(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.open_connections)
+    }
+
     pub fn serve_one(&self) -> Result<(), DaemonError> {
         let stream = marsh_runtime::accept_unix(&self.lifecycle.listener)?;
         self.handler().handle(stream)
@@ -5453,7 +5462,7 @@ impl Server {
         F: Fn() -> bool,
     {
         self.lifecycle.listener.set_nonblocking(true)?;
-        let active_connections = Arc::new(AtomicUsize::new(0));
+        let active_connections = Arc::clone(&self.open_connections);
         let mut accept_failures = 0_u32;
         let (mut workers, mut stop_updater) = self.spawn_workers();
         self.spawn_agent_reader();

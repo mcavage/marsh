@@ -89,6 +89,10 @@ impl Successor {
 
 /// How long a successor must stay up after reporting ready.
 const SETTLE: Duration = Duration::from_millis(200);
+/// A successor whose output ended without a ready line may still be exiting:
+/// its descriptors close before the process can be reaped. How long its exit
+/// status is waited for, so the failure names the exit.
+const EXIT_GRACE: Duration = Duration::from_secs(2);
 
 impl UpgradeWatch {
     pub(crate) fn new(
@@ -340,15 +344,27 @@ fn wait_ready(stdout: ChildStdout, child: &mut Child) -> Result<String, String> 
                 .trim()
                 .strip_prefix("ready ")
                 .map(str::to_owned)
-                .ok_or_else(|| match child.try_wait() {
-                    Ok(Some(status)) => {
+                .ok_or_else(|| match exit_status(child, EXIT_GRACE) {
+                    Some(status) => {
                         format!("the successor exited ({status}) before it was ready")
                     }
-                    _ => "the successor did not report ready".to_owned(),
+                    None => "the successor did not report ready".to_owned(),
                 });
         }
         if Instant::now() >= deadline {
             return Err("the successor did not get ready in time".into());
+        }
+    }
+}
+
+/// The child's exit status, waiting up to `grace` for it to be reapable.
+fn exit_status(child: &mut Child, grace: Duration) -> Option<std::process::ExitStatus> {
+    let deadline = Instant::now() + grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            _ => return None,
         }
     }
 }
@@ -517,8 +533,28 @@ pub fn is_handover_flag(argument: &OsStr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{older, watched_path};
+    use super::{older, wait_ready, watched_path};
     use std::path::Path;
+    use std::process::{Command, Stdio};
+
+    /// A successor that fails before it is ready closes its stdout when it
+    /// exits, and the daemon can see that end of stream before the process
+    /// is reapable. The failure must still be reported as the exit it is.
+    #[test]
+    fn a_successor_that_closes_its_output_and_then_exits_is_reported_as_exited() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exec >&-; sleep 0.3; exit 3"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let why = wait_ready(stdout, &mut child).unwrap_err();
+        assert!(
+            why.contains("exited") && why.contains("before it was ready"),
+            "{why}"
+        );
+        let _ = child.wait();
+    }
 
     #[test]
     fn a_homebrew_keg_is_watched_through_its_opt_link() {

@@ -26,18 +26,32 @@ import types
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import harness03  # noqa: E402
+import image_cache  # noqa: E402
 import sentinels  # noqa: E402
 import stage  # noqa: E402
 import synthetic_injection  # noqa: E402
 import vmlock  # noqa: E402
 
 RESULTS: list[tuple[str, bool, str]] = []
+SKIPPED: list[tuple[str, str]] = []
 DROP = object()  # a field to remove from a synthetic grant
 
 
 def record(name: str, caught: bool, detail: str) -> None:
     RESULTS.append((name, caught, detail))
     print(f"{'CAUGHT    ' if caught else 'NOT CAUGHT'}  {name}: {detail}", flush=True)
+
+
+def skip(name: str, why: str) -> None:
+    SKIPPED.append((name, why))
+    print(f"SKIPPED     {name}: {why}", flush=True)
+
+
+def uncached_images() -> list[str]:
+    """The saved image tars HARNESS-03's image load needs that are not in `target/nfx/images`."""
+    wanted = [image_cache.tar_name(ref) for ref in image_cache.image_set(None)]
+    wanted += [image_cache.local_tar_name(entry["tag"]) for entry in image_cache.local_images()]
+    return [name for name in wanted if not (image_cache.DEFAULT_OUT / name).is_file()]
 
 
 # --- 1. checkpoint completeness -------------------------------------------------------
@@ -839,7 +853,15 @@ exit 0
 def check_nested_interruption() -> None:
     """Interruption + a failing sandbox removal + a long-running NESTED child (HARNESS-03 -> image_cache.py ->
     `sbx exec ... docker load`, which ignores SIGTERM): the nested child must be gone before a competitor can take
-    the (synthetic) lock, and the evidence must be kept."""
+    the (synthetic) lock, and the evidence must be kept.
+
+    HARNESS-03 loads the saved images before that `sbx exec`, and stops at the first one that is missing, so
+    without `image_cache.py save` (no Docker, no network here) the nested child never exists to be checked."""
+    missing = uncached_images()
+    if missing:
+        skip("nested interruption", f"needs the saved images in {image_cache.DEFAULT_OUT} (run image_cache.py save); "
+                                    f"missing {len(missing)}, first {missing[0]}")
+        return
     with tempfile.TemporaryDirectory() as scratch:
         scratch = pathlib.Path(scratch)
         lock_path = scratch / "lock"
@@ -1205,7 +1227,8 @@ def main() -> int:
     if args.live:
         live(args.live, args.sbx)
     missed = [name for name, caught, _ in RESULTS if not caught]
-    print(f"\n{len(RESULTS) - len(missed)}/{len(RESULTS)} self-checks as expected" + (f"; NOT AS EXPECTED: {missed}" if missed else ""))
+    print(f"\n{len(RESULTS) - len(missed)}/{len(RESULTS)} self-checks as expected" + (f"; NOT AS EXPECTED: {missed}" if missed else "")
+          + (f"; SKIPPED: {[name for name, _ in SKIPPED]}" if SKIPPED else ""))
     return 1 if missed else 0
 
 

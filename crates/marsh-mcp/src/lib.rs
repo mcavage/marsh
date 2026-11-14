@@ -3749,6 +3749,13 @@ mod tests {
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
 
+    /// The time a test that only expects a command to succeed gives it, from
+    /// before the executables are verified until its output is read. It guards
+    /// against a hang and measures nothing: a 2 s guard failed these tests on
+    /// the first run on a cold machine. Tests of the timeout itself state
+    /// their own.
+    const SPAWN_BUDGET: Duration = Duration::from_secs(60);
+
     fn executable(path: &Path, body: &str) {
         let mut file = fs::File::create(path).unwrap();
         file.write_all(body.as_bytes()).unwrap();
@@ -4470,9 +4477,7 @@ mod tests {
         // values do not depend on optional parent USER/LOGNAME variables, without
         // process-global environment mutation in this test.
         let server = HostMcp::new(config.clone());
-        let response = server
-            .run_json(&["status", "--json"], Duration::from_secs(2))
-            .await;
+        let response = server.run_json(&["status", "--json"], SPAWN_BUDGET).await;
         assert!(response.ok);
         let data = response.data.unwrap();
         assert_eq!(data["cwd"], config.workspace.to_string_lossy().as_ref());
@@ -4545,18 +4550,8 @@ mod tests {
         let server = HostMcp::new(config);
         let scope = server.active_scope("default").await.unwrap();
         let (first, second) = tokio::join!(
-            server.run_json_in(
-                "default",
-                &scope,
-                &["status", "--json"],
-                Duration::from_secs(2)
-            ),
-            server.run_json_in(
-                "default",
-                &scope,
-                &["results", "--json"],
-                Duration::from_secs(2)
-            )
+            server.run_json_in("default", &scope, &["status", "--json"], SPAWN_BUDGET),
+            server.run_json_in("default", &scope, &["results", "--json"], SPAWN_BUDGET)
         );
         assert!(first.ok);
         assert!(second.ok);
@@ -4841,7 +4836,7 @@ mod tests {
                 CommandSpec {
                     executable: config.marsh,
                     arguments: vec![],
-                    timeout: Duration::from_secs(2),
+                    timeout: SPAWN_BUDGET,
                     home_identity: DirectoryIdentity::capture(&config.home).unwrap(),
                     home: config.home,
                 },

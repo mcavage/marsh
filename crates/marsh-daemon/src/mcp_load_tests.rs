@@ -222,6 +222,8 @@ pub(crate) struct LoadFixture {
     relay: Client,
     master: Client,
     guest_token: PathBuf,
+    /// Connections the daemon's accept loop has admitted and not finished.
+    open_connections: Arc<AtomicUsize>,
     declaration: Vec<u8>,
     declaration_path: PathBuf,
     registration: Vec<u8>,
@@ -323,6 +325,7 @@ impl LoadFixture {
         let master = Client::connect(&home).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = Arc::clone(&stop);
+        let open_connections = server.open_connections();
         let task = thread::spawn(move || {
             server
                 .serve_until(|| stopping.load(Ordering::SeqCst))
@@ -353,6 +356,7 @@ impl LoadFixture {
             relay,
             master,
             guest_token,
+            open_connections,
             stop,
             task: Some(task),
         }
@@ -595,6 +599,12 @@ fn load_needs_no_second_daemon_connection() {
             }
         })
         .collect::<Vec<_>>();
+    // A connect that returned is only queued: the listen backlog is short, and
+    // a connect to it while it is full is refused. The load must arrive after
+    // the accept loop has admitted every one of these.
+    wait_until("the daemon admits the occupied connections", || {
+        f.open_connections.load(Ordering::Acquire) >= occupied.len()
+    });
     f.relay
         .mcp_load(
             f.session.clone(),
