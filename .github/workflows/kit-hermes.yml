@@ -29,6 +29,9 @@ env:
 jobs:
   publish:
     name: build, test and publish marsh-hermes
+    # The push token is a release-environment secret (main and v* tags only).
+    # A pull request builds and pushes nothing, so it runs outside it.
+    environment: ${{ github.event_name != 'pull_request' && 'release' || '' }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 45
     defaults:

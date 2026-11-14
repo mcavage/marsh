@@ -54,6 +54,9 @@ env:
 jobs:
   publish:
     name: verify and publish marsh-pix
+    # The push token is a release-environment secret (main and v* tags only).
+    # A pull request builds and pushes nothing, so it runs outside it.
+    environment: ${{ github.event_name != 'pull_request' && 'release' || '' }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 45
     env:

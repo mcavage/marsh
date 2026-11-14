@@ -50,7 +50,7 @@ def evaluate(expression, context):
     text = re.sub(r"\b(needs|github|steps|secrets|inputs)\.[\w.-]+", lambda match: repr(context.get(match.group(0))),
                   text)
     text = text.replace("&&", " and ").replace("||", " or ").replace("format(", "fmt(")
-    if re.search(r"[!$]", text):
+    if re.search(r"!(?!=)|\$", text):
         raise AssertionError(f"unsupported expression: {expression}")
     return eval(text, {"__builtins__": {}}, {"True": True, "fmt": str.format})  # noqa: S307 - our own workflow text
 
@@ -237,6 +237,46 @@ def rust_lanes():
 
 
 RUST_LANES = rust_lanes() if yaml else []
+
+
+PUBLISHING_SECRETS = ("DOCKERHUB_TOKEN", "HOMEBREW_TAP_TOKEN")
+
+
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class PublishingSecrets(unittest.TestCase):
+    def test_only_release_environment_jobs_name_a_publishing_secret(self):
+        seen = 0
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            data = load(path.name)
+            self.assertNotRegex(yaml.safe_dump(data.get("env", {})), r"secrets\.", path.name)
+            for name, job in data["jobs"].items():
+                text = yaml.safe_dump(job)
+                used = [secret for secret in PUBLISHING_SECRETS if re.search(rf"secrets\.{secret}\b", text)]
+                if not used:
+                    continue
+                seen += 1
+                environment = job.get("environment")
+                self.assertIsNotNone(environment, f"{path.name} job {name} reads {used} outside an environment")
+                # Every trigger of the workflow gets the release environment,
+                # except a pull request, which gets none.
+                for event in data["on"]:
+                    got = group(str(environment), {"github.event_name": event})
+                    want = "" if event == "pull_request" else "release"
+                    self.assertEqual(got, want, f"{path.name} job {name} on {event}")
+        self.assertGreaterEqual(seen, 6)
+
+    def test_pruning_uses_the_release_environments_token(self):
+        data = load("prune-nightlies.yml")
+        job = data["jobs"]["prune"]
+        self.assertEqual(job.get("environment"), "release")
+        text = yaml.safe_dump(job)
+        self.assertRegex(text, r"secrets\.DOCKERHUB_TOKEN\b")
+        self.assertNotIn("DOCKERHUB_PRUNE_TOKEN", text)
+
+    def test_ci_never_reads_a_publishing_secret(self):
+        text = (WORKFLOWS / "ci.yml").read_text()
+        for secret in PUBLISHING_SECRETS:
+            self.assertIsNone(re.search(rf"secrets\.{secret}\b", text), f"ci.yml reads {secret}")
 
 
 @unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")

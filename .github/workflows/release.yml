@@ -63,11 +63,16 @@ name: Release
 # digests pinned into commands.json and shell-image; tarball + checksum),
 # release (GitHub Release), tap (mcavage/homebrew-tap).
 #
-# Secrets:
-#   DOCKERHUB_USERNAME,       Docker account that can push docker.io/mcavage/*
-#   DOCKERHUB_TOKEN           and pull dhi.io base images (one login for both)
-#   HOMEBREW_TAP_TOKEN        token with contents:write on mcavage/homebrew-tap
-#                             (optional; the tap job is skipped without it)
+# Secrets. The publishing ones are secrets of the `release` environment, which
+# only main and v* tags may use; only the images and tap jobs name it.
+#   DOCKERHUB_USERNAME        (repository) the Docker account
+#   DOCKERHUB_TOKEN           (release) its token that can push
+#                             docker.io/mcavage/* and pull dhi.io base images
+#   DOCKERHUB_READ_TOKEN      (repository) its read-only token, for the ci job's
+#                             build-only image lane
+#   HOMEBREW_TAP_TOKEN        (release) token with contents:write on
+#                             mcavage/homebrew-tap (optional; the tap job is
+#                             skipped without it)
 # New Docker Hub repositories may default to private: make each public once.
 on:
   push:
@@ -172,7 +177,7 @@ jobs:
             push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
             workflow_dispatch)
               # A manual run publishes images (a nightly, or a rehearsal's
-              # :draft): main only.
+              # :draft) and gets the release environment: main only.
               [ "$GITHUB_REF" = refs/heads/main ] || {
                 echo "::error::run the Release workflow by hand on main only (this is $GITHUB_REF)"; exit 1; }
               if [ -n "$INPUT" ]; then channel=stable; version=${INPUT#v}; draft=true
@@ -262,7 +267,7 @@ jobs:
       ref: ${{ needs.version.outputs.sha }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_READ_TOKEN: ${{ secrets.DOCKERHUB_READ_TOKEN }}
 
   guest:
     needs: [version, ci]
@@ -299,6 +304,8 @@ jobs:
       !cancelled() && needs.version.result == 'success' &&
       (needs.ci.result == 'success' && needs.version.outputs.stages == 'all' ||
        needs.ci.result == 'skipped' && needs.version.outputs.stages == 'images')
+    # The push token is a release-environment secret (main and v* tags only).
+    environment: release
     concurrency:
       group: release-images-${{ github.event_name == 'workflow_run' && 'commit' || github.run_id }}
       cancel-in-progress: false
@@ -563,6 +570,7 @@ jobs:
   tap:
     needs: [version, release]
     if: needs.version.outputs.draft == 'false'
+    environment: release
     runs-on: ubuntu-26.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
