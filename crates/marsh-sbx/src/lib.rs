@@ -46,8 +46,8 @@ mod vm_ownership;
 pub use ephemeral_home::{EphemeralHomeLease, EphemeralHomeToken};
 pub use shell_template_reference::ShellTemplateReference;
 pub use stock_inventory::{StockInventory, StockInventoryVm};
-pub use vm_ownership::{DevGrantRecord, VmPurpose, valid_vm_prefix, vm_prefix};
 use vm_ownership::{VmClass, VmOwnership};
+pub use vm_ownership::{VmPurpose, valid_vm_prefix, vm_prefix};
 mod capped_command;
 mod mcp_environment;
 mod services_net;
@@ -233,7 +233,7 @@ pub struct KitVmSpec {
 pub struct RecordedVm {
     pub name: String,
     pub purpose: VmPurpose,
-    /// The ownership key: a Kit identity, or a shell selector (`shell`, `dev`,
+    /// The ownership key: a Kit identity, or a shell selector (`shell`,
     /// `ephemeral:SESSION`, …).
     pub key: String,
     pub running: bool,
@@ -1198,8 +1198,6 @@ pub struct StockSbx {
     /// Per-user verified local Kit image archives keyed by source
     /// fingerprint (daemon opt-in; `make dev` seeds it).
     kit_image_cache: Option<PathBuf>,
-    /// Whether published (digest) Kit images use the cache as well.
-    published_image_cache: bool,
     /// The Docker CLI marsh reads registries and builds with (`docker`).
     docker: PathBuf,
     /// Published images whose archive is being saved into the cache.
@@ -1360,7 +1358,6 @@ impl StockSbx {
             worker_init_locks: Mutex::new(BTreeMap::new()),
             installed_worker_artifacts: Mutex::new(BTreeMap::new()),
             kit_image_cache: None,
-            published_image_cache: true,
             docker: PathBuf::from("docker"),
             published_image_saves: Arc::new(Mutex::new(BTreeSet::new())),
             worker_artifact_identities: Mutex::new(BTreeMap::new()),
@@ -1416,31 +1413,8 @@ impl StockSbx {
         self.ownership.assign(purpose, key)
     }
 
-    /// Persisted development grants (child maps) from the ownership file.
-    #[must_use]
-    pub fn dev_grants(&self) -> BTreeMap<String, DevGrantRecord> {
-        self.ownership.dev_grants()
-    }
-
-    /// Persist a change to the grant section before acting on it.
-    ///
-    /// # Errors
-    /// Fails (and rolls back) when the map cannot be written.
-    pub fn update_dev_grants<R>(
-        &self,
-        update: impl FnOnce(&mut BTreeMap<String, DevGrantRecord>) -> R,
-    ) -> Result<R, SbxError> {
-        self.ownership.update_dev_grants(update)
-    }
-
-    /// Names in this daemon's own (host) ownership map.
-    #[must_use]
-    pub fn host_vm_names(&self) -> BTreeSet<String> {
-        self.ownership.host_names()
-    }
-
     /// Cached stock inventory (one `sbx ls --json` when cold or `refresh`).
-    /// Storing a fresh view adopts host and grant intents by name.
+    /// Storing a fresh view adopts intents by name.
     ///
     /// # Errors
     /// Fails when stock inventory cannot be observed.
@@ -1448,27 +1422,12 @@ impl StockSbx {
         self.stock_view(refresh)
     }
 
-    /// Store an `sbx ls --json` result observed by the dev broker as the
-    /// fresh view (adopting intents by name), avoiding a second listing.
-    ///
-    /// # Errors
-    /// Fails when the bytes are not a stock inventory or cannot be persisted.
-    pub fn adopt_inventory(&self, raw: &[u8]) -> Result<Arc<StockInventory>, SbxError> {
-        match StockInventory::decode(raw) {
-            Ok(inventory) => self.ownership.store_view(inventory),
-            Err(error) => {
-                self.ownership.invalidate();
-                Err(error)
-            }
-        }
-    }
-
     /// Drop the cached inventory after a lifecycle change made elsewhere.
     pub fn invalidate_stock_inventory(&self) {
         self.ownership.invalidate();
     }
 
-    /// The stock executable and runner, for the dev broker's forwarded calls.
+    /// The stock executable and runner.
     #[must_use]
     pub fn stock_command(&self) -> (PathBuf, Arc<dyn CommandRunner>) {
         (self.sbx.clone(), Arc::clone(&self.runner))
@@ -1483,20 +1442,10 @@ impl StockSbx {
         self
     }
 
-    /// Whether published (digest) Kit images are saved to and loaded from
-    /// the Kit image cache (default on). A nested `--dev` daemon turns it
-    /// off: its stock calls cross the dev broker, and moving an archive
-    /// through it costs more than the child VM's own registry pull.
     /// Use another Docker CLI (`MARSH_DOCKER`) for registry reads and builds.
     #[must_use]
     pub fn with_docker(mut self, docker: PathBuf) -> Self {
         self.docker = docker;
-        self
-    }
-
-    #[must_use]
-    pub fn with_published_image_cache(mut self, enabled: bool) -> Self {
-        self.published_image_cache = enabled;
         self
     }
 
@@ -2310,12 +2259,9 @@ impl StockSbx {
             });
         }
         let ours = self.ownership.host_names();
-        let grants = self.ownership.grant_names();
         let foreign = view
             .names()
-            .filter(|name| {
-                name.starts_with("marsh-") && !ours.contains(*name) && !grants.contains(*name)
-            })
+            .filter(|name| name.starts_with("marsh-") && !ours.contains(*name))
             .map(str::to_owned)
             .collect();
         Ok((recorded, foreign))
@@ -2490,7 +2436,21 @@ impl StockSbx {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .retain(|(vm, _), _| vm != name);
-        self.remove_owned_vm(name, deadline)?;
+        match self.remove_owned_vm(name, deadline) {
+            Ok(_) => {}
+            // A fresh listing shows the name held by another UUID. Never
+            // touch that VM. If the same listing has no VM with the recorded
+            // UUID, ours is gone: stop retrying a removal that can never
+            // apply. Otherwise keep the record, and the error.
+            Err(SbxError::ForeignVm(foreign)) => {
+                if let Some(recorded) = self.ownership.uuid(name)
+                    && self.stock_view(false)?.contains_uuid(&recorded)
+                {
+                    return Err(SbxError::ForeignVm(foreign));
+                }
+            }
+            Err(error) => return Err(error),
+        }
         self.ownership.forget(name)?;
         self.worker_init_locks
             .lock()
@@ -2517,7 +2477,7 @@ impl StockSbx {
         for name in self.ownership.retired_names() {
             self.quarantine_vm(
                 &name,
-                "retired for good: a `marsh workers stop` did not settle",
+                "retired for good: a `marsh workers stop` did not settle, or `marsh --dev` left it",
             );
             let (vm_transition, _vm_cleanup) =
                 weak_rw_transition_lock(&self.grant_vm_transition_locks, name.clone());
@@ -4416,7 +4376,6 @@ impl StockSbx {
         let cache = self
             .kit_image_cache
             .as_deref()
-            .filter(|_| self.published_image_cache)
             .filter(|_| published_image_digest(&reference).is_some());
         if let Some(cache) = cache
             && let Some(archive) = cached_published_image(cache, &reference)
@@ -4480,11 +4439,7 @@ impl StockSbx {
         if published_image_digest(image).is_none() {
             return false;
         }
-        match self
-            .kit_image_cache
-            .as_deref()
-            .filter(|_| self.published_image_cache)
-        {
+        match self.kit_image_cache.as_deref() {
             Some(cache) => cached_published_image(cache, image).is_none(),
             None => true,
         }

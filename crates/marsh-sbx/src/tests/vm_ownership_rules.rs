@@ -283,3 +283,250 @@ fn a_malformed_inventory_row_never_makes_an_owned_vm_absent() {
     );
     assert_eq!(model.mutations(), 0);
 }
+
+/// Write `value` as an owner-only ownership map, as a daemon would.
+fn write_map(path: &Path, value: &serde_json::Value) {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .unwrap();
+    file.write_all(&serde_json::to_vec_pretty(value).unwrap())
+        .unwrap();
+}
+
+/// A grant as an older `marsh --dev` daemon persisted it.
+fn legacy_grant(names: &serde_json::Value, uncertain: Option<bool>) -> serde_json::Value {
+    let mut grant = serde_json::json!({
+        "session": "session-1",
+        "prefix": "marsh-xab12c-",
+        "roots": ["/Users/example/marsh"],
+        "scratch": "/Users/example/Library/Caches/marsh/dev/0123456789abcdef",
+        "max_vms": 4,
+        "revoked": true,
+        "names": names,
+    });
+    if let Some(uncertain) = uncertain {
+        grant["cleanup_uncertain"] = uncertain.into();
+    }
+    grant
+}
+
+/// The retired entries in the map file at `path`, and whether it still has
+/// a `grants` section.
+fn retired_on_disk(path: &Path) -> (Vec<String>, bool) {
+    let written: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    let retired = written["vms"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, entry)| entry["purpose"] == "retired")
+        .map(|(name, _)| name.clone())
+        .collect();
+    (retired, written.get("grants").is_some())
+}
+
+/// `marsh --dev` was removed. A map an older daemon left with development
+/// grants (every historical field, `cleanup_uncertain` present or not, and
+/// one it never had) and a dev shell VM still loads. Loading alone, with no
+/// mirror (as every installed daemon runs), rewrites the map at once with
+/// what `--dev` left retired; a mirror added later gets the same. The
+/// retired-VM pass removes it by recorded UUID. A child name now held by
+/// another VM is forgotten and that VM is never named in any stock call; one
+/// whose VM is gone is forgotten; the ordinary shell stays.
+#[test]
+fn an_older_maps_dev_grants_and_dev_shell_are_retired_and_removed_by_uuid() {
+    let control = scratch();
+    let map = control.path().join("vm-ownership.json");
+    let mirror_dir = control.path().join("mirror");
+    fs::create_dir(&mirror_dir).unwrap();
+    fs::set_permissions(&mirror_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let mirror = mirror_dir.join("vm-ownership.json");
+    let model = StockModel::new();
+    let shell = model.seed_vm("marsh-s-shell001");
+    let dev_shell = model.seed_vm("marsh-s-devshl01");
+    let child = model.seed_vm("marsh-xab12c-k-child001");
+    model.seed_vm("marsh-xab12c-k-intent01");
+    model.seed_vm("marsh-xab12c-s-replaced");
+    let mut uncertain = legacy_grant(
+        &serde_json::json!({
+            "marsh-xab12c-s-replaced": FOREIGN,
+            "marsh-xab12c-k-gone0001": "22222222-2222-4222-8222-222222222222",
+        }),
+        Some(true),
+    );
+    uncertain["depth"] = 2.into();
+    write_map(
+        &map,
+        &serde_json::json!({
+            "version": 2,
+            "vms": {
+                "marsh-s-shell001": {"purpose": "shell", "key": "shell", "uuid": shell},
+                "marsh-s-devshl01": {"purpose": "shell", "key": "dev", "uuid": dev_shell},
+            },
+            "grants": {
+                "grant-a": legacy_grant(
+                    &serde_json::json!({
+                        "marsh-xab12c-k-child001": child,
+                        "marsh-xab12c-k-intent01": null,
+                    }),
+                    None,
+                ),
+                "grant-b": uncertain,
+            },
+        }),
+    );
+
+    let retired = [
+        "marsh-s-devshl01",
+        "marsh-xab12c-k-child001",
+        "marsh-xab12c-k-gone0001",
+        "marsh-xab12c-k-intent01",
+        "marsh-xab12c-s-replaced",
+    ];
+    // The load itself saves, before anything else uses the map.
+    drop(VmOwnership::persisted(map.clone()).unwrap());
+    assert_eq!(
+        retired_on_disk(&map),
+        (retired.map(String::from).to_vec(), false)
+    );
+
+    let adapter = StockSbx::new("sbx", Arc::clone(&model) as Arc<dyn CommandRunner>)
+        .with_vm_ownership(map.clone())
+        .unwrap()
+        .with_vm_ownership_mirror(mirror.clone())
+        .unwrap();
+    assert_eq!(
+        retired_on_disk(&mirror),
+        (retired.map(String::from).to_vec(), false)
+    );
+    assert_eq!(model.mutations(), 0, "loading touches no VM");
+
+    let (removed, failed) = adapter.remove_retired_kit_vms();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert_eq!(removed, retired);
+    assert_eq!(
+        model.vm_names(),
+        ["marsh-s-shell001", "marsh-xab12c-s-replaced"]
+    );
+    let named: Vec<_> = model
+        .calls()
+        .into_iter()
+        .filter(|call| {
+            call.args
+                .iter()
+                .any(|arg| arg.contains("marsh-xab12c-s-replaced"))
+        })
+        .map(|call| call.args)
+        .collect();
+    assert!(named.is_empty(), "the other VM was named: {named:?}");
+    let (removed, failed) = adapter.remove_retired_kit_vms();
+    assert!(
+        removed.is_empty() && failed.is_empty(),
+        "{removed:?} {failed:?}"
+    );
+    let reloaded = VmOwnership::persisted(map).unwrap();
+    assert_eq!(
+        reloaded.host_names().into_iter().collect::<Vec<_>>(),
+        ["marsh-s-shell001"]
+    );
+    assert_eq!(reloaded.uuid("marsh-s-shell001"), Some(shell));
+}
+
+/// A retired name held by another UUID is forgotten only when the same
+/// listing has no VM with the recorded UUID. If the recorded UUID is still
+/// listed (under another name), the record and the failure stay, and neither
+/// VM is named in a stock call.
+#[test]
+fn a_retired_name_held_by_another_vm_keeps_a_recorded_uuid_that_is_still_listed() {
+    let control = scratch();
+    let map = control.path().join("vm-ownership.json");
+    let model = StockModel::new();
+    let ours = model.seed_vm("marsh-k-renamed1");
+    model.seed_vm("marsh-k-retired1");
+    write_map(
+        &map,
+        &serde_json::json!({
+            "version": 2,
+            "vms": {"marsh-k-retired1": {"purpose": "retired", "key": "fixture", "uuid": ours}},
+        }),
+    );
+    let adapter = StockSbx::new("sbx", Arc::clone(&model) as Arc<dyn CommandRunner>)
+        .with_vm_ownership(map.clone())
+        .unwrap();
+
+    let (removed, failed) = adapter.remove_retired_kit_vms();
+    assert!(removed.is_empty(), "{removed:?}");
+    assert!(
+        matches!(failed.as_slice(), [(name, SbxError::ForeignVm(_))] if name == "marsh-k-retired1"),
+        "{failed:?}"
+    );
+    let named: Vec<_> = model
+        .calls()
+        .into_iter()
+        .filter(|call| call.args.iter().any(|arg| arg.starts_with("marsh-k-re")))
+        .map(|call| call.args)
+        .collect();
+    assert!(named.is_empty(), "a VM was named: {named:?}");
+    assert_eq!(model.vm_names(), ["marsh-k-renamed1", "marsh-k-retired1"]);
+    let reloaded = VmOwnership::persisted(map).unwrap();
+    assert_eq!(reloaded.uuid("marsh-k-retired1"), Some(ours));
+    assert!(reloaded.is_retired("marsh-k-retired1"));
+}
+
+/// A grant whose only names are already host entries still counts as
+/// something `marsh --dev` left: the load drops `grants` from the map at
+/// once, with no mirror, and the host entry keeps its purpose, key and UUID.
+#[test]
+fn a_grant_name_that_is_a_host_entry_keeps_the_host_entry() {
+    let control = scratch();
+    let map = control.path().join("vm-ownership.json");
+    write_map(
+        &map,
+        &serde_json::json!({
+            "version": 2,
+            "vms": {
+                "marsh-k-fixture1": {"purpose": "kit", "key": "fixture", "uuid": FOREIGN},
+            },
+            "grants": {
+                "grant-a": legacy_grant(&serde_json::json!({"marsh-k-fixture1": null}), None),
+            },
+        }),
+    );
+    let loaded = VmOwnership::persisted(map.clone()).unwrap();
+    assert_eq!(retired_on_disk(&map), (Vec::new(), false));
+    assert!(!loaded.is_retired("marsh-k-fixture1"));
+    assert_eq!(loaded.uuid("marsh-k-fixture1").as_deref(), Some(FOREIGN));
+    assert_eq!(
+        loaded.lookup(VmPurpose::Kit, "fixture").as_deref(),
+        Some("marsh-k-fixture1")
+    );
+}
+
+/// A map with nothing `marsh --dev` left loads without being rewritten.
+#[test]
+fn a_map_without_dev_grants_is_not_rewritten_at_load() {
+    let control = scratch();
+    let map = control.path().join("vm-ownership.json");
+    write_map(
+        &map,
+        &serde_json::json!({
+            "version": 2,
+            "vms": {
+                "marsh-s-shell001": {"purpose": "shell", "key": "shell", "uuid": FOREIGN},
+                "marsh-k-intent01": {"purpose": "kit", "key": "fixture"},
+            },
+        }),
+    );
+    let before = (fs::read(&map).unwrap(), fs::metadata(&map).unwrap().ino());
+    let loaded = VmOwnership::persisted(map.clone()).unwrap();
+    // Every write replaces the file, so the same inode means none happened.
+    assert_eq!(
+        (fs::read(&map).unwrap(), fs::metadata(&map).unwrap().ino()),
+        before
+    );
+    assert_eq!(loaded.uuid("marsh-s-shell001").as_deref(), Some(FOREIGN));
+    assert!(!loaded.is_retired("marsh-k-intent01"));
+}

@@ -773,11 +773,6 @@ pub fn lifecycle_summary(
             if services_kept == 1 { "" } else { "s" }
         ));
     }
-    if report.components.iter().any(|component| {
-        component.kind == "dev-grant" && component.state == ScopeCleanupState::Removed
-    }) {
-        facts.push("development grants revoked".into());
-    }
     if removed.is_empty() && report.cleanup_complete {
         facts.insert(
             0,

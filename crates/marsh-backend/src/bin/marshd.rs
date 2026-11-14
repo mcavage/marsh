@@ -164,20 +164,12 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         return Err("install must provide libexec/marsh/shell-image or MARSH_SHELL_IMAGE".into());
     }
     let shell_image = OciImage::parse(shell_image)?;
-    // A dev install (`make dev`) carries a `dev-enabled` marker beside the
-    // shell image; that install-time file enables `--dev` (the dev broker).
-    // Production installs ship none, so their daemons expose no broker unless
-    // started with MARSH_ENABLE_DEV_SCOPES=1. Dev shells use the one shell
-    // image, which carries the dev tooling.
-    let dev_enabled = env::var("MARSH_ENABLE_DEV_SCOPES").as_deref() == Ok("1")
-        || guest_artifacts.join("dev-enabled").is_file();
     let username = env::var("USER").map_err(|_| "USER is required")?;
     let uid = rustix::process::getuid().as_raw();
     let gid = rustix::process::getgid().as_raw();
     let ownership_mirror = env::var_os("MARSH_OWNERSHIP_MIRROR")
         .map(|mirror| absolute_setting("MARSH_OWNERSHIP_MIRROR", mirror.into()))
         .transpose()?;
-    let dev_cache = absolute_setting("MARSH_DEV_CACHE_ROOT", dev_cache_root(&real_home))?;
     let stock_sbx = resolve_sbx()?;
     let programs = ProgramSettings::read(|name| env::var_os(name))?;
     successor_environment.extend(programs.successor_environment.iter().cloned());
@@ -196,8 +188,6 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     }
     let mut stock_adapter = stock_adapter
         .with_kit_image_cache(kit_image_cache)
-        // Inside `marsh --dev` every stock call crosses the dev broker.
-        .with_published_image_cache(env::var_os("MARSH_DEV_DEPTH").is_none())
         .with_vm_ownership(control_home.join("vm-ownership.json"))?;
     // Test harnesses (`make check`) keep a copy of the map in a per-user scope
     // registry outside the scope, so `make check-gc` can still retire its VMs
@@ -218,13 +208,6 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         },
     };
     let stock = Arc::new(stock_adapter);
-    let templates = vec![shell.image.as_str().to_owned()];
-    let dev_broker = Arc::new(marsh_daemon::DevBroker::new(
-        Arc::clone(&stock),
-        dev_enabled,
-        dev_cache,
-        templates,
-    ));
     let config = BackendConfig {
         worker_binary: guest_artifacts.join("marsh-worker-linux-arm64"),
         relay_binary: guest_artifacts.join("marsh-relay-linux-arm64"),
@@ -259,14 +242,7 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
     stock.validate_supported_version().map_err(|_| {
         format!("stock SBX compatibility check failed for {}; requires stock SBX v0.47.0 or newer with local Kit v3 support; check `sbx version` and `sbx create --help`", stock_sbx.display())
     })?;
-    // Grants never outlive a daemon: revoke and clean every persisted grant
-    // (and retry uncertain ones) before serving.
-    if !stock.dev_grants().is_empty()
-        && let Err(error) = dev_broker.revoke_all()
-    {
-        eprintln!("marshd: {error}");
-    }
-    let backend = Arc::new(backend.with_dev_broker(Arc::clone(&dev_broker)));
+    let backend = Arc::new(backend);
     // Started by the daemon it replaces (an upgrade): everything but the
     // endpoint is ready; say so, and wait until that daemon is gone.
     if env::args_os()
@@ -281,8 +257,7 @@ fn run(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error
         .with_limits_config(home.join("config.json"))
         .with_successor_environment(successor_environment)
         .with_url_opener(programs.opener(env::var_os("MARSH_OPEN_URLS").as_deref(), &home))
-        .with_backend(backend)
-        .with_dev_broker(dev_broker);
+        .with_backend(backend);
     let stopping = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(SIGINT, Arc::clone(&stopping))?;
     signal_hook::flag::register(SIGTERM, Arc::clone(&stopping))?;
@@ -428,25 +403,6 @@ fn prebuild_kit_images(arguments: &[std::ffi::OsString]) -> Result<(), Box<dyn s
         Ok(())
     } else {
         Err(failures.join("; ").into())
-    }
-}
-
-/// Host-private dev scratch root, outside every guest mount and control home.
-fn dev_cache_root(real_home: &Path) -> PathBuf {
-    if let Some(root) = env::var_os("MARSH_DEV_CACHE_ROOT") {
-        return PathBuf::from(root);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        real_home.join("Library/Caches/marsh/dev")
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // An inner daemon keeps its children's scratch under its own grant.
-        env::var_os("MARSH_DEV_SCRATCH").map_or_else(
-            || real_home.join(".cache/marsh/dev"),
-            |scratch| PathBuf::from(scratch).join("tmp/dev"),
-        )
     }
 }
 

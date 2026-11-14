@@ -86,11 +86,9 @@ pub use mcp_publication::{
     publication_load_arguments, validate_publication_options, validate_publication_pipeline,
     validate_publication_sandbox_output,
 };
-pub mod dev_broker;
 pub mod ignored;
 pub mod relay;
 pub mod relay_cleanup;
-pub use dev_broker::DevBroker;
 
 pub const PROTOCOL: &str = "marsh.daemon/v1";
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
@@ -918,14 +916,6 @@ pub enum PublicRequest {
         generation: String,
         request_id: String,
         option_id: String,
-    },
-    /// Run one stock `sbx` command for the caller's development grant.
-    /// Authorized only by an attached relay; the session comes from the relay.
-    DevSbx {
-        argv: Vec<String>,
-        pty: Option<TerminalSize>,
-        #[serde(default)]
-        cwd: Option<PathBuf>,
     },
     InstallKit {
         command: String,
@@ -1769,17 +1759,6 @@ pub trait DaemonBackend: Send + Sync + 'static {
         progress: PreparationProgress,
         store: DaemonStore,
     ) -> Result<PreparationResult, DaemonError>;
-    /// `--load` for a `--dev` session, which attaches to the dev shell VM:
-    /// a backend that warms a shell VM while it prepares Kits warms that one.
-    fn prepare_dev(
-        &self,
-        selection: &LoadSelection,
-        session: &SessionSpec,
-        progress: PreparationProgress,
-        store: DaemonStore,
-    ) -> Result<PreparationResult, DaemonError> {
-        self.prepare(selection, session, progress, store)
-    }
     fn execute(
         &self,
         request: ExecuteSpec,
@@ -2713,7 +2692,7 @@ struct State {
     /// Detached sessions, oldest first (`shell_admission::note_detached`).
     detached_sessions: std::collections::VecDeque<String>,
     ephemeral_home_tokens: BTreeMap<String, marsh_sbx::EphemeralHomeToken>,
-    // Host-only cleanup ownership, retained when development authority is revoked.
+    // Host-only cleanup ownership.
     shell_cleanup_vms: BTreeMap<String, String>,
     shell_attachments: BTreeMap<String, String>,
     workers: BTreeMap<String, WorkerStatus>,
@@ -2766,7 +2745,6 @@ enum RequestAuthority {
     Shared,
     HostLifecycle,
     HostPublishedAcp,
-    RelayDevelopment,
     RelayMcp,
     RelayAcp,
     /// A shell's relay or a job's capability, never the host owner.
@@ -2793,7 +2771,6 @@ impl PublicRequest {
             | Self::AcpPublishedStatus { .. }
             | Self::AcpPublishedCancel { .. }
             | Self::AcpPublishedRespond { .. } => RequestAuthority::HostPublishedAcp,
-            Self::DevSbx { .. } => RequestAuthority::RelayDevelopment,
             Self::McpPublish { .. } | Self::McpLoad { .. } | Self::McpUnpublish { .. } => {
                 RequestAuthority::RelayMcp
             }
@@ -2846,9 +2823,6 @@ impl RequestAuthority {
             (Self::HostPublishedAcp, AuthenticationScope::Relay(_)) => {
                 Some("published ACP control requires the host owner")
             }
-            (Self::RelayDevelopment, AuthenticationScope::Master) => {
-                Some("development scope requires an attached relay")
-            }
             (Self::RelayMcp, AuthenticationScope::Master) => {
                 Some("MCP publication requires an attached project-shell session token")
             }
@@ -2861,10 +2835,9 @@ impl RequestAuthority {
             (_, AuthenticationScope::Capability(_))
             | (Self::Shared, AuthenticationScope::Master | AuthenticationScope::Relay(_))
             | (Self::HostLifecycle | Self::HostPublishedAcp, AuthenticationScope::Master)
-            | (
-                Self::RelayDevelopment | Self::RelayMcp | Self::RelayAcp | Self::GuestOpen,
-                AuthenticationScope::Relay(_),
-            ) => None,
+            | (Self::RelayMcp | Self::RelayAcp | Self::GuestOpen, AuthenticationScope::Relay(_)) => {
+                None
+            }
         }
     }
 }
@@ -5127,7 +5100,6 @@ pub struct Server {
     stock_sbx: Option<PathBuf>,
     stock_sbx_probe_interval: Duration,
     protected_guest_roots: Vec<PathBuf>,
-    dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
     events: Arc<events::Bus>,
     /// Production daemons watch their own executable (`upgrade.rs`).
@@ -5238,7 +5210,6 @@ impl Server {
             stock_sbx: None,
             stock_sbx_probe_interval: STOCK_SBX_PROBE_INTERVAL,
             protected_guest_roots: Vec::new(),
-            dev_broker: None,
             splits,
             events,
             upgrade: None,
@@ -5341,13 +5312,6 @@ impl Server {
     #[must_use]
     pub fn with_kept_split_retention(self, retention: Duration) -> Self {
         self.splits.set_kept_retention(retention);
-        self
-    }
-
-    /// Serve `DevSbx` relay requests for development grants.
-    #[must_use]
-    pub fn with_dev_broker(mut self, broker: Arc<dev_broker::DevBroker>) -> Self {
-        self.dev_broker = Some(broker);
         self
     }
 
@@ -5843,7 +5807,6 @@ impl Server {
             mcp_host: self.mcp_host.clone(),
             stock_sbx: self.stock_sbx.clone(),
             protected_guest_roots: self.protected_guest_roots.clone(),
-            dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
             events: Arc::clone(&self.events),
             upgrade: self.upgrade.clone(),
@@ -5956,7 +5919,6 @@ struct ConnectionHandler {
     /// The stock SBX executable this daemon's identity pins.
     stock_sbx: Option<PathBuf>,
     protected_guest_roots: Vec<PathBuf>,
-    dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
     events: Arc<events::Bus>,
     upgrade: Option<Arc<upgrade::UpgradeWatch>>,
@@ -6078,7 +6040,7 @@ mod mount_guard_tests {
         let home = temp.path().join("home");
         fs::create_dir(&project).unwrap();
         fs::create_dir(&home).unwrap();
-        // Like ~/.local/state/marsh in a dev VM whose daemon uses
+        // Like ~/.local/state/marsh in a shell VM whose daemon uses
         // MARSH_CONTROL_HOME: the product root was never created.
         let absent = home.join(".local/state/marsh");
         assert!(reject_guest_mount_overlap(&[&project], std::slice::from_ref(&absent)).is_ok());
@@ -7091,17 +7053,12 @@ impl ConnectionHandler {
                 stream.set_read_timeout(None)?;
                 stream.set_write_timeout(None)?;
                 let progress = PreparationProgress::new(stream);
-                let prepared = if dev {
-                    self.backend.prepare_dev(
-                        &selection,
-                        &session,
-                        progress.clone(),
-                        self.store.clone(),
-                    )
-                } else {
-                    self.backend
-                        .prepare(&selection, &session, progress.clone(), self.store.clone())
-                };
+                let prepared = self.backend.prepare(
+                    &selection,
+                    &session,
+                    progress.clone(),
+                    self.store.clone(),
+                );
                 match prepared {
                     Ok(result) => progress.send(&PreparationFrame::Complete { result }),
                     Err(error) => {
@@ -7320,27 +7277,6 @@ impl ConnectionHandler {
             &request.token,
             &mut request.body,
         )?;
-        if let PublicRequest::DevSbx { argv, pty, cwd } = &request.body {
-            // The relay's authentication is the capability: the session is
-            // the relay owner, never a payload field.
-            let AuthenticationScope::Relay(session) = &authentication_scope else {
-                return Self::reject_unauthorized(
-                    &mut stream,
-                    "development grant requires a relay",
-                );
-            };
-            let Some(broker) = &self.dev_broker else {
-                return dev_broker::stream::reject(&stream, "development broker is not enabled");
-            };
-            stream.set_read_timeout(None)?;
-            stream.set_write_timeout(None)?;
-            let result = broker.serve(&stream, session, argv, *pty, cwd.as_deref());
-            if let Err(error) = &result {
-                // Report in-band; a peer already streaming treats it as terminal.
-                let _ = dev_broker::stream::reject(&stream, &error.to_string());
-            }
-            return result;
-        }
         if let (PublicRequest::OpenUrl { url }, AuthenticationScope::Relay(session)) =
             (&request.body, &authentication_scope)
         {
@@ -7723,8 +7659,7 @@ fn authorize_request_session(
         | PublicRequest::Events
         | PublicRequest::ProcessShow
         | PublicRequest::CloudDetached { .. }
-        | PublicRequest::OpenUrl { .. }
-        | PublicRequest::DevSbx { .. } => return Ok(()),
+        | PublicRequest::OpenUrl { .. } => return Ok(()),
     };
     *session = store.authorize_session(token, session)?;
     Ok(())
@@ -7803,10 +7738,6 @@ fn dispatch_request(
         PublicRequest::Prepare { .. } => PublicReply::Error {
             code: ErrorCode::Internal,
             message: "preparation attachment was not established".into(),
-        },
-        PublicRequest::DevSbx { .. } => PublicReply::Error {
-            code: ErrorCode::Internal,
-            message: "development broker request was not handled by the host controller".into(),
         },
         PublicRequest::OpenUrl { .. } => PublicReply::Error {
             code: ErrorCode::InvalidRequest,
@@ -8489,26 +8420,6 @@ impl Client {
         self.request_with_timeout(body, Duration::from_secs(5))
     }
 
-    /// Guest shim: forward one stock `sbx` argv over this relay and relay
-    /// stdio until the host reports the exit status.
-    pub fn dev_sbx(
-        &self,
-        argv: Vec<String>,
-        pty: Option<TerminalSize>,
-        cwd: Option<PathBuf>,
-    ) -> Result<i32, DaemonError> {
-        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
-        write_frame(
-            &mut stream,
-            &Envelope {
-                protocol: PROTOCOL.into(),
-                token: self.token.clone(),
-                body: PublicRequest::DevSbx { argv, pty, cwd },
-            },
-        )?;
-        Ok(dev_broker::stream::run_client(stream))
-    }
-
     /// One request whose reply may take up to `read_timeout` (a host
     /// publication runs a host CLI; `request` allows 5 s).
     ///
@@ -9159,15 +9070,14 @@ impl Client {
         selection: LoadSelection,
         session: SessionSpec,
     ) -> Result<PreparationResult, DaemonError> {
-        self.prepare_with_progress(selection, session, false, io::stderr())
+        self.prepare_with_progress(selection, session, io::stderr())
     }
 
-    /// `prepare` for a `--dev` session (`dev`: warm the dev shell VM).
+    /// `prepare`, writing cold-boot notices to `progress_output`.
     pub fn prepare_with_progress(
         &self,
         selection: LoadSelection,
         session: SessionSpec,
-        dev: bool,
         mut progress_output: impl Write,
     ) -> Result<PreparationResult, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
@@ -9179,7 +9089,7 @@ impl Client {
                 body: PublicRequest::Prepare {
                     selection,
                     session,
-                    dev,
+                    dev: false,
                 },
             },
         )?;
