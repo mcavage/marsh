@@ -1,17 +1,51 @@
 """File selection for CI builds, model checking and image publication."""
+import os
 import pathlib
 import re
 import subprocess
 import unittest
 
-SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts/ci-changes.sh"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts/ci-changes.sh"
 LANES = ("code", "host", "tools", "model", "images", "renovate")
+
+# Files a Rust source names at compile time or in a test: include_str!/
+# include_bytes! relative to the source file, and paths built from
+# CARGO_MANIFEST_DIR relative to the crate.
+INCLUDE = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"')
+MANIFEST_CONCAT = re.compile(r'env!\("CARGO_MANIFEST_DIR"\)\s*,\s*"([^"]+)"')
+MANIFEST_JOIN = re.compile(r'env!\("CARGO_MANIFEST_DIR"\)\)\s*\.join\(\s*"([^"]+)"')
 
 
 def classify(*files):
     result = subprocess.run(["sh", str(SCRIPT)], input="".join(f + "\n" for f in files),
                             capture_output=True, text=True, timeout=30, check=True)
     return dict(line.split("=") for line in result.stdout.split())
+
+
+def crate_dir(source):
+    for parent in source.parents:
+        if (parent / "Cargo.toml").is_file():
+            return parent
+    raise AssertionError(f"{source} is not in a crate")
+
+
+def rust_test_inputs():
+    """Every repository file the workspace's Rust sources read by path."""
+    found = {}
+    for source in sorted((ROOT / "crates").rglob("*.rs")):
+        text = source.read_text(encoding="utf-8", errors="replace")
+        targets = [source.parent / rel for rel in INCLUDE.findall(text)]
+        crate = crate_dir(source)
+        targets += [crate / rel.lstrip("/") for rel in MANIFEST_CONCAT.findall(text) + MANIFEST_JOIN.findall(text)]
+        for target in targets:
+            target = pathlib.Path(os.path.normpath(target))
+            if not target.exists():
+                continue
+            files = [target] if target.is_file() else [path for path in target.rglob("*") if path.is_file()]
+            for path in files:
+                found.setdefault(path.relative_to(ROOT).as_posix(), source.relative_to(ROOT).as_posix())
+    return found
 
 
 class CiChanges(unittest.TestCase):
@@ -34,10 +68,7 @@ class CiChanges(unittest.TestCase):
         self.check([".github/workflows/model.yml"], "tools", "model")
 
     def test_image_only_updates_skip_rust_and_models(self):
-        self.check(["kits/marsh-claude/claude.yaml"], "tools", "images")
-        self.check(["packaging/shell/Dockerfile", "kits/marsh-pi/package-lock.json",
-                    "tests/acceptance/fixture/fixture.dockerfile",
-                    "tests/acceptance/acp-fixture/acp-fixture.dockerfile"], "tools", "images")
+        self.check(["packaging/shell/Dockerfile", "tests/acceptance/fixture/fixture.dockerfile"], "tools", "images")
         self.check(["scripts/publish-kits.py"], "tools", "images")
         self.check(["scripts/third-party-notices.py"], "tools")
 
@@ -49,6 +80,32 @@ class CiChanges(unittest.TestCase):
         self.assertIsNotNone(job, "ci.yml has no images job")
         self.assertRegex(job.group(1), r"run: python3 scripts/prepare-svc-engine-image\.py --docker docker --output ")
         self.assertNotRegex(job.group(1), r"--push\b|docker push|kit-publish|--repository")
+
+    def test_kit_and_command_inputs_the_rust_tests_read_run_the_rust_lanes(self):
+        # marsh-contracts reads every Kit file and the packaged command
+        # tables; marsh-acp reads the ACP fixture. A Renovate bump of one of
+        # them must not report "CI passed" without those tests.
+        for path in ("kits/marsh-claude/claude.yaml", "kits/marsh-pi/package-lock.json",
+                     "tests/acceptance/acp-fixture/acp-fixture.dockerfile"):
+            self.check([path], "code", "host", "tools", "images")
+        self.check(["kits/marsh-tools/Dockerfile"], "code", "host", "tools")
+        for path in ("packaging/commands.json", "tests/acceptance/fixture/commands.json"):
+            self.check([path], "code", "host", "tools", "images")
+        self.check(["packaging/drive-commands.json"], "code", "host", "tools")
+
+    def test_every_file_a_rust_test_reads_runs_the_rust_lanes(self):
+        inputs = rust_test_inputs()
+        # The scan must keep finding the known readers.
+        for path in ("packaging/commands.json", "tests/acceptance/acp-fixture/host.py",
+                     "tests/acceptance/acp-fixture/agent.mjs", "kits/marsh-claude/claude.yaml"):
+            self.assertIn(path, inputs)
+        missed = {}
+        for path, reader in inputs.items():
+            lanes = classify(path)
+            if lanes["code"] != "true" or lanes["host"] != "true":
+                missed[path] = reader
+        self.assertEqual(missed, {}, "files read by Rust sources that do not select the Rust lanes "
+                         "(add them to code= in scripts/ci-changes.sh)")
 
     def test_rust_and_real_binary_callers_run_both_platforms(self):
         for path in ("crates/marsh-sbx/src/lib.rs", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml",

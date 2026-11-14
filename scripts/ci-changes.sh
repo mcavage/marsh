@@ -9,8 +9,11 @@ if [ -z "$files" ]; then
 fi
 
 ci='^(\.github/workflows/ci\.yml|scripts/ci-changes\.sh)$'
-# Rust tests, real binary callers, and the shell differential harness.
-code="^(crates/|Cargo\\.(toml|lock)\$|rust-toolchain\\.toml\$|vendor/|docs/upstream/|Makefile\$|\\.config/nextest\\.toml\$|tests/mcp/|tests/acceptance/(onboarding\\.py|acp-fixture/typed_host_caller\\.py|bash_suites\\.py|bash_divergences\\.json)\$)|$ci"
+# Rust tests, real binary callers, and the shell differential harness, plus
+# the files the Rust tests read: every Kit (marsh-contracts), the packaged
+# command tables and the ACP fixture (tests/release/test_ci_changes.py
+# derives that list from the sources).
+code="^(crates/|Cargo\\.(toml|lock)\$|rust-toolchain\\.toml\$|vendor/|docs/upstream/|Makefile\$|\\.config/nextest\\.toml\$|tests/mcp/|kits/|packaging/(commands|drive-commands)\\.json\$|tests/acceptance/(onboarding\\.py\$|acp-fixture/|fixture/commands\\.json\$|bash_suites\\.py\$|bash_divergences\\.json\$))|$ci"
 host=$code
 # Tooling tests exercise publisher, acceptance and release scripts without Rust.
 tools="^(scripts/|tests/|evals/|kits/|packaging/|Makefile\$|\\.github/)|$code"
