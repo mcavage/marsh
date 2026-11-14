@@ -426,8 +426,9 @@ refused by the spawn set), and is counted in `marsh status`
   source of skills. The daemon mirrors the folders `sbx skills import` scans
   into it (`skills_mirror.rs`, `marsh config skills-mirror`): at start, and
   two seconds after those folders last changed, it imports the skills whose
-  store copy differs, through a HOME it prepares that holds links to just
-  those skills, and removes the ones it imported whose source is gone. It
+  store copy differs, through a HOME it prepares that holds a copy of just
+  those skills (read by descriptor: a link inside a skill's folder that leads
+  out of it keeps that skill out of the store), and removes the ones it imported whose source is gone. It
   replaces or removes only an entry whose content is what it last imported
   (`skills-mirror.json` in the control home) or what the folder holds now;
   any other entry (an `sbx skills add`) is a clash that `marsh status` names.
