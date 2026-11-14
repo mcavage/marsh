@@ -186,7 +186,6 @@ def main() -> None:
             raise ValueError("shell Dockerfile changed while staging")
         base_inputs = copy_inputs(ROOT / "packaging/image-base", context / "image-base", budget)
         notice_inputs = copy_inputs(ROOT / "packaging/dhi-notices/collected", context / "dhi-notices", budget)
-        pi_inputs = copy_inputs(ROOT / "packaging/shell/pi", context / "pi", budget)
         editor_inputs = copy_inputs(ROOT / "packaging/shell/editors", context / "editors", budget)
         staged_inputs = INPUTS.tree_inventory(context)
         metadata = temporary_root / "metadata.json"
@@ -207,7 +206,7 @@ def main() -> None:
         inputs = {"packaging/shell-image": base_hash, "packaging/shell/Dockerfile": recipe_hash,
                   "packaging/image-base": base_inputs,
                   "scripts/prepare-shell-image.py": script_hash,
-                   "packaging/dhi-notices/collected": notice_inputs, "packaging/shell/pi": pi_inputs,
+                   "packaging/dhi-notices/collected": notice_inputs,
                    "packaging/shell/editors": editor_inputs,
                   "support_scripts": support_hashes}
         phase = "build"
@@ -218,7 +217,6 @@ def main() -> None:
                     or file_hash(Path(__file__)) != script_hash
                     or input_tree(ROOT / "packaging/image-base") != base_inputs
                     or input_tree(ROOT / "packaging/dhi-notices/collected") != notice_inputs
-                    or input_tree(ROOT / "packaging/shell/pi") != pi_inputs
                     or input_tree(ROOT / "packaging/shell/editors") != editor_inputs
                     or support_hashes != {name: file_hash(ROOT / "scripts" / name) for name in support_hashes}):
                 raise ValueError("shell image inputs changed during build")

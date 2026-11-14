@@ -1,9 +1,0 @@
-{
-  "name": "marsh-shell-pi",
-  "private": true,
-  "version": "0.1.0",
-  "description": "Pi coding agent for marsh --dev (version: dependencies).",
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.5.2"
-  }
-}

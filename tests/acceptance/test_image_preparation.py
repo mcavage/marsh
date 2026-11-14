@@ -129,8 +129,6 @@ class ImageCallerTests(unittest.TestCase):
             directory = self.source / "packaging" / name
             directory.mkdir(parents=True)
             (directory / "Dockerfile").write_text("FROM controlled@sha256:" + "a" * 64 + "\n")
-        (self.source / "packaging/shell/pi").mkdir()
-        (self.source / "packaging/shell/pi/package.json").write_text("{}\n")
         (self.source / "packaging/shell/editors").mkdir()
         (self.source / "packaging/shell/editors/input").write_text("controlled editor input\n")
         (self.source / "packaging/shell-image").write_text("example/base@sha256:" + "b" * 64 + "\n")
@@ -183,6 +181,28 @@ class ImageCallerTests(unittest.TestCase):
         self.assertFalse(any(row[1:2] in (["create"], ["run"]) for row in self.calls()))
         verified = self.verify_proof()
         self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_local_authority_accepts_exactly_the_inputs_the_real_helper_records(self):
+        # LOCAL authority binds the producer's proof to captured source
+        # records; an input it demands that the producer no longer records
+        # (such as the removed packaging/shell/pi) must not slip back in.
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        proof = json.loads(self.output.with_name("shell-image.build.json").read_text())
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import local_shell_authority
+        from package_observations import file_digest
+        records = {}
+        for path in self.source.rglob("*"):
+            if path.is_file():
+                records[str(path.relative_to(self.source))] = {
+                    "kind": "file", "sha256": file_digest(path), "mode": path.stat().st_mode & 0o7777}
+        local_shell_authority._captured_image_inputs({"source_files": records}, proof, "shell")
+        self.assertNotIn("packaging/shell/pi", proof["inputs"])
+        with self.assertRaises(ValueError):
+            local_shell_authority._captured_image_inputs(
+                {"source_files": {**records, "packaging/shell/editors/input": {"kind": "file", "sha256": "0"}}},
+                proof, "shell")
 
     def test_candidate_consumer_rejects_missing_or_changed_produced_tag_and_digest(self):
         result = self.invoke()
