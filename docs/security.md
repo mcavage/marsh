@@ -97,8 +97,12 @@ A job (and every child job) mounts the project read-write, but what your Mac's
 `.git/config`, `.git/config.worktree` (when `extensions.worktreeConfig` is on),
 `.git/hooks/`, `.git/info/`, `.git/commondir`, and the submodule and linked
 worktree Git directories `.git/modules/` and `.git/worktrees/`. `.git` itself is
-bound onto itself so it can't be renamed away, and a `.git` file (the project is
-itself a worktree or submodule) is read-only. Before each job marsh makes
+bound onto itself so it can't be renamed away. A `.git` file (the project is
+itself a worktree or submodule, or was made with `--separate-git-dir`) is
+read-only, and when the Git directory it names (or that directory's common
+directory) is inside the project, its controls are guarded the same way; one
+outside the project isn't mounted in the job. A `.git` that is a symlink
+refuses the job. Before each job marsh makes
 missing ones, so a job can't plant them: empty `hooks/`, `info/`, `modules/`
 and `worktrees/` directories, empty `config` and `config.worktree` files, and
 a `commondir` containing `./` (the Git directory itself) in a repository that
@@ -120,25 +124,35 @@ submodule or an existing linked worktree, `git submodule update --init`, and
 `git worktree add`; `git lfs install`, `pre-commit install` and other tools
 that install hooks.
 
-Not covered. No setting of your Mac's Git fixes these; only
-`--ignore-submodules=all` on a single command is safe (a job can override
-`diff.ignoreSubmodules` with `ignore = none` in `.gitmodules`), and the safe
-habit is to review a job's work in a separate checkout:
+**Known gap, not prevented: nested repositories.** `.git/index` stays
+writable so a job can commit, and so a job can create a repository anywhere
+in the project's files and stage or commit it as a submodule, or put a
+repository of its own in a submodule's directory (replacing its `.git` file,
+or in an uninitialised one). Your Mac's `git status`, `diff`, `add -A`/`-u`,
+`commit -a`, `stash`, `merge`, `diff-files` and `diff-index`, and any IDE or
+prompt that runs them, then run Git inside that repository with its config:
+its `core.fsmonitor`, or a `filter.<name>.clean` its `.gitattributes` names.
+The only full prevention is a private index per job, which marsh does not
+have yet (future work). Until then:
 
-- A job can create a repository anywhere in the project's files and stage or
-  commit it as a submodule (`.git/index` stays writable so commits work).
-  Your Mac's `git status`, `diff`, `add -A`/`-u`, `commit -a`, `stash`,
-  `merge`, `diff-files` and `diff-index`, and any IDE or prompt that polls
-  them, then run Git inside that repository with its config: its
-  `core.fsmonitor`, or a `filter.<name>.clean` its `.gitattributes` names.
-- A job can replace an existing submodule's `.git` file with a repository
-  of its own, or create one in an uninitialised submodule's directory.
+- No setting of your Mac's Git fully helps. `diff.ignoreSubmodules` is
+  overridden by `ignore = none` in the job-written `.gitmodules`, and doesn't
+  cover `add -A`, `stash`, `merge`, `diff-files` or `diff-index`; only
+  `--ignore-submodules=all` on a single command skips submodules.
+- Run `git status` (and let your IDE or prompt run it) only in repositories
+  whose contents you trust; after an agent has worked in a project, treat it
+  as untrusted until you have reviewed its changes.
+- Consider reviewing a job's work with host Git in a separate checkout (a
+  fresh clone that fetches the job's branch), not in the project it ran in.
+
+Also not covered:
+
 - An IDE that scans one level down (VS Code by default) opens a nested
   repository the job created even when nothing stages it.
 - A job can write interactive-rebase state (`.git/rebase-merge/`) whose
   `exec` lines run at your next `git rebase --continue`.
 - Hooks your config points into the project (`core.hooksPath`, as husky
-  sets), and a symlinked `.git/hooks`, which a job can edit or re-point.
+  sets), which a job can edit.
 - Your own shell commands (the shell VM mounts the whole project).
 
 A job has no containerd or `sbx` socket and never a Kit VM's Docker engine.

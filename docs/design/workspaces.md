@@ -288,7 +288,9 @@ public state strings.
   that isn't a directory marsh can make refuses the job. It also gets
   `.git/config`, `config.worktree`, `hooks/`, `info/`, `modules/`,
   `worktrees/` and `commondir` (made, as `./`, when missing; a `commondir`
-  naming another directory, or a symlinked control, refuses the job) as read-only
+  naming another directory, a symlinked control or a symlinked `.git`
+  refuses the job; a `.git` file's Git directory inside the project is
+  guarded the same way) as read-only
   binds, under `.git` bound onto itself (`project_guards` in
   `marsh-backend`; `docs/security.md` Git in jobs).
   A Kit job whose project root itself lies inside a `.marsh` directory (a
