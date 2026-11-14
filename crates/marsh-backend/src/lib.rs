@@ -4404,15 +4404,15 @@ const COMMONDIR_SELF: &[u8] = b"./\n";
 /// read-only, what a host `git` reads code or a Git dir from (`config`,
 /// `config.worktree`, `hooks/`, `info/`, `commondir`, and the submodule and
 /// linked-worktree Git dirs `modules/` and `worktrees/`), under `.git` bound
-/// onto itself so it can't be renamed away. Missing `hooks/`, `info/`,
-/// `modules/` and `worktrees/` are made empty, and a missing `commondir` is
-/// written as [`COMMONDIR_SELF`], so a job can't plant them. A gitfile is
+/// onto itself so it can't be renamed away. Missing ones are made (empty,
+/// and `commondir` as [`COMMONDIR_SELF`]), so a job can't plant them. A gitfile is
 /// bound read-only whole. Commit, branch and fetch still write objects, refs
 /// and the index; `git config` fails.
 ///
 /// # Errors
 /// Fails closed, with the reason, when `.marsh` can't be made a real
-/// directory or a missing guard can't be made.
+/// directory, a missing guard can't be made, a control is a symlink or of
+/// the wrong type, or `commondir` names another directory.
 fn project_guards(project: &Path) -> Result<Vec<(PathBuf, bool)>, String> {
     let marsh_failed = |why: String| {
         format!(
@@ -4438,16 +4438,14 @@ fn project_guards(project: &Path) -> Result<Vec<(PathBuf, bool)>, String> {
                     _ => {}
                 }
             }
-            let mut placeholders = vec![("commondir", COMMONDIR_SELF)];
-            // Read only when the read-only config turns it on.
-            if std::fs::read(git.join("config")).is_ok_and(|config| {
-                String::from_utf8_lossy(&config)
-                    .to_ascii_lowercase()
-                    .contains("worktreeconfig")
-            }) {
-                placeholders.push(("config.worktree", b""));
-            }
-            for (name, bytes) in placeholders {
+            // Made empty when missing (`config.worktree` is read only when
+            // the config turns it on, which a job can't), so a job can't
+            // plant them.
+            for (name, bytes) in [
+                ("commondir", COMMONDIR_SELF),
+                ("config", &b""[..]),
+                ("config.worktree", &b""[..]),
+            ] {
                 let created = std::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
@@ -4460,7 +4458,8 @@ fn project_guards(project: &Path) -> Result<Vec<(PathBuf, bool)>, String> {
                     _ => {}
                 }
             }
-            let controls = [
+            let mut controls = Vec::new();
+            for (name, directory) in [
                 ("config", false),
                 ("config.worktree", false),
                 ("hooks", true),
@@ -4468,19 +4467,33 @@ fn project_guards(project: &Path) -> Result<Vec<(PathBuf, bool)>, String> {
                 ("modules", true),
                 ("worktrees", true),
                 ("commondir", false),
-            ]
-            .into_iter()
-            .filter(|(name, directory)| {
-                std::fs::symlink_metadata(git.join(name)).is_ok_and(|metadata| {
-                    if *directory {
+            ] {
+                let path = git.join(name);
+                let fits = std::fs::symlink_metadata(&path).is_ok_and(|metadata| {
+                    if directory {
                         metadata.is_dir()
                     } else {
                         metadata.is_file()
                     }
-                })
-            })
-            .map(|(name, _)| (git.join(name), false))
-            .collect::<Vec<_>>();
+                });
+                if !fits {
+                    return Err(format!(
+                        "{} is a symlink or not a {}; marsh can't keep jobs from changing it",
+                        path.display(),
+                        if directory { "directory" } else { "file" }
+                    ));
+                }
+                controls.push((path, false));
+            }
+            // A `commondir` naming another directory moves the config and
+            // hooks Git reads there, out of these binds.
+            let common = std::fs::read(git.join("commondir")).unwrap_or_default();
+            if !matches!(String::from_utf8_lossy(&common).trim_end(), "." | "./") {
+                return Err(format!(
+                    "{} names another Git directory; marsh can't keep jobs from changing that one's config and hooks",
+                    git.join("commondir").display()
+                ));
+            }
             guards.push((git, true));
             guards.extend(controls);
         }
@@ -6245,27 +6258,27 @@ mod tests {
             Some(".git/commondir".into())
         )));
         assert_eq!(fs::read(project.join(".git/commondir")).unwrap(), b".\n");
-        // `config.worktree` is guarded once the config turns it on.
-        assert!(!project.join(".git/config.worktree").exists());
-        fs::write(
-            project.join(".git/config"),
-            "[extensions]\n\tworktreeConfig = true\n",
-        )
-        .unwrap();
+        // `config.worktree` is made and guarded whatever the config says.
         assert!(direct_job_mounts(&project).contains(&(
             project.join(".git/config.worktree"),
             MountAccess::ReadOnly,
             Some(".git/config.worktree".into())
         )));
-        // A symlinked control entry is never bound (the runtime would refuse
-        // the whole job); a gitfile is read-only whole.
+        // A `commondir` naming another directory (whose config host Git
+        // would read, outside these binds) refuses the job, as does a
+        // symlinked control.
+        fs::write(project.join(".git/commondir"), "common\n").unwrap();
+        let refused = project_guards(&project).unwrap_err();
+        assert!(refused.contains("names another Git directory"), "{refused}");
+        fs::write(project.join(".git/commondir"), "./\n").unwrap();
         fs::remove_dir(project.join(".git/hooks")).unwrap();
         std::os::unix::fs::symlink("/tmp", project.join(".git/hooks")).unwrap();
-        assert!(
-            !direct_job_mounts(&project)
-                .iter()
-                .any(|(target, ..)| target == &project.join(".git/hooks"))
-        );
+        let refused = project_guards(&project).unwrap_err();
+        assert!(refused.contains("is a symlink"), "{refused}");
+        fs::remove_file(project.join(".git/commondir")).unwrap();
+        std::os::unix::fs::symlink("/tmp/x", project.join(".git/commondir")).unwrap();
+        assert!(project_guards(&project).is_err());
+        // A gitfile is read-only whole.
         fs::remove_dir_all(project.join(".git")).unwrap();
         fs::write(project.join(".git"), "gitdir: /elsewhere\n").unwrap();
         assert!(direct_job_mounts(&project).contains(&(

@@ -100,8 +100,11 @@ worktree Git directories `.git/modules/` and `.git/worktrees/`. `.git` itself is
 bound onto itself so it can't be renamed away, and a `.git` file (the project is
 itself a worktree or submodule) is read-only. Before each job marsh makes
 missing ones, so a job can't plant them: empty `hooks/`, `info/`, `modules/`
-and `worktrees/` directories, and a `commondir` containing `./` (the Git
-directory itself) in a repository that had none. `marsh` leaves them in place.
+and `worktrees/` directories, empty `config` and `config.worktree` files, and
+a `commondir` containing `./` (the Git directory itself) in a repository that
+had none. `marsh` leaves them in place. The job is refused when one of them
+is a symlink or of the wrong type, or when `commondir` names another
+directory (Git would read config and hooks there).
 With that `commondir`, `git rev-parse --git-common-dir` prints an absolute
 path instead of `.git`; a script that compares it with `--git-dir` to detect
 a linked worktree is fooled. `.marsh` must be a directory marsh can make, or
@@ -117,13 +120,23 @@ submodule or an existing linked worktree, `git submodule update --init`, and
 `git worktree add`; `git lfs install`, `pre-commit install` and other tools
 that install hooks.
 
-Not covered:
+Not covered. No setting of your Mac's Git fixes these; only
+`--ignore-submodules=all` on a single command is safe (a job can override
+`diff.ignoreSubmodules` with `ignore = none` in `.gitmodules`), and the safe
+habit is to review a job's work in a separate checkout:
 
-- A job can create a repository anywhere in the project's files and stage it
-  as a submodule (`.git/index` stays writable so commits work). Your Mac's
-  `git status` then runs Git inside that repository, with its config, and so
-  its `core.fsmonitor`. `git config --global diff.ignoreSubmodules dirty`
-  stops `status` and `diff` from looking inside submodules.
+- A job can create a repository anywhere in the project's files and stage or
+  commit it as a submodule (`.git/index` stays writable so commits work).
+  Your Mac's `git status`, `diff`, `add -A`/`-u`, `commit -a`, `stash`,
+  `merge`, `diff-files` and `diff-index`, and any IDE or prompt that polls
+  them, then run Git inside that repository with its config: its
+  `core.fsmonitor`, or a `filter.<name>.clean` its `.gitattributes` names.
+- A job can replace an existing submodule's `.git` file with a repository
+  of its own, or create one in an uninitialised submodule's directory.
+- An IDE that scans one level down (VS Code by default) opens a nested
+  repository the job created even when nothing stages it.
+- A job can write interactive-rebase state (`.git/rebase-merge/`) whose
+  `exec` lines run at your next `git rebase --continue`.
 - Hooks your config points into the project (`core.hooksPath`, as husky
   sets), and a symlinked `.git/hooks`, which a job can edit or re-point.
 - Your own shell commands (the shell VM mounts the whole project).

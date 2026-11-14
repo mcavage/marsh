@@ -287,7 +287,8 @@ public state strings.
   checkpoint made while it runs is never writable to it, and a `.marsh`
   that isn't a directory marsh can make refuses the job. It also gets
   `.git/config`, `config.worktree`, `hooks/`, `info/`, `modules/`,
-  `worktrees/` and `commondir` (made, as `./`, when missing) as read-only
+  `worktrees/` and `commondir` (made, as `./`, when missing; a `commondir`
+  naming another directory, or a symlinked control, refuses the job) as read-only
   binds, under `.git` bound onto itself (`project_guards` in
   `marsh-backend`; `docs/security.md` Git in jobs).
   A Kit job whose project root itself lies inside a `.marsh` directory (a
