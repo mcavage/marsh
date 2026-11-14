@@ -51,7 +51,7 @@ plain `summary` line of each project of `marsh services status --json`.
 [cloud placement design](../../docs/design/cloud-placement.md#10-observable-acceptance)).
 It creates billed sandboxes, needs `--i-accept-cloud-charges` and a signed-in
 account with cloud sandbox access, and is not part of `make verify`,
-`make regress`, or the release run. Evidence and coverage:
+`make regress`, or the full acceptance run. Evidence and coverage:
 [cloud dispatch](../../docs/plan/cloud-dispatch.md).
 
 There are three ways to run the gate (`run.py` is the full gate; `smoke.py`
@@ -64,7 +64,7 @@ is its fast subset, sharing the same scope harness, `harness.py`):
 - `make acceptance-smoke` builds a fresh candidate in a private directory
   outside the checkout, records a build receipt, and runs the smoke subset.
 - `make acceptance` builds a fresh candidate the same way and runs every
-  observation below. This is the release run.
+  observation below. This is the full acceptance run.
 
 When a build receipt is supplied the harness verifies it against the source
 tree and artifacts before creating any scope; without one (dev runs) that check
@@ -81,7 +81,7 @@ The release and smoke targets use the fixture OCI reference from
 `target/fixture-ref` (written by `make fixture-ref` from the latest release's
 `fixture-ref.txt`; release CI publishes `docker.io/mcavage/marsh-fixture`), or
 `ACCEPTANCE_KIT=repository@sha256:...`. The registry must be allowed by stock
-SBX. Local source and mutable tags do not satisfy the release run. Normal
+SBX. Local source and mutable tags do not satisfy the full acceptance run. Normal
 `make test` is independent of these stock-SBX runs.
 
 ## Environment

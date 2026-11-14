@@ -78,7 +78,7 @@ A registry entry names a native Kit v3 source directory or an immutable Kit OCI
 reference; mutable tags are rejected. The Kit's OCI config and descriptor own
 entrypoint, command, environment, user, workdir, capabilities, network policy,
 and services. The adapter does not translate or add to them. Local source is
-an authoring path; the release run uses published digests.
+an authoring path; the full acceptance run uses published digests.
 
 Each Kit VM runs one retained `sbx exec -i ... marsh-worker --serve`
 transport, which also keeps stock SBX from stopping an idle VM. The worker

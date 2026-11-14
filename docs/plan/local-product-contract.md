@@ -217,9 +217,13 @@ relay. See [self-development](../design/self-development.md).
 
 ## Release gate
 
-A release passes every observation in `../../tests/acceptance/CONTRACT.md`
-with `make acceptance` on stock SBX, using a freshly built candidate and an
-immutable fixture Kit. Unit and mock tests support but do not replace that run.
+A release is gated on every CI lane (`make test`, split into jobs) passing on
+the tagged commit; release.yml runs them before it builds anything. CI starts
+no microVM, so the stock-SBX observations in
+`../../tests/acceptance/CONTRACT.md` (`make acceptance`, with a freshly built
+candidate and an immutable fixture Kit) and `make regress` are manual
+qualification on a Mac. Unit and mock tests support but do not replace that
+run.
 
 ## Out of scope
 

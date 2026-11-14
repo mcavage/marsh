@@ -79,7 +79,7 @@ LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
 
-.PHONY: release help build build-host build-linux prepare-shell-image prepare-svc-engine-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
+.PHONY: help build build-host build-linux prepare-shell-image prepare-svc-engine-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
@@ -98,11 +98,11 @@ help:
 		'make check-reset       Mac: stop the make check scope and delete target/check (run before removing a worktree)' \
 		'make check-gc          Mac: retire warm check scopes whose checkout was deleted (also run by check/verify/regress)' \
 		'make verify [DEV_KIT=ref]  Mac, before pushing: check + the highest-signal sbx suites, concurrently' \
-		'make regress [DEV_KIT=ref]  Mac, before a release: every sbx suite, then make test with the full model' \
+		'make regress [DEV_KIT=ref]  Mac: every sbx suite, then make test with the full model (manual)' \
 		'                        ONLY=/SKIP= suites, families or scenario ids; REGRESS_JOBS=1 one at a time' \
 		'make services-e2e TIER=smoke|full|perf|soak|break [ONLY=ID,ID] [BREAK=mode] [DRIVER=internal|product]  Mac: services E2E (real sbx, takes the VM lock)' \
 		'make services-e2e-gc [DRY_RUN=1]  Mac: remove services E2E leftovers of finished runs (takes the VM lock)' \
-		'make acceptance        Build a fresh candidate and run the full local-v3 stock-SBX gate (release run)' \
+		'make acceptance        Build a fresh candidate and run the full local-v3 stock-SBX gate (manual)' \
 		'make acceptance-smoke  Build a fresh candidate and run the stock-SBX smoke gate' \
 		'make perf              Measure the assembled warm registered-command path' \
 		'' \
@@ -121,7 +121,6 @@ help:
 		'make site              Build the runmar.sh site into $$(SITE_DIR) and check its links' \
 		'make site-check        make site, plus every relative link in tracked Markdown' \
 		'make dist              Package a release tarball (needs pinned KIT_COMMANDS and shell-image)' \
-		'make release VERSION=X.Y.Z  Mac: check main, run make regress, tag with the result, push (DRY_RUN=1, YES=1, SKIP=suite SKIP_REASON=..., WAIVE_REGRESSION=reason)' \
 		'make dev-inner         Inside marsh --dev: build a Linux candidate into $$MARSH_DEV_SCRATCH/artifacts' \
 		'make dev-inner-run CMD=...  Inside marsh --dev: run the inner candidate via the broker'
 
@@ -254,7 +253,8 @@ test-tools:
 	sh tests/kits/acp-proxy.sh
 	node --test tests/kits/pi-acp-patch.test.mjs
 	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
-	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py
+	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py \
+		tests/release/test_release_workflow.py
 
 # The publisher's one dependency, hash-pinned.
 $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
@@ -375,8 +375,6 @@ site:
 site-check: site
 	$(PYTHON) scripts/check-links.py --markdown .
 
-# Cut a stable release: the one way to make a tag the Release workflow accepts.
-# It runs the full regression on this Mac first (scripts/cut-release.py).
 # Release packaging refuses the test-breaks feature (docs/design/test-breaks.md).
 # This fails fast on the feature inputs this Makefile passes to cargo. The
 # compile-time refusal (MARSH_RELEASE_PACKAGING=1) and the packaged-binary check
@@ -384,12 +382,6 @@ site-check: site
 .PHONY: check-release-features
 check-release-features:
 	@case " $(HOST_FEATURES) $(ACCEPTANCE_HOST_FEATURES) $(DEV_FEATURES) " in *test-breaks*) echo 'make: test-breaks is a test-build feature; release packaging refuses it (drop it from HOST_FEATURES, ACCEPTANCE_HOST_FEATURES and DEV_FEATURES)' >&2; exit 1;; esac
-
-release: check-release-features
-	@test "$(origin VERSION)" = "command line" || { echo 'make release: pass VERSION=X.Y.Z on the command line (the Makefile default is not a release version)'; exit 1; }
-	$(PYTHON) scripts/cut-release.py "$(VERSION)" $(if $(DRY_RUN),--dry-run) $(if $(YES),--yes) \
-		$(if $(SKIP),--skip "$(SKIP)" --skip-reason "$(SKIP_REASON)") \
-		$(if $(WAIVE_REGRESSION),--waive-regression "$(WAIVE_REGRESSION)")
 
 # Release packaging. CI (.github/workflows/release.yml) builds the inputs:
 # host binaries, guest artifacts, published Kit digests, and the shell image.

@@ -60,8 +60,8 @@ real `sbx` stack:
 | `make test-model` | quick TLA+ sweep (Docker, or `TLC_RUNNER=java`) | CI's model job runs every config |
 | `make check` | real smoke test of the installed dev product | Mac, after `make dev` |
 | `make verify` | `check` plus the highest-signal sbx suites | Mac, before you push |
-| `make regress` | every sbx suite, then `make test` with the full model | Mac; `make release` runs it |
-| `make acceptance` | builds a fresh candidate, runs the full gate with a receipt | Mac, the release run |
+| `make regress` | every sbx suite, then `make test` with the full model | Mac, by hand |
+| `make acceptance` | builds a fresh candidate, runs the full gate with a receipt | Mac, by hand (the full acceptance run) |
 
 `make test` needs `cargo-nextest`; it stops with an install hint rather than
 falling back to `cargo test`, so it runs exactly what CI runs. CI uses the
@@ -118,13 +118,18 @@ the Rust lanes (the Rust tests read them); Rust
 changes run the Linux and macOS code lanes. Linux runs the full workspace and Bash differential
 tests (against GNU Bash 5.3). macOS PR jobs split the host tests between two
 runners; selected macOS jobs on main also run the platform-neutral workspace
-tests and tooling self-tests. Manual CI runs check everything.
+tests and tooling self-tests. Manual CI runs check everything, and so does the run release.yml
+makes on the commit it is about to build (below). A push to `main` runs only
+the lanes its diff selects, so "CI passed" on a `main` commit does not mean
+`make test` passed on it. Stable, nightly and rehearsal builds re-run every
+lane on the commit they build (a nightly still picks its commit from push CI);
+per-commit Kit images follow the push run.
 
 TLA+ checks run when specs, configs, their runner or shared build/CI inputs
 change. Normal CI excludes the huge configs; those run weekly and in
-`make regress` before releases ([model.yml](.github/workflows/model.yml)).
-Per-commit image publishing runs only when the passing CI run built images.
-Stable and daily nightly releases keep their full build pipeline.
+a manual `make regress` ([model.yml](.github/workflows/model.yml)); no
+release waits for them. Per-commit image publishing runs only when the
+passing CI run built images.
 The macOS release build runs in the nightly and release
 workflows, not in CI. Rust jobs use content-addressed `sccache` compiler
 results across source changes. The isolated Python harness tests run
@@ -142,7 +147,8 @@ a fake `sbx` and temporary homes. Nothing in CI starts a microVM, so `make check
 
 A Linux lane for the real stack would need a Linux workspace-identity backend
 and amd64 guests, which is product work. Until then, the real gate is a Mac:
-`make verify` before you push, `make regress` before a release.
+`make verify` before you push, and `make regress` when you change
+something only the real stack exercises. No release runs either for you.
 
 Prefer tests that run the shipped binaries and check output, exit status,
 receipts, and cleanup over unit tests that restate the implementation. Never
@@ -162,7 +168,7 @@ disk, set `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`.
 
 Run `make test`. Add focused tests for the crate you changed, and on a Mac run
 `make verify` (`make dev` first). `make acceptance` builds a fresh candidate
-and runs the full gate; it is the release run.
+and runs the full acceptance gate, by hand.
 
 ### Shell behavior
 
@@ -252,6 +258,13 @@ By contributing you agree that your work is licensed under the Apache License
 CI stamps the release version into the build without committing it. Do not
 edit a version number in the source.
 
+Before a stable, nightly or rehearsal build builds anything, release.yml runs
+every CI lane (the jobs `make test` is split into, as `ci.yml` with `all`) on
+the exact commit it is about to build, and stops there if any lane fails.
+Nothing in a release starts a microVM: the stock-SBX suites (`make regress`,
+`make acceptance`) and the huge TLA+ configs are manual qualification on a
+Mac, not a release gate.
+
 - **Nightly.** Once a day (08:00 UTC), the newest commit on `main` whose CI run
   passed is published as `X.Y.(Z+1)-nightly.<UTC commit time>.g<sha>`, unless
   `main` has not moved since the last nightly: a GitHub prerelease (the newest
@@ -262,43 +275,30 @@ edit a version number in the source.
 - **Kit images, per commit.** Every commit on `main` whose CI run passes also
   builds and publishes the Kit images (`:nightly`, and the stable `:latest`
   when the rule at the top of `release.yml` allows), so agent updates reach
-  users the same day. That run does not build marsh, publish a prerelease, or
-  touch Homebrew.
-- **Stable.** Run `make release VERSION=X.Y.Z` on the Mac (below). It tags a
-  commit that is on `main` and whose CI run has passed, after the full
-  regression passes on that commit. The tag is the version. That publishes a GitHub Release, Docker Hub images tagged `:X.Y.Z`
-  and `:latest`, and the `marsh` formula.
+  users the same day. That run follows the push CI run's image job instead of
+  a full CI run. It does not build marsh, publish a prerelease, or touch
+  Homebrew.
+- **Stable.** Push a tag `vX.Y.Z` on a commit on `main`. The tag is the
+  version. The Release workflow refuses a tag that is not on `main` or not
+  `X.Y.Z`, runs every CI lane on the commit, and only then publishes a GitHub
+  Release, Docker Hub images tagged `:X.Y.Z` and `:latest`, and the `marsh`
+  formula.
 
 ```sh
-make release VERSION=0.1.3
+git switch main && git pull --ff-only
+git tag v0.1.3 && git push origin v0.1.3
 ```
 
-CI cannot start a microVM, so the regression runs on your Mac, with Docker
-Desktop running. `make release` checks that you are on a clean `main` equal to
-`origin/main`, that CI passed on that commit, and that the tag is new. It then
-runs `make regress` (every sbx suite, then the full model) on that commit and
-refuses to go on if anything fails or `main` moves meanwhile. After you confirm,
-it makes an annotated tag whose message records the result
-(`Regression: passed on <sha> ...`) and pushes it, which starts the release.
-`DRY_RUN=1` stops after the regression; `YES=1` skips the confirmation.
-`SKIP=SUITE SKIP_REASON="..."` leaves a suite out for a known failure that is
-not the release's (for example one that fails the same way on the previous
-release); the reason is required and is written into the tag message as
-`Skipped: SUITE: REASON`, next to the result.
-`WAIVE_REGRESSION="..."` releases without running the regression at all (for
-example when other work on the Mac keeps creating and removing VMs, which the
-regression's cleanup check refuses); every other check still applies, and the
-tag records `Regression: waived on <sha> (REASON)` instead of `passed`. The
-Release workflow refuses a tag that is not annotated with one of those records, so
-`git tag` and `git push` alone do not publish. The check guards against
-accidents: nothing stops someone from typing the line by hand.
+Anyone who can create a `v*` tag can start a stable release. Restrict that
+with a tag ruleset in the repository settings.
 
 To rehearse a release, run the Release workflow by hand with a version: it
-builds a draft and announces nothing. Its images get only the moving tag
-`:draft`, so no tag a user reads moves, and it replaces any earlier draft
-release of the same version. Without a version it publishes a nightly
-from the branch you pick, any time. [.github/workflows/release.yml](.github/workflows/release.yml)
-documents the secrets and the stages.
+runs the same CI, builds a draft and announces nothing. Its images get only
+the moving tag `:draft`, so no tag a user reads moves, and it replaces any
+earlier draft release of the same version. Without a version it publishes a
+nightly from the branch you pick, any time.
+[.github/workflows/release.yml](.github/workflows/release.yml) documents the
+secrets and the stages.
 
 ## Thanks
 

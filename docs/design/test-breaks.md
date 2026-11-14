@@ -89,7 +89,7 @@ fail early; the last two are independent checks at packaging time.
    variable: CI on the host build (`make build-host`), CI and `make build-linux`
    on the guest build (`RELEASE_PACKAGING=1`, see
    `packaging/linux-arm64/Dockerfile`).
-2. **Make.** `make dist` and `make release` fail first when `HOST_FEATURES`,
+2. **Make.** `make dist` fails first when `HOST_FEATURES`,
    `ACCEPTANCE_HOST_FEATURES` or `DEV_FEATURES` contains `test-breaks`
    (`check-release-features`).
 3. **Build receipt** (does not depend on binary contents).

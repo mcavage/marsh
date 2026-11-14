@@ -4,9 +4,13 @@ name: Release
 # three triggers: a tag (stable), a daily schedule (nightly), and every passing
 # CI run on main (the Kit images only).
 #
-#   stable   push a tag vX.Y.Z made by `make release` (it records a passing full
-#            regression on the Mac in the tag). Version = the tag. Publishes the
-#            GitHub Release,
+# Before a stable, nightly or draft build builds anything, the ci job runs
+# every CI lane (ci.yml, the jobs `make test` is split into) on the exact
+# commit it is about to build, whatever that commit changed. Nothing is built
+# or published unless that run passes.
+#
+#   stable   push a tag vX.Y.Z on a commit on main. Version = the tag.
+#            Publishes the GitHub Release,
 #            Docker Hub images (:X.Y.Z, :latest, :release) and the Homebrew
 #            formula `marsh`.
 #   nightly  once a day (08:00 UTC: midnight PST, 1am PDT), from the newest
@@ -75,11 +79,14 @@ on:
         required: false
 permissions:
   contents: read
-# Stable and daily nightly releases keep their own queues. Per-commit runs
+# GitHub keeps one pending run per group and drops an older pending one, so
+# each stable tag has its own group: a tag pushed while another release (with
+# its full CI run) is going is never dropped. Rehearsals and nightlies each
+# keep one queue, where only the newest pending run matters. Per-commit runs
 # classify independently, so an unrelated commit cannot replace a pending
 # image publication. Only their selected image jobs share a queue (below).
 concurrency:
-  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || (github.event_name == 'workflow_run' && format('commit-{0}', github.run_id) || 'nightly') }}
+  group: release-${{ github.event_name == 'push' && format('stable-{0}', github.ref_name) || github.event.inputs.version && 'rehearsal' || github.event_name == 'workflow_run' && format('commit-{0}', github.run_id) || 'nightly' }}
   cancel-in-progress: false
 env:
   KIT_REPOSITORY_PREFIX: docker.io/mcavage
@@ -88,7 +95,6 @@ env:
 
 jobs:
   version:
-    # Nightlies ship only commits whose CI run on main passed.
     if: >-
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -160,22 +166,11 @@ jobs:
             *) channel=nightly; draft=false; stages=images ;;
           esac
           if [ "$channel" = stable ]; then
-            # A release tag comes from `make release` on the Mac, which runs the
-            # full regression (CI cannot start a microVM) and records it in an
-            # annotated tag, or records that it was waived (WAIVE_REGRESSION,
-            # with a reason). Refuse any other tag before anything is built.
-            if [ "$GITHUB_EVENT_NAME" = push ]; then
-              git fetch --quiet --force origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" || true
-              [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME" 2>/dev/null)" = tag ] || {
-                echo "::error::$GITHUB_REF_NAME is not an annotated tag: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
-              git tag --list --format='%(contents)' "$GITHUB_REF_NAME" | grep -Eq "^Regression: (passed|waived) on ${sha:0:7} \(" || {
-                echo "::error::$GITHUB_REF_NAME does not record a passing (or explicitly waived) regression on ${sha:0:7}: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
-            fi
+            # The ci job below runs every CI lane on this commit before
+            # anything is built.
             echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "bad version: $version"; exit 1; }
             if [ "$draft" = false ]; then
-              git merge-base --is-ancestor "$sha" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
-              passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=success" --jq '.total_count')
-              [ "$passed" -ge 1 ] || { echo "CI has not passed on ${sha:0:7}: wait for CI on main to finish, then push the tag again"; exit 1; }
+              git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${sha:0:7} is not on main"; exit 1; }
             fi
             formula=marsh; image_tag=; extra_tags="$version latest"
             # A draft rehearses the pipeline and announces nothing, so it must not
@@ -209,8 +204,34 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "### $channel $version (${sha:0:7})" >> "$GITHUB_STEP_SUMMARY"
 
-  guest:
+  # Every CI lane on the commit this run builds. Per-commit runs (stages
+  # images) skip it: they follow a push CI run of that commit whose image
+  # job passed. The workflow file itself comes from the commit this run was
+  # started on. For a tag or a manual run that is the commit it builds; a
+  # scheduled nightly builds the newest commit on main whose CI passed, which
+  # can be older than main's tip, so tip's ci.yml then drives that older
+  # commit's Makefile and scripts: it checks that commit with tip's lane set
+  # (the Makefile targets each lane runs are the older commit's), and a lane
+  # that needs something newer fails the nightly, which then publishes
+  # nothing.
+  ci:
     needs: version
+    if: needs.version.outputs.stages == 'all'
+    permissions:
+      contents: read
+    # A job-level call resolves at this run's commit, not from a checkout.
+    # actionlint does not know the $/ form yet, and it checks this call's
+    # inputs and secrets against ci.yml.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    with:
+      all: true
+      ref: ${{ needs.version.outputs.sha }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  guest:
+    needs: [version, ci]
     if: needs.version.outputs.stages == 'all'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 60
@@ -236,9 +257,14 @@ jobs:
 
   # The images do not contain the marsh version, so this job builds the
   # checkout as committed and does not stamp it.
+  # A skipped ci job would skip this job too unless the condition says
+  # otherwise: only a per-commit run (stages images) may go without it.
   images:
-    needs: version
-    if: needs.version.outputs.stages != 'none'
+    needs: [version, ci]
+    if: >-
+      !cancelled() && needs.version.result == 'success' &&
+      (needs.ci.result == 'success' && needs.version.outputs.stages == 'all' ||
+       needs.ci.result == 'skipped' && needs.version.outputs.stages == 'images')
     concurrency:
       group: release-images-${{ github.event_name == 'workflow_run' && 'commit' || github.run_id }}
       cancel-in-progress: false

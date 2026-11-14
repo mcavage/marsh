@@ -639,5 +639,5 @@ already loaded servers return an empty list and reject calls.
 
 The black-box protocol, security, and end-to-end cases required for an exact
 candidate are in [`tests/mcp/CONTRACT.md`](../../tests/mcp/CONTRACT.md). The
-local product release gate is
+local product's full acceptance run is
 [`tests/acceptance/CONTRACT.md`](../../tests/acceptance/CONTRACT.md).

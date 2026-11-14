@@ -51,7 +51,7 @@ make test                             # VM-free gate, the same targets CI runs (
 make dev && make check                # the loop: fast real smoke, warm scope in target/check
 make check-reset                      # before removing a worktree (make check-gc recovers if you forget)
 make verify                           # before pushing: check + high-signal suites, concurrent (tests/regress.py)
-make regress                          # every sbx-backed suite, then make test with the full model, before release
+make regress                          # every sbx-backed suite, then make test with the full model (manual)
 make regress ONLY=smoke               # one suite, family, or scenario id (W01-...); REGRESS_JOBS=1 serializes
 python3 tests/perf/warm.py --marsh ~/.marsh-dev/bin/marsh \
   --guest-artifacts ~/.marsh-dev/libexec/marsh --kit <fixture-ref>
@@ -66,7 +66,8 @@ make test-model MODEL_FLAGS=          # every TLA+ config, when cross-component 
 ```
 
 Add focused tests for the crate you changed. Avoid whole-workspace test churn.
-`make acceptance` builds a fresh candidate and is the release run.
+`make acceptance` builds a fresh candidate and runs the full acceptance gate
+(manual). A release runs every CI lane on the tagged commit, not these.
 
 Prioritize real-caller end-to-end evidence over unit-test volume. Exercise the
 built product through its actual CLI/transports on stock SBX (and cloud when

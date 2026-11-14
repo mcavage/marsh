@@ -335,7 +335,7 @@ The default and `make regress` run every config. `--huge` / `--no-huge` split th
 not fit a CI job from the rest: CI's model job runs `--no-huge`, and the weekly
 [model.yml](../../.github/workflows/model.yml) runs `--huge`. `TLC_CACHE=DIR` skips a config whose spec, config,
 jar and `check.sh` are byte-identical to one that already gave its expected verdict (`make test` uses
-`target/tlc-cache`); the release run does not set it. This needs Docker (or `TLC_RUNNER=java` with a local
+`target/tlc-cache`); the full sweep (`make regress`, `MODEL_FLAGS=`) does not set it. This needs Docker (or `TLC_RUNNER=java` with a local
 Java 17+) and the pinned TLA+ tools jar, which `make test-model` downloads and checks (the build is
 mirrored as a release of this repository because upstream replaces its v1.8.0 asset in place; see the
 Makefile). Run directly, `check.sh` takes the jar from `TLA2TOOLS_JAR`. The script exits nonzero if a
