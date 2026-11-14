@@ -2196,17 +2196,28 @@ impl DaemonBackend for StockDaemonBackend {
                     }
                 }) {
                     Ok(mut view) => {
-                        // Narrower-or-equal: a split area created after the
-                        // parent started is still read-only to the child.
+                        // Narrower-or-equal: a split area or Git control
+                        // file the parent's view lacks is still guarded in
+                        // the child.
                         let project = &request.session.launch_directory;
-                        if let Some(marsh) = split_area(project)
-                            && view.iter().any(|mount| &mount.target == project)
-                            && !view.iter().any(|mount| mount.target == marsh)
+                        if let Some(whole) = view
+                            .iter()
+                            .find(|mount| &mount.target == project)
+                            .map(|mount| mount.access == "read_write")
                         {
-                            view.push(PublicMount {
-                                target: marsh,
-                                access: "read_only".into(),
-                            });
+                            for (target, write) in project_guards(project) {
+                                if !view.iter().any(|mount| mount.target == target) {
+                                    view.push(PublicMount {
+                                        target,
+                                        access: if write && whole {
+                                            "read_write"
+                                        } else {
+                                            "read_only"
+                                        }
+                                        .into(),
+                                    });
+                                }
+                            }
                         }
                         view
                     }
@@ -4334,14 +4345,14 @@ fn public_mounts(
         target: target.to_path_buf(),
         access: if write { "read_write" } else { "read_only" }.into(),
     };
-    let mut mounts = match confinement {
-        None => {
-            let mut mounts = vec![mount(&session.launch_directory, true)];
-            if let Some(marsh) = split_area(&session.launch_directory) {
-                mounts.push(mount(&marsh, false));
-            }
-            mounts
-        }
+    let mut mounts: Vec<_> = match confinement {
+        None => std::iter::once(mount(&session.launch_directory, true))
+            .chain(
+                project_guards(&session.launch_directory)
+                    .iter()
+                    .map(|(target, write)| mount(target, *write)),
+            )
+            .collect(),
         Some(confinement) => std::iter::once(mount(&confinement.workspace, true))
             .chain(
                 confinement
@@ -4399,6 +4410,52 @@ fn split_area(project: &Path) -> Option<PathBuf> {
         .map(|_| path)
 }
 
+/// The binds `(target, read_write)` laid over a job's whole-project mount:
+/// `<project>/.marsh` read-only, created first so a job never starts while a
+/// split or checkpoint made later would land in a writable `.marsh`; and the
+/// files a host `git` runs code from read-only (`config`, `hooks/`, `info/`,
+/// `commondir`), under `.git` bound onto itself so it can't be renamed away.
+/// A gitfile is bound read-only whole. Commit, branch and fetch still write
+/// objects, refs and the index; `git config` fails.
+fn project_guards(project: &Path) -> Vec<(PathBuf, bool)> {
+    let _ = marsh_daemon::split_fs::marsh_dir(project);
+    let mut guards = split_area(project)
+        .map(|marsh| (marsh, false))
+        .into_iter()
+        .collect::<Vec<_>>();
+    let git = project.join(".git");
+    match std::fs::symlink_metadata(&git) {
+        Ok(metadata) if metadata.is_file() => guards.push((git, false)),
+        Ok(metadata) if metadata.is_dir() => {
+            for directory in ["hooks", "info"] {
+                let _ = std::fs::create_dir(git.join(directory));
+            }
+            let controls = [
+                ("config", false),
+                ("hooks", true),
+                ("info", true),
+                ("commondir", false),
+            ]
+            .into_iter()
+            .filter(|(name, directory)| {
+                std::fs::symlink_metadata(git.join(name)).is_ok_and(|metadata| {
+                    if *directory {
+                        metadata.is_dir()
+                    } else {
+                        metadata.is_file()
+                    }
+                })
+            })
+            .map(|(name, _)| (git.join(name), false))
+            .collect::<Vec<_>>();
+            guards.push((git, true));
+            guards.extend(controls);
+        }
+        _ => {}
+    }
+    guards
+}
+
 /// Replaces the whole-project mount with subpath binds of the same prepared
 /// grant: the fork read-write plus its Git metadata binds
 /// (`docs/design/workspaces.md` section 8). Every other mount is unchanged.
@@ -4408,21 +4465,30 @@ fn confine_job_mounts(
     confinement: Option<&marsh_daemon::split_confinement::BranchConfinement>,
 ) -> Vec<JobMount> {
     let Some(confinement) = confinement else {
-        // An ordinary job never writes split workspaces (defense in depth
-        // beside the daemon's descriptor-only access to `.marsh`).
+        // An ordinary job never writes split workspaces or checkpoints, nor
+        // what host Git runs (defense in depth beside the daemon's
+        // descriptor-only access to `.marsh`).
         let mut mounts = mounts;
-        if let Some(marsh) = split_area(project)
-            && let Some(whole) = mounts
-                .iter()
-                .find(|mount| mount.target == project && mount.subpath.is_none())
-                .cloned()
+        if let Some(whole) = mounts
+            .iter()
+            .find(|mount| mount.target == project && mount.subpath.is_none())
+            .cloned()
         {
-            mounts.push(JobMount {
-                target: marsh,
-                access: MountAccess::ReadOnly,
-                subpath: Some(PathBuf::from(".marsh")),
-                ..whole
-            });
+            for (target, write) in project_guards(project) {
+                let Ok(subpath) = target.strip_prefix(project).map(Path::to_path_buf) else {
+                    continue;
+                };
+                mounts.push(JobMount {
+                    target,
+                    access: if write && whole.access == MountAccess::ReadWrite {
+                        MountAccess::ReadWrite
+                    } else {
+                        MountAccess::ReadOnly
+                    },
+                    subpath: Some(subpath),
+                    ..whole.clone()
+                });
+            }
         }
         return mounts;
     };
@@ -6042,6 +6108,87 @@ fn with_published_acp(kit: &NativeKitRef, mut agent: KitAgent) -> KitAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn direct_job_mounts(project: &Path) -> Vec<(PathBuf, MountAccess, Option<PathBuf>)> {
+        let whole = JobMount {
+            source: project.to_path_buf(),
+            target: project.to_path_buf(),
+            access: MountAccess::ReadWrite,
+            subpath: None,
+        };
+        confine_job_mounts(vec![whole], project, None)
+            .into_iter()
+            .map(|mount| (mount.target, mount.access, mount.subpath))
+            .collect()
+    }
+
+    #[test]
+    fn direct_jobs_never_write_marsh_even_before_it_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        // A split or checkpoint made while this job runs creates `.marsh`;
+        // the job's mounts were fixed at start, so it must be bound then.
+        let mounts = direct_job_mounts(&project);
+        assert!(
+            mounts.contains(&(
+                project.join(".marsh"),
+                MountAccess::ReadOnly,
+                Some(".marsh".into())
+            )),
+            "{mounts:?}"
+        );
+        assert!(
+            fs::symlink_metadata(project.join(".marsh"))
+                .unwrap()
+                .is_dir()
+        );
+    }
+
+    #[test]
+    fn direct_jobs_see_git_control_files_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(project.join(".git/objects")).unwrap();
+        fs::write(project.join(".git/config"), "[core]\n").unwrap();
+        let mounts = direct_job_mounts(&project);
+        // `.git` is bound onto itself (read-write) so it can't be renamed
+        // away; what host Git runs code from is read-only. `hooks` and
+        // `info` are made when missing so a job can't plant them.
+        let expected = [
+            (".git", MountAccess::ReadWrite),
+            (".git/config", MountAccess::ReadOnly),
+            (".git/hooks", MountAccess::ReadOnly),
+            (".git/info", MountAccess::ReadOnly),
+        ];
+        for (relative, access) in expected {
+            assert!(
+                mounts.contains(&(project.join(relative), access, Some(relative.into()))),
+                "{relative}: {mounts:?}"
+            );
+        }
+        fs::write(project.join(".git/commondir"), ".\n").unwrap();
+        assert!(direct_job_mounts(&project).contains(&(
+            project.join(".git/commondir"),
+            MountAccess::ReadOnly,
+            Some(".git/commondir".into())
+        )));
+        // A symlinked control entry is never bound (the runtime would refuse
+        // the whole job); a gitfile is read-only whole.
+        fs::remove_dir(project.join(".git/hooks")).unwrap();
+        std::os::unix::fs::symlink("/tmp", project.join(".git/hooks")).unwrap();
+        assert!(
+            !direct_job_mounts(&project)
+                .iter()
+                .any(|(target, ..)| target == &project.join(".git/hooks"))
+        );
+        fs::remove_dir_all(project.join(".git")).unwrap();
+        fs::write(project.join(".git"), "gitdir: /elsewhere\n").unwrap();
+        assert!(direct_job_mounts(&project).contains(&(
+            project.join(".git"),
+            MountAccess::ReadOnly,
+            Some(".git".into())
+        )));
+    }
     use marsh_daemon::SessionAuthority;
 
     use std::{

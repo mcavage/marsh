@@ -282,7 +282,12 @@ public state strings.
   names `refs/heads/marsh-split`, so `git commit` updates a writable ref
   and never `HEAD`. Capture also rejects any admin entry outside Git's own
   state files (`commondir`, `gitdir`, `config.worktree`, `hooks`, ...). An
-  ordinary (unconfined) Kit job gets `<root>/.marsh` as a read-only bind.
+  ordinary (unconfined) Kit job gets `<root>/.marsh` as a read-only bind;
+  the backend creates `.marsh` before the job starts, so a split or
+  checkpoint made while it runs is never writable to it. It also gets
+  `.git/config`, `.git/hooks/`, `.git/info/` and an existing
+  `.git/commondir` as read-only binds, under `.git` bound onto itself
+  (`project_guards` in `marsh-backend`).
   A Kit job whose project root itself lies inside a `.marsh` directory (a
   shell opened in a fork) is refused: it would mount the fork as a project
   without its Git metadata and with a writable gitfile. A host command run

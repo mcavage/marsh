@@ -12,6 +12,8 @@ and development shells have the explicit grants described below.
 | Read your real home directory | Not implicitly | Only the project, guest home, and explicitly configured extra directories are mounted |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
+| Change what your Mac's `git` runs in the project | Not through `config`, `hooks/`, `info/` or `commondir` | Each registered command's job gets `.git/config`, `.git/hooks/`, `.git/info/` and an existing `.git/commondir` as read-only binds (a gitfile `.git` read-only whole), and `.git` bound onto itself so it can't be renamed away. It can still commit, branch and fetch; `git config` writes fail. Not covered: a `.git/commondir` the job creates where none existed, a symlinked `hooks/`, and your own shell commands |
+| Change marsh's split copies and checkpoints | No | `<project>/.marsh` is created before each job and bound read-only into it |
 | Read other jobs' logins and history | Yes, when they use the same guest home, unless the job's Kit takes no home | The persistent guest home is shared within a scope; `org.marsh/home@1` keeps it out of a Kit's VM ([Mounts](kits.md#mounts)) |
 | Start other registered commands | Yes, within limits | The job capability socket; `MARSH_SPAWN` narrows it |
 | Reach the network | As its Kit's policy allows | `sbx` enforces the policy; marsh does not inspect traffic |

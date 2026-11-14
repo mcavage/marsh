@@ -190,12 +190,14 @@ fn invalid_entrypoint(words: &[String]) -> bool {
             .any(|word| word.len() > 4096 || word.contains('\0'))
 }
 
-/// A read-only subpath bind may cover part of the same grant mounted whole
-/// (`.marsh` for an ordinary job).
-fn read_only_overlay(whole: &JobMount, part: &JobMount) -> bool {
+/// A subpath bind may cover part of the same grant mounted whole when it is
+/// no wider: read-only (`.marsh`, `.git/config` for an ordinary job), or
+/// read-write under a read-write whole (`.git`, bound onto itself so a job
+/// can't rename it away).
+fn narrowing_overlay(whole: &JobMount, part: &JobMount) -> bool {
     whole.source == part.source
         && whole.subpath.is_none()
-        && part.access == MountAccess::ReadOnly
+        && (part.access == MountAccess::ReadOnly || whole.access == MountAccess::ReadWrite)
         && part
             .subpath
             .as_ref()
@@ -288,8 +290,8 @@ impl JobSpec {
                     && mount.subpath.is_some()
                     && other.subpath.is_some();
                 !shared_subpaths
-                    && !read_only_overlay(mount, other)
-                    && !read_only_overlay(other, mount)
+                    && !narrowing_overlay(mount, other)
+                    && !narrowing_overlay(other, mount)
                     && (mount.source.starts_with(&other.source)
                         || other.source.starts_with(&mount.source))
             }) {
@@ -715,6 +717,29 @@ mod tests {
         let mut mixed = branch.clone();
         mixed.mounts[2].subpath = None;
         assert_eq!(mixed.validate(), Err(JobSpecError::OverlappingMountSource));
+        // An ordinary job's `.git` pin and read-only control files overlay
+        // the read-write project; nothing overlays wider than its whole.
+        let mut direct = job();
+        let project = direct.mounts[0].clone();
+        for (subpath, access) in [
+            (".git", MountAccess::ReadWrite),
+            (".git/config", MountAccess::ReadOnly),
+        ] {
+            direct.mounts.push(JobMount {
+                subpath: Some(subpath.into()),
+                target: project.target.join(subpath),
+                access,
+                ..project.clone()
+            });
+        }
+        assert_eq!(project.access, MountAccess::ReadWrite);
+        assert_eq!(direct.validate(), Ok(()));
+        let mut widened = direct.clone();
+        widened.mounts[0].access = MountAccess::ReadOnly;
+        assert_eq!(
+            widened.validate(),
+            Err(JobSpecError::OverlappingMountSource)
+        );
         for invalid in ["../escape", "/abs", "./a", "a/../b", ""] {
             let mut bad = branch.clone();
             bad.mounts[2].subpath = Some(invalid.into());
