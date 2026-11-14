@@ -26,11 +26,6 @@ Kept apart on purpose (`Suite.groups` / `Suite.avoid`):
   mcp-registry  mcp_load_uat publishes to the per-user stock MCP registry
                 (`sbx mcp`, one refresh lock for every scope of this user):
                 one holder at a time.
-  cpu-heavy     self_dev compiles marsh inside a VM with every core (host load
-                50+). acceptance asserts latency budgets (a two-branch fanout
-                under 1 s: 0.3 s alone, 1.1 s beside the compile; `docker
-                inspect` of a held container racing its 1 s hold), so it never
-                overlaps that compile.
   quiet         timing-budget scenarios (split-overhead) are meaningless under
                 load from sibling suites: they run alone, after the rest.
 """
@@ -194,7 +189,7 @@ class Plan:
                                     est, tiers, ("quiet",) if is_quiet else ()))
 
         candidate("smoke.py", "smoke", 50, ("verify", "regress"), ["--kit", self.kit])
-        candidate("run.py", "acceptance", 530, ("regress",), ["--kit", self.kit], avoid=("cpu-heavy",))
+        candidate("run.py", "acceptance", 530, ("regress",), ["--kit", self.kit])
         suites.append(Suite("sbxenvs", "sbxenvs",
                             [python, str(ACCEPTANCE / "sbxenvs_uat.py"), "--prefix", str(self.prefix),
                              "--kit", self.kit, *self.common()], 120, ("verify", "regress"),
@@ -255,9 +250,6 @@ class Plan:
             print("regress: published-codex and published-acp not scheduled: no `codex` on PATH", file=sys.stderr)
         if sys.platform == "darwin":
             candidate("shell_disconnect.py", "shell-disconnect", 150, ("regress",))
-        suites.append(Suite("self-dev", "self_dev",
-                            [python, str(ACCEPTANCE / "self_dev.py"), "--prefix", str(self.prefix),
-                             "--sbx", self.sbx, "--kit", self.kit], 310, ("regress",), ("cpu-heavy",)))
         # Quiet shards wait for everything else.
         others = tuple(s.name for s in suites if "quiet" not in s.groups)
         for suite in suites:
@@ -419,8 +411,8 @@ def launch(suite: Suite, plan: Plan, environment: dict[str, str]) -> None:
     # check --source-revision against it, so bind each suite to HEAD at its start.
     if "--source-revision" in argv:
         argv[argv.index("--source-revision") + 1] = plan.head()
-    # Harness flag names differ: self_dev and kit_live_install take a file, the rest a directory.
-    evidence_file = {"self_dev": "self-dev.json", "kit_live_install": "kit-live-install.json"}.get(suite.family)
+    # Harness flag names differ: kit_live_install takes a file, the rest a directory.
+    evidence_file = {"kit_live_install": "kit-live-install.json"}.get(suite.family)
     evidence_arg = suite.evidence / evidence_file if evidence_file else suite.evidence
     argv += ["--evidence", str(evidence_arg)]
     if suite.family == "mcp_load":

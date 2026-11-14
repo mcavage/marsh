@@ -187,7 +187,7 @@ def unreachable_worktree_root(source):
     """The enclosing linked worktree whose gitdir is not reachable here, or None.
 
     A linked worktree's `.git` is a `gitdir:` file naming the main checkout's
-    `.git/worktrees/NAME`. Inside the `marsh --dev` shell only the worktree
+    `.git/worktrees/NAME`. Inside a marsh shell only the worktree
     itself is mounted, so Git cannot open it.
     """
     for directory in [Path(source).resolve(), *Path(source).resolve().parents]:
@@ -213,7 +213,7 @@ def git_files(source, *, untracked=False):
     if worktree is None:
         return _git_paths(["git", "-C", str(source), *options, *([] if untracked else ["--cached"]),
                            "--others", "--exclude-per-directory=.gitignore", "-z", "--", "."], environment)
-    # A linked worktree whose repository is not mounted (marsh --dev): list the
+    # A linked worktree whose repository is not mounted (a marsh shell): list the
     # same .gitignore-aware files against an empty private index. Only files that
     # are tracked yet ignored can differ from the host's staging.
     print(f"publish-kits: {worktree} is a linked worktree without its repository; "
