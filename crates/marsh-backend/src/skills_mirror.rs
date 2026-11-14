@@ -2641,6 +2641,12 @@ mod tests {
             imported: Some(true),
             ..change("added", None, Some("2"))
         };
+        let scopeless = HistoryEntry {
+            scope: None,
+            ..proven.clone()
+        };
+        follow(&mut record, &scopeless, &Settled::Made);
+        assert!(record.skills.is_empty());
         follow(&mut record, &proven, &Settled::Uncertain);
         assert!(record.skills.is_empty());
         follow(
@@ -2970,12 +2976,14 @@ mod tests {
     fn a_store_copy_edited_during_the_pass_is_not_removed() {
         let rig = Rig::new();
         let (tool, gone) = (rig.folder().join("tool"), rig.folder().join("gone"));
-        for (folder, body) in [(&tool, "one"), (&gone, "g")] {
+        let other = rig.folder().join("other");
+        for (folder, body) in [(&tool, "one"), (&gone, "g"), (&other, "o")] {
             fs::create_dir_all(folder).unwrap();
             fs::write(folder.join("SKILL.md"), body).unwrap();
         }
         rig.sync().unwrap();
         fs::remove_dir_all(&gone).unwrap();
+        fs::remove_dir_all(&other).unwrap();
         fs::write(tool.join("SKILL.md"), "two").unwrap();
         let edited = rig.stored("gone").join("SKILL.md");
         *rig.fake.during_import.lock().unwrap() = Some(Box::new(move || {
@@ -2986,6 +2994,8 @@ mod tests {
             fs::read_to_string(rig.stored("gone").join("SKILL.md")).unwrap(),
             "the user's edit"
         );
+        // The other removal in the same pass still happens.
+        assert!(!rig.stored("other").exists());
     }
 
     /// A removal whose record cannot be written stays pending, and the

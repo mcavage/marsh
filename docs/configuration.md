@@ -318,10 +318,16 @@ compares the store with each entry still pending:
   store's copy is never taken as the mirror's. It shows as a clash and is
   left alone until you remove it (`sbx skills rm NAME`).
 
-One case cannot be told apart. If marsh stops after an import but
-before its record, and you then `sbx skills add` a skill with exactly the
-content the mirror was importing (or the content it replaced), marsh treats
-your copy as the mirror's, and may later replace or remove it. A different
+If marsh stops between a new skill's import and the moment it marks the
+entry imported (a very short window), the new skill is not taken as the
+mirror's: it shows as a clash, and edits to its folder are not imported
+until you run `sbx skills rm NAME`.
+
+One case cannot be told apart. If marsh stops after an update's or a
+removal's change but before its record, and you then `sbx skills add` a
+skill with exactly the content the mirror was installing (or the content
+it replaced), marsh treats your copy as the mirror's, and may later replace
+or remove it. A different
 copy is never touched. Before it removes a skill, marsh checks again that
 the store's copy is still the one it imported, and leaves it if not.
 
