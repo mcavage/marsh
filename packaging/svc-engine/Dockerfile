@@ -22,7 +22,7 @@ FROM ${SVC_ENGINE_BASE}
 USER root
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.9.3-10 docker-ce-cli=5:29.9.3-10 containerd.io=2.4.2-15 \
+      docker-ce=5:29.9.3-11 docker-ce-cli=5:29.9.3-11 containerd.io=2.4.2-16 \
       docker-compose-plugin=5.7.1-10 \
       xfsprogs util-linux mount iproute2 procps iptables \
  && apt-get clean \
