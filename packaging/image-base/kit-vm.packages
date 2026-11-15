@@ -8,7 +8,7 @@
 # Sandboxes expects of a workload image. The DHI-built Engine packages carry
 # no Debian copyright file. Retained upstream notices accompany the images;
 # package versions are pinned here.
-docker-ce=5:29.9.3-6
+docker-ce=5:29.9.3-7
 docker-ce-cli=5:29.9.3-7
 containerd.io=2.4.2-12
 bash
