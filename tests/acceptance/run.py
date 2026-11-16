@@ -777,7 +777,7 @@ class Harness(IsolatedScope):
                 completed = self.run(
                     [self.marsh, "--load", selection, "-c", "true"],
                     cwd=self.project,
-                    timeout=300,
+                    timeout=900,  # a cold build on a busy machine exceeded 300 s once
                 )
                 if completed.returncode != 0:
                     raise AssertionError(f"--load {selection} failed: {completed.stderr!r}")
