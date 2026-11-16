@@ -5,7 +5,7 @@ use marsh_mcp::{
     default_paths, generated_scope_root_for_workspace,
 };
 use rmcp::{
-    RoleServer, ServiceExt,
+    RoleServer, Service, ServiceExt,
     service::{RxJsonRpcMessage, TxJsonRpcMessage},
     transport::async_rw::JsonRpcMessageCodec,
 };
@@ -14,6 +14,7 @@ use std::{
     os::unix::fs::MetadataExt as _,
     path::{Path, PathBuf},
 };
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 const HELP: &str = "Usage: marsh-mcp MODE --sbx ABS [--workspace ABS] [--scope-root ABS | --home ABS] [--marsh ABS] [--allow-full-sbx-control] [--declaration PATH] [--tool NAME] [--expected-generation UUID]\n\nModes:\n  serve             run a direct bounded stdio MCP server (Codex/Claude)\n  export-serve      run an export-only stdio MCP server for declared tools\n  acp-export-serve  run an export-only stdio MCP server for one published ACP session\n  --tool NAME      select one tool instead of exposing the declaration bundle\n  --expected-generation pins export modes to one publication generation\n  broker-start      idempotently ensure the resident host broker is ready\n  broker-stop       stop an idle resident host broker\n  connect           proxy one bounded stdio MCP session to that broker (stock SBX)\n\nserve without --home/--scope-root drives the marsh CLI's selected home (MARSH_HOME or ~/.marsh); scope_start is then disabled.\nBroker modes default to the generated scope root ~/Library/Application Support/marsh-mcp-scopes/<workspace-hash>\n(<MARSH_CONTROL_HOME>-mcp-scopes/<workspace-hash> when MARSH_CONTROL_HOME is set). Export modes require an explicit command home.
@@ -275,66 +276,62 @@ fn require_private_declaration(path: &Path) -> Result<(), String> {
 }
 
 async fn serve_stdio(server: HostMcp) -> Result<(), String> {
-    let reader = FramedRead::new(
-        tokio::io::stdin(),
-        JsonRpcMessageCodec::<RxJsonRpcMessage<RoleServer>>::new_with_max_length(
-            MAX_MCP_FRAME_BYTES,
-        ),
-    )
-    .take_while(|result| future::ready(result.is_ok()))
-    .filter_map(|result| future::ready(result.ok()));
-    let writer = FramedWrite::new(
-        tokio::io::stdout(),
-        JsonRpcMessageCodec::<TxJsonRpcMessage<RoleServer>>::new_with_max_length(
-            MAX_MCP_FRAME_BYTES,
-        ),
-    );
-    let running = server
-        .clone()
-        .serve((writer, reader))
-        .await
-        .map_err(|error| format!("cannot start MCP transport: {error}"))?;
-    let wait = running
-        .waiting()
-        .await
-        .map_err(|error| format!("MCP transport failed: {error}"));
-    let shutdown = server.shutdown_session().await;
-    wait?;
-    shutdown
+    let closing = server.clone();
+    serve_framed_stdio(server, "MCP", move || async move {
+        closing.shutdown_session().await
+    })
+    .await
 }
 
 async fn serve_export_stdio(server: marsh_mcp::ExportBundle) -> Result<(), String> {
-    let reader = FramedRead::new(
-        tokio::io::stdin(),
-        JsonRpcMessageCodec::<RxJsonRpcMessage<RoleServer>>::new_with_max_length(
-            MAX_MCP_FRAME_BYTES,
-        ),
-    )
-    .take_while(|result| future::ready(result.is_ok()))
-    .filter_map(|result| future::ready(result.ok()));
-    let writer = FramedWrite::new(
-        tokio::io::stdout(),
-        JsonRpcMessageCodec::<TxJsonRpcMessage<RoleServer>>::new_with_max_length(
-            MAX_MCP_FRAME_BYTES,
-        ),
-    );
-    let running = server
-        .clone()
-        .serve((writer, reader))
-        .await
-        .map_err(|error| format!("cannot start MCP export transport: {error}"))?;
-    let wait = running
-        .waiting()
-        .await
-        .map_err(|error| format!("MCP export transport failed: {error}"));
-    let shutdown = server.shutdown_server().await;
-    wait?;
-    shutdown
+    let closing = server.clone();
+    serve_framed_stdio(server, "MCP export", move || async move {
+        closing.shutdown_server().await
+    })
+    .await
 }
 
 async fn serve_acp_stdio(server: AcpExportMcp) -> Result<(), String> {
-    let reader = FramedRead::new(
+    serve_framed_stdio(server, "ACP MCP", || async { Ok(()) }).await
+}
+
+/// Serves `service` over this process's stdin and stdout until the peer
+/// disconnects. `label` names the transport in the errors.
+async fn serve_framed_stdio<S, F, Fut>(service: S, label: &str, shutdown: F) -> Result<(), String>
+where
+    S: Service<RoleServer>,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    serve_framed(
+        service,
         tokio::io::stdin(),
+        tokio::io::stdout(),
+        label,
+        shutdown,
+    )
+    .await
+}
+
+/// The order is: start the transport (a failure returns at once and does NOT
+/// run `shutdown`, as the three loops this replaced did), wait for it to end,
+/// run `shutdown`, then report the wait error before the shutdown error.
+async fn serve_framed<S, R, W, F, Fut>(
+    service: S,
+    input: R,
+    output: W,
+    label: &str,
+    shutdown: F,
+) -> Result<(), String>
+where
+    S: Service<RoleServer>,
+    R: AsyncRead + Send + Unpin + 'static,
+    W: AsyncWrite + Send + Unpin + 'static,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    let reader = FramedRead::new(
+        input,
         JsonRpcMessageCodec::<RxJsonRpcMessage<RoleServer>>::new_with_max_length(
             MAX_MCP_FRAME_BYTES,
         ),
@@ -342,20 +339,23 @@ async fn serve_acp_stdio(server: AcpExportMcp) -> Result<(), String> {
     .take_while(|result| future::ready(result.is_ok()))
     .filter_map(|result| future::ready(result.ok()));
     let writer = FramedWrite::new(
-        tokio::io::stdout(),
+        output,
         JsonRpcMessageCodec::<TxJsonRpcMessage<RoleServer>>::new_with_max_length(
             MAX_MCP_FRAME_BYTES,
         ),
     );
-    let running = server
+    let running = service
         .serve((writer, reader))
         .await
-        .map_err(|error| format!("cannot start ACP MCP transport: {error}"))?;
-    running
+        .map_err(|error| format!("cannot start {label} transport: {error}"))?;
+    let wait = running
         .waiting()
         .await
         .map(|_| ())
-        .map_err(|error| format!("ACP MCP transport failed: {error}"))
+        .map_err(|error| format!("{label} transport failed: {error}"));
+    let shutdown = shutdown().await;
+    wait?;
+    shutdown
 }
 
 fn validate_absolute_paths(
@@ -390,7 +390,16 @@ fn next_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::ServerHandler;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
     use tokio_util::{bytes::BytesMut, codec::Decoder};
+
+    struct Idle;
+
+    impl ServerHandler for Idle {}
 
     #[test]
     fn stdio_codec_rejects_oversized_frames() {
@@ -400,5 +409,73 @@ mod tests {
         let mut frame = BytesMut::from(vec![b'x'; MAX_MCP_FRAME_BYTES + 1].as_slice());
         frame.extend_from_slice(b"\n");
         assert!(codec.decode(&mut frame).is_err());
+    }
+
+    /// A shutdown step that records that it ran and returns `result`.
+    fn recording_shutdown(
+        ran: &Arc<AtomicBool>,
+        result: Result<(), String>,
+    ) -> impl FnOnce() -> std::future::Ready<Result<(), String>> + use<> {
+        let ran = Arc::clone(ran);
+        move || {
+            ran.store(true, Ordering::SeqCst);
+            std::future::ready(result)
+        }
+    }
+
+    #[tokio::test]
+    async fn serve_framed_runs_a_session_until_the_peer_disconnects_then_shuts_down() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let (input, output) = tokio::io::split(server_io);
+        let ran = Arc::new(AtomicBool::new(false));
+        let shutdown = recording_shutdown(&ran, Ok(()));
+        let server =
+            tokio::spawn(async move { serve_framed(Idle, input, output, "test", shutdown).await });
+        let client = ().serve(client_io).await.expect("client initializes");
+        client.cancel().await.expect("client closes");
+        assert_eq!(server.await.expect("server task"), Ok(()));
+        assert!(
+            ran.load(Ordering::SeqCst),
+            "shutdown runs after a normal end"
+        );
+    }
+
+    #[tokio::test]
+    async fn serve_framed_names_the_transport_and_skips_shutdown_when_it_never_starts() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        drop(client_io);
+        let (input, output) = tokio::io::split(server_io);
+        let ran = Arc::new(AtomicBool::new(false));
+        let error = serve_framed(
+            Idle,
+            input,
+            output,
+            "test",
+            recording_shutdown(&ran, Ok(())),
+        )
+        .await
+        .expect_err("no peer, no session");
+        assert!(error.starts_with("cannot start test transport:"), "{error}");
+        assert!(
+            !ran.load(Ordering::SeqCst),
+            "an initialization error does not run the shutdown step"
+        );
+    }
+
+    #[tokio::test]
+    async fn serve_framed_reports_a_shutdown_error_after_a_normal_end() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let (input, output) = tokio::io::split(server_io);
+        let ran = Arc::new(AtomicBool::new(false));
+        let shutdown = recording_shutdown(&ran, Err("cleanup failed".to_owned()));
+        let server =
+            tokio::spawn(async move { serve_framed(Idle, input, output, "test", shutdown).await });
+        let client = ().serve(client_io).await.expect("client initializes");
+        client.cancel().await.expect("client closes");
+        assert_eq!(
+            server.await.expect("server task"),
+            Err("cleanup failed".to_owned())
+        );
+        assert!(ran.load(Ordering::SeqCst));
     }
 }
