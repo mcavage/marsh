@@ -7,6 +7,7 @@ fn spec(shell: &ShellFixture, project: &Path, disk_size: &str) -> ServicesVmSpec
         image: shell.spec.image.clone(),
         shell_binary: shell.spec.shell_binary.clone(),
         disk_size: disk_size.into(),
+        pool_bytes: None,
     }
 }
 
@@ -248,4 +249,44 @@ fn reset_with_an_unknown_project_key_touches_nothing() {
     );
     assert_eq!(model.count("rm"), 0);
     assert!(model.vm(&name).is_some());
+}
+
+/// A new VM whose configured disk cannot hold the engine's pool and reserve is
+/// refused before a name is recorded or any stock call is made, with the
+/// engine's own hint; a disk that can hold it, or no pool to hold, creates.
+#[test]
+fn a_disk_too_small_for_the_pool_is_refused_before_a_vm_is_created() {
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    let shell = ShellFixture::new();
+    let project = directory(shell.dir.path(), "project");
+    let pool = 24_u64 << 30;
+    let with_pool = |size: &str, pool| ServicesVmSpec {
+        pool_bytes: pool,
+        ..spec(&shell, &project, size)
+    };
+
+    for size in ["5g", "24g"] {
+        let refused = adapter
+            .ensure_services_vm(&with_pool(size, Some(pool)))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains(&format!("the Docker disk is set to {size}"))
+                && refused
+                    .contains("a 24576 MiB pool needs 25088 MiB (including a 512 MiB reserve)")
+                && refused.contains("marsh config services-disk-size"),
+            "{refused}"
+        );
+        assert!(model.calls().is_empty(), "{size}: {:?}", model.calls());
+        assert_eq!(adapter.recorded_services_vm(&project), None);
+    }
+
+    // 25g holds the pool and the reserve; a 5g disk holds a small test pool.
+    for (size, pool) in [("25g", Some(pool)), ("5g", Some(4_u64 << 30)), ("5g", None)] {
+        let model = StockModel::new();
+        let adapter = model.adapter();
+        let _ = adapter.ensure_services_vm(&with_pool(size, pool));
+        assert_eq!(model.count("create"), 1, "{size} {pool:?}");
+    }
 }

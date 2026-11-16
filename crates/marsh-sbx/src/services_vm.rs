@@ -134,6 +134,10 @@ pub struct ServicesVmSpec {
     /// Docker disk size for a new VM, for example `40g`. Existing VMs keep
     /// the size they were created with.
     pub disk_size: String,
+    /// The engine's Docker pool, which a new VM's disk must hold with the
+    /// engine's reserve (`marsh_services::engine::check_pool_fits`). `None`
+    /// skips the check (the engine's own check still runs at engine start).
+    pub pool_bytes: Option<u64>,
 }
 
 /// Readiness generation: the VM's boot id plus this daemon's counter, which
@@ -218,6 +222,28 @@ fn valid_disk_size(value: &str) -> bool {
         .is_some_and(|gib| (1..=4096).contains(&gib))
 }
 
+/// Refuse a new VM whose configured disk cannot hold the engine's pool plus
+/// its reserve: the engine would only fail at start, leaving the VM behind.
+fn check_disk_holds_pool(spec: &ServicesVmSpec) -> Result<(), SbxError> {
+    let Some(pool_bytes) = spec.pool_bytes else {
+        return Ok(());
+    };
+    let gibibytes = spec
+        .disk_size
+        .trim_end_matches(['g', 'G'])
+        .parse::<u64>()
+        .unwrap_or(0);
+    marsh_services::engine::check_pool_fits(pool_bytes, gibibytes.saturating_mul(1 << 30)).map_err(
+        |why| {
+            SbxError::HostGrantFence(format!(
+                "the Docker disk is set to {}: {}",
+                spec.disk_size,
+                why.trim_start_matches("marsh: ")
+            ))
+        },
+    )
+}
+
 impl StockSbx {
     fn services_key(project: &Path) -> Result<String, SbxError> {
         if !safe_absolute(project) {
@@ -270,6 +296,11 @@ impl StockSbx {
             )));
         }
         let key = Self::services_key(&spec.project)?;
+        // A project with no VM yet gets one now: refuse a disk that cannot
+        // hold the pool before a name is recorded or a VM exists.
+        if self.ownership.lookup(VmPurpose::Services, &key).is_none() {
+            check_disk_holds_pool(spec)?;
+        }
         let name = self.ownership.assign(VmPurpose::Services, &key)?;
         validate_name(&name)?;
         let init_lock = self.services_init_lock(&name);
@@ -333,6 +364,7 @@ impl StockSbx {
                 // Our recorded VM is gone and a VM that is not ours now holds
                 // its name: never exec into, adopt or remove it. This project
                 // takes a new random name.
+                check_disk_holds_pool(spec)?;
                 self.drop_stale_services_record(&name)?;
                 name = self.ownership.assign(VmPurpose::Services, key)?;
                 self.create_services_vm(spec, &name)?;
@@ -343,6 +375,7 @@ impl StockSbx {
                 false
             }
             VmClass::Absent => {
+                check_disk_holds_pool(spec)?;
                 self.create_services_vm(spec, &name)?;
                 true
             }

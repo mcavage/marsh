@@ -246,6 +246,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **config services-disk-size** [*SIZE*]
 : Set, or with no value print, the Docker disk of a newly created Docker VM
   (**1g** to **4096g**, default **40g**). Existing Docker VMs keep theirs.
+  Docker needs 24 GiB plus a 512 MiB reserve, so **marsh docker start** refuses
+  a smaller size before it creates the VM.
 
 **config services-idle-seconds** [*SECONDS*]
 : Set, or with no value print, how long a Docker VM with no job or shell using

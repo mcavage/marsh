@@ -502,6 +502,17 @@ impl ServicesRelays {
             .is_some_and(crate::services_engine::EngineArtifacts::present_in)
     }
 
+    /// The engine's pool size (`MARSH_SERVICES_POOL_BYTES` or the default), as
+    /// a new VM's disk must hold it; `None` when that setting is malformed
+    /// (the engine start says so).
+    #[must_use]
+    pub fn pool_bytes(&self) -> Option<u64> {
+        self.settings
+            .as_ref()
+            .ok()
+            .map(|settings| settings.pool_bytes)
+    }
+
     /// Replaces the channel limits (settings; the defaults are A7's).
     #[must_use]
     pub fn with_limits(mut self, limits: Limits) -> Self {

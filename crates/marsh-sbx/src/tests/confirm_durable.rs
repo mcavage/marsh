@@ -53,6 +53,7 @@ fn the_services_create_waits_for_a_durable_map() {
         image: shell.spec.image.clone(),
         shell_binary: shell.spec.shell_binary.clone(),
         disk_size: "2G".into(),
+        pool_bytes: None,
     };
     let key = project.to_str().unwrap();
     let adapter_over = |model: &Arc<StockModel>, file: &str| {

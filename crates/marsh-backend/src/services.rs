@@ -523,6 +523,11 @@ impl StockDaemonBackend {
             image: self.config.shell.image.clone(),
             shell_binary: self.config.shell.shell_binary.clone(),
             disk_size: settings.disk_size.clone(),
+            pool_bytes: self
+                .services
+                .relays
+                .as_ref()
+                .and_then(|relays| relays.pool_bytes()),
         }
     }
 
@@ -2068,6 +2073,41 @@ mod tests {
                 .is_err()
         );
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// `marsh docker start` with a Docker disk too small for the pool is
+    /// refused before any stock call (the runner here fails every call), with
+    /// the engine's hint, and leaves no VM record and no failure behind.
+    #[test]
+    fn start_with_a_too_small_disk_is_refused_before_any_vm_exists() {
+        let home = tempfile::tempdir().unwrap();
+        let backend = crate::tests::backend_for_kit_identity(home.path(), BTreeMap::new())
+            .with_services_artifacts(home.path().join("artifacts"));
+        let project = fs::canonicalize(tempfile::tempdir().unwrap().keep()).unwrap();
+        fs::write(
+            home.path().join("config.json"),
+            json!({"services_disk_size": "5g"}).to_string(),
+        )
+        .unwrap();
+        let message = backend
+            .services_request(ServicesRequest::Start {
+                root: project.clone(),
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("the Docker disk is set to 5g")
+                && message.contains("marsh config services-disk-size"),
+            "{message}"
+        );
+        assert!(
+            backend
+                .sbx
+                .owned_services_vms()
+                .iter()
+                .all(|(_, key)| key != project.to_str().unwrap())
+        );
+        fs::remove_dir_all(&project).unwrap();
     }
 
     fn config_list(home: &Path, key: &str) -> Vec<String> {

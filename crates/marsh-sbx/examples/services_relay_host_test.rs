@@ -720,6 +720,7 @@ fn main() {
             image: image.clone(),
             shell_binary: binary.clone(),
             disk_size: disk.clone(),
+            pool_bytes: None,
         })
         .collect();
     let mut driver = Driver {
