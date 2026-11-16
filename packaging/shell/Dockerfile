@@ -63,7 +63,7 @@ COPY image-base /tmp/marsh-image-base
 RUN apt-get update \
  && sh /tmp/marsh-image-base/align-packages.sh \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.9.3-11 docker-ce-cli=5:29.9.3-11 containerd.io=2.4.2-16 \
+      docker-ce=5:29.10.0-0 docker-ce-cli=5:29.10.0-0 containerd.io=2.4.2-16 \
       docker-buildx-plugin=0.39.0-10 \
       nodejs-24=24.22.3-0 npm=11.21.2-1 \
       python-3.14=3.14.10-6 python-3.14-minimal=3.14.10-6 \
