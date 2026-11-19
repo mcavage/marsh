@@ -275,3 +275,36 @@ fn successful_native_output_preserves_typed_termination_uncertainty() {
         other => panic!("native success masked or misclassified cleanup uncertainty: {other}"),
     }
 }
+
+/// A leader that is gone while an orphaned descendant keeps the output pipes
+/// open must not hold a capped control call until its (long) deadline.
+#[test]
+fn capped_control_does_not_wait_for_pipe_holders_after_the_leader_exits() {
+    let root = tempfile::tempdir().unwrap();
+    let pid_file = root.path().join("descendant.pid");
+    let script = format!(
+        "sleep 60 & echo $! > {file}.tmp; mv {file}.tmp {file}; exit 3",
+        file = pid_file.display()
+    );
+    let started = Instant::now();
+    let error = run_stock_command_capped(
+        &SystemCommandRunner::new(root.path()),
+        &Invocation {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), script.into()],
+            working_directory: Some(root.path().to_owned()),
+            environment: Vec::new(),
+        },
+        Duration::from_mins(30),
+        4096,
+    )
+    .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(15), "{error}");
+    assert!(error.to_string().contains("drain grace"), "{error}");
+    let descendant: i32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(exits(descendant), "the pipe-holding descendant outlived the call");
+}

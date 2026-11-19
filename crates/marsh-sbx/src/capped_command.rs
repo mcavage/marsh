@@ -104,6 +104,7 @@ pub(crate) fn run_stock_command_capped_with_start(
     });
     let mut outputs = [None, None];
     let mut code = None;
+    let mut exited_at = None;
     let mut identity_uncertain = false;
     let result = (|| -> io::Result<()> {
         loop {
@@ -140,6 +141,15 @@ pub(crate) fn run_stock_command_capped_with_start(
             }
             if code.is_some() && outputs.iter().all(Option::is_some) {
                 return Ok(());
+            }
+            if code.is_some()
+                && exited_at.get_or_insert_with(Instant::now).elapsed()
+                    >= STOCK_COMMAND_CLEANUP_TIMEOUT
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "stock process exited but a descendant kept its output open past the drain grace",
+                ));
             }
             thread::sleep(POLL);
         }

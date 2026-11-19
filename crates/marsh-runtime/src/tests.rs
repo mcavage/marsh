@@ -1641,6 +1641,106 @@ fn bounded_system_runner_kills_descendant_process_group() {
     );
 }
 
+/// `pid` is gone: neither alive nor a zombie awaiting its reaper.
+fn reaped_and_gone(pid: i32) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None)
+            == Err(nix::errno::Errno::ESRCH)
+        {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// The stock call's leader is gone (here it dies by itself, as when something
+/// kills a hung `sbx create`) while an orphaned descendant keeps both output
+/// pipes open. The call must not wait for the pipes' EOF until its own,
+/// possibly hour-long, deadline: it returns shortly after the leader's exit,
+/// kills the descendant, and leaves no zombie.
+#[test]
+fn bounded_system_runner_does_not_wait_for_pipe_holders_after_the_leader_exits() {
+    let directory = tempfile::tempdir().unwrap();
+    let leader_file = directory.path().join("leader.pid");
+    let (attachment, descendant) = spawn_reporting_fixture(format!(
+        "echo $$ > {leader}.tmp; mv {leader}.tmp {leader}; \
+         sleep {DESCENDANT_LIFETIME_SECS} & echo $!; exit 3",
+        leader = leader_file.display()
+    ));
+    let leader: i32 = fs::read_to_string(&leader_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    let started = std::time::Instant::now();
+    let error = run_attachment_bounded(attachment, Duration::from_mins(30)).unwrap_err();
+    let elapsed = started.elapsed();
+
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
+    assert!(
+        elapsed < Duration::from_secs(15),
+        "waited {elapsed:?} for output EOF after the leader exited"
+    );
+    assert!(reaped_and_gone(leader), "the leader was left unreaped");
+    assert!(
+        exits(descendant),
+        "the pipe-holding descendant outlived the call"
+    );
+}
+
+/// A timed-out call kills the whole group, reaps the leader, and returns within
+/// the deadline plus a bounded grace, whatever descendants do with the pipes.
+#[test]
+fn bounded_system_runner_timeout_reaps_leader_and_kills_group() {
+    let directory = tempfile::tempdir().unwrap();
+    let leader_file = directory.path().join("leader.pid");
+    let (attachment, descendant) = spawn_reporting_fixture(format!(
+        "echo $$ > {leader}.tmp; mv {leader}.tmp {leader}; \
+         sleep {DESCENDANT_LIFETIME_SECS} & echo $!; sleep {DESCENDANT_LIFETIME_SECS}",
+        leader = leader_file.display()
+    ));
+    let leader: i32 = fs::read_to_string(&leader_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    let started = std::time::Instant::now();
+    let error = run_attachment_bounded(attachment, FIXTURE_DEADLINE).unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
+    assert!(started.elapsed() < FIXTURE_DEADLINE + Duration::from_secs(10));
+    assert!(reaped_and_gone(leader), "the leader was left unreaped");
+    assert!(exits(descendant), "the descendant outlived the call");
+}
+
+/// Output beyond a pipe's buffer through both pipes is neither truncated nor
+/// deadlocked.
+#[test]
+fn bounded_system_runner_returns_large_output_from_both_pipes() {
+    let invocation = Invocation {
+        program: "/bin/sh".into(),
+        arguments: vec![
+            "-c".into(),
+            "head -c 300000 /dev/zero | tr '\\0' a; head -c 200000 /dev/zero | tr '\\0' b >&2; exit 5"
+                .into(),
+        ],
+        working_directory: None,
+        environment: Vec::new(),
+    };
+    let output = SystemCommandRunner::new("/tmp")
+        .run_bounded(&invocation, Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(output.exit_code, Some(5));
+    assert_eq!(output.stdout, vec![b'a'; 300_000]);
+    assert_eq!(output.stderr, vec![b'b'; 200_000]);
+}
+
 struct TryWaitErrorProcess {
     terminated: Arc<AtomicBool>,
     reaped: Arc<AtomicBool>,

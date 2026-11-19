@@ -589,21 +589,69 @@ fn run_attachment_bounded(attachment: Attachment, timeout: Duration) -> io::Resu
     run_attachment_interruptible(attachment, Some(timeout), &Cancellation::default(), false)
 }
 
-fn spawn_bounded_capture(
-    stream: Box<dyn Read + Send>,
-    label: &'static str,
-) -> thread::JoinHandle<io::Result<Vec<u8>>> {
-    thread::spawn(move || {
-        let mut output = Vec::new();
-        stream.take(8 * 1024 * 1024 + 1).read_to_end(&mut output)?;
-        if output.len() > 8 * 1024 * 1024 {
-            Err(io::Error::other(format!(
-                "control {label} exceeded capture bound"
-            )))
-        } else {
-            Ok(output)
+/// How long a bounded command's output pipes may stay open after its leader
+/// has exited. A descendant that outlives the leader and keeps a pipe open
+/// (an orphaned helper of a killed `sbx create`) must not hold the call until
+/// its deadline; the group is signaled and the call reports it.
+const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+struct BoundedCapture {
+    thread: thread::JoinHandle<io::Result<()>>,
+    captured: Arc<Mutex<Vec<u8>>>,
+}
+
+impl BoundedCapture {
+    fn is_finished(&self) -> bool {
+        self.thread.is_finished()
+    }
+
+    fn captured(&self) -> Vec<u8> {
+        self.captured
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The bytes read so far, once the reader has stopped.
+    fn join(self) -> io::Result<Vec<u8>> {
+        self.thread
+            .join()
+            .map_err(|_| io::Error::other("output reader panicked"))??;
+        Ok(std::mem::take(
+            &mut *self
+                .captured
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ))
+    }
+}
+
+fn spawn_bounded_capture(mut stream: Box<dyn Read + Send>, label: &'static str) -> BoundedCapture {
+    const LIMIT: usize = 8 * 1024 * 1024;
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+    let thread = thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            let count = match stream.read(&mut buffer) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => result?,
+            };
+            if count == 0 {
+                return Ok(());
+            }
+            let mut output = sink
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if output.len() + count > LIMIT {
+                return Err(io::Error::other(format!(
+                    "control {label} exceeded capture bound"
+                )));
+            }
+            output.extend_from_slice(&buffer[..count]);
         }
-    })
+    });
+    BoundedCapture { thread, captured }
 }
 
 fn run_attachment_interruptible(
@@ -633,11 +681,17 @@ fn run_attachment_interruptible(
     let stdout = spawn_bounded_capture(attachment.stdout, "stdout");
     let stderr = spawn_bounded_capture(attachment.stderr, "stderr");
     let mut exit_code = None;
+    let mut exited_at = None;
     let mut identity_uncertain = false;
     let outcome = loop {
         if exit_code.is_none() {
             match attachment.process.try_wait_unreaped() {
-                Ok(code) => exit_code = code,
+                Ok(code) => {
+                    exit_code = code;
+                    if code.is_some() {
+                        exited_at = Some(std::time::Instant::now());
+                    }
+                }
                 Err(error) => {
                     identity_uncertain = true;
                     break Err(error);
@@ -646,6 +700,19 @@ fn run_attachment_interruptible(
         }
         if exit_code.is_some() && stdout.is_finished() && stderr.is_finished() {
             break Ok(());
+        }
+        if exited_at.is_some_and(|at| at.elapsed() >= OUTPUT_DRAIN_GRACE) {
+            break Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "command exited (status {exit_code:?}) but a descendant kept its output \
+                     open for {OUTPUT_DRAIN_GRACE:?}; captured {} bytes of stdout and {} of \
+                     stderr, stderr tail: {:?}",
+                    stdout.captured().len(),
+                    stderr.captured().len(),
+                    String::from_utf8_lossy(&tail(&stderr.captured(), 512)),
+                ),
+            ));
         }
         if let Err(error) = cancel.check() {
             break Err(error);
@@ -682,12 +749,8 @@ fn run_attachment_interruptible(
     };
     // Only admitted cancellable implementations reach these joins; every I/O
     // operation is nonblocking and observes cancel within one 20 ms poll.
-    let stdout = stdout
-        .join()
-        .map_err(|_| io::Error::other("stdout reader panicked"))?;
-    let stderr = stderr
-        .join()
-        .map_err(|_| io::Error::other("stderr reader panicked"))?;
+    let stdout = stdout.join();
+    let stderr = stderr.join();
     if cancellation.is_err() || termination.is_err() || !reaped {
         return Err(process_owner::uncertainty(retained));
     }
@@ -697,6 +760,10 @@ fn run_attachment_interruptible(
         stdout: stdout?,
         stderr: stderr?,
     })
+}
+
+fn tail(bytes: &[u8], limit: usize) -> Vec<u8> {
+    bytes[bytes.len().saturating_sub(limit)..].to_vec()
 }
 
 fn signal_child(pid: u32, signal: JobSignal) -> io::Result<()> {
