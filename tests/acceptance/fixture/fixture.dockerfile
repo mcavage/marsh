@@ -14,7 +14,7 @@ RUN cargo build --release --locked \
 # a -dev build stage (image-base/assemble-packages.sh).
 FROM ${SHELL_IMAGE} AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:a249f094c5e7dee12dee88ad5ad70274cc621dd311a64353bc8876f7c775eb49 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:ac54666cad73016059945e22a9d460cd0a60d869a8a92a8f5c367517eb778531 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
