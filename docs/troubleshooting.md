@@ -188,6 +188,24 @@ To clear it yourself, run `marsh workers reset KIT`, using the Kit name in the
 message, or `marsh workers reset all` to retire all idle or quarantined Kit
 VMs, including one left by a `marsh kit install` that failed.
 
+### A `kit install` that failed or timed out
+
+`marsh kit install NAME REF` creates the Kit's VM before it registers `NAME`.
+If that fails, for example `stock preparation operation create kit VM timed
+out after ...` (the create may still land, so the VM is quarantined), a retry
+says `Kit NAME worker VM is quarantined: marsh-...-k-xxxx` and `marsh status`
+lists the VM under `NAME`. Run `marsh workers reset NAME` with the name you
+gave `kit install` (or `marsh workers reset all`): it removes that VM by the
+UUID marsh recorded for it, as for any Kit VM, and never a VM marsh did not
+record. While the install is still running, `workers reset NAME` says so and
+`workers reset all` leaves it alone; the VM can be reset once the install has
+failed (a create is given up after an hour).
+
+A `sbx` command that marsh gives up on (its time ran out, or it exited while a
+background helper kept its output open) is cut off: marsh stops the command's
+whole process group, reaps it, and waits at most two seconds for its output to
+close, so a stuck helper no longer keeps the daemon busy.
+
 Either way the uncertain jobs stay uncertain, and files the job wrote to your
 project stay as they are. Review them with `git status` and `git diff`, or
 your own tools.
@@ -208,7 +226,7 @@ back for two minutes in case it still lands, then removed or retried.
 |---|---|
 | `marsh workers stop KIT\|all` | Stop idle Kit VMs and keep them; the next call starts them again ([Stopping VMs](kits.md#stopping-vms)) |
 | `marsh gc [--dry-run]` | Remove this home's superseded and long-unused VMs now ([below](#garbage-collection)) |
-| `marsh workers reset KIT` | Remove one idle or quarantined Kit VM |
+| `marsh workers reset KIT` | Remove one idle or quarantined Kit VM (`KIT` may be the name of a `kit install` that failed) |
 | `marsh workers reset all` | Remove all idle or quarantined Kit VMs |
 | `marsh workers reset cloud` | Delete every [Docker Cloud](cloud.md) sandbox this daemon owns |
 | `marsh reset` | Remove the scope's Kit and shell VMs; keep the daemon running. [Services VMs](design/services.md) are skipped; `marsh reset --include-services` lists the projects whose services data it would delete and asks first (`--yes` skips the question) |

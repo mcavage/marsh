@@ -262,7 +262,11 @@ impl StockDaemonBackend {
                 worker.warm = false;
                 worker.quarantine.get_or_insert(record);
             } else {
-                let (kits, spec) = self.spec_for_vm(&vm);
+                let (mut kits, spec) = self.spec_for_vm(&vm);
+                if spec.is_none() {
+                    // A failed `kit install`: `workers reset` takes its name.
+                    kits = self.install_names_for_vm(&vm);
+                }
                 workers.push(WorkerStatus {
                     worker_id: vm.clone(),
                     vm_id: vm.clone(),

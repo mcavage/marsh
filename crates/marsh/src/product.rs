@@ -1378,8 +1378,8 @@ fn write_workers(
             crate::client::serde_label(&worker.health)
         )?;
         if let Some(quarantine) = &worker.quarantine {
-            // The reset command takes a registered name; a VM no command
-            // names (a failed install) is cleared by `reset all`.
+            // The reset command takes a registered name, or the name a failed
+            // install was given; any other unnamed VM is cleared by `reset all`.
             let reset = worker.kits.first().map_or("all", String::as_str);
             writeln!(
                 writer,

@@ -9362,7 +9362,7 @@ pub enum SbxError {
     )]
     AmbiguousWorkerStart { vm: String, detail: String },
     #[error(
-        "worker VM is quarantined and cannot be reused: {0}; retire it with host `marsh workers reset KIT` (`marsh workers reset all` when no command names it yet)"
+        "worker VM is quarantined and cannot be reused: {0}; retire it with host `marsh workers reset KIT` (the Kit's name, or the name a failed `marsh kit install` was given; `marsh workers reset all` retires every idle or quarantined Kit VM)"
     )]
     QuarantinedVm(String),
     #[error(

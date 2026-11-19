@@ -306,5 +306,8 @@ fn capped_control_does_not_wait_for_pipe_holders_after_the_leader_exits() {
         .trim()
         .parse()
         .unwrap();
-    assert!(exits(descendant), "the pipe-holding descendant outlived the call");
+    assert!(
+        exits(descendant),
+        "the pipe-holding descendant outlived the call"
+    );
 }

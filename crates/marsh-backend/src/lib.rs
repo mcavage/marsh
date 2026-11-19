@@ -8,6 +8,7 @@ use marsh_acp::AgentAdapterDeclaration;
 pub mod config;
 mod endpoint;
 mod ephemeral;
+mod failed_install;
 mod kit_auto_update;
 mod kit_descriptors;
 mod kit_lifecycle;
@@ -155,6 +156,8 @@ pub struct StockDaemonBackend {
     configured_mcp_vms: Mutex<BTreeMap<String, BTreeMap<String, String>>>,
     /// Why automatic recovery last left a quarantined Kit VM in place.
     quarantine_recovery: Mutex<BTreeMap<String, String>>,
+    /// Installs that have not registered their command (`failed_install.rs`).
+    install_attempts: Mutex<BTreeMap<String, failed_install::InstallAttempt>>,
     /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
     cloud: cloud::CloudPlacement,
     /// Automatic Kit updates; off unless [`Self::with_auto_update`].
@@ -494,6 +497,7 @@ impl StockDaemonBackend {
             sbxenv_sweep: Mutex::new(sbxenv::Sweep::default()),
             configured_mcp_vms: Mutex::new(BTreeMap::new()),
             quarantine_recovery: Mutex::new(BTreeMap::new()),
+            install_attempts: Mutex::new(BTreeMap::new()),
             cloud: cloud::CloudPlacement::default(),
             auto_update: None,
             kit_updates: Mutex::new(()),
@@ -1813,6 +1817,10 @@ impl DaemonBackend for StockDaemonBackend {
             LoadSelection::All => self.command_names(),
             LoadSelection::Kits(commands) => commands.clone(),
         };
+        // The VM of a `kit install` that has not registered its command is
+        // named by the install's name (`failed_install.rs`).
+        let installs = self.failed_install_specs(selection)?;
+        selected.extend(installs.keys().cloned());
         selected.sort();
         selected.dedup();
         if selected.is_empty() {
@@ -1825,7 +1833,10 @@ impl DaemonBackend for StockDaemonBackend {
         // that name the same exact Kit identity collapse to one owned VM.
         let mut specs = BTreeMap::new();
         for command in &selected {
-            let spec = self.kit_spec(command)?;
+            let spec = match installs.get(command) {
+                Some(spec) => spec.clone(),
+                None => self.kit_spec(command)?,
+            };
             specs.entry(spec.name.clone()).or_insert(spec);
         }
         let locks = specs
@@ -1850,6 +1861,9 @@ impl DaemonBackend for StockDaemonBackend {
             .collect::<Vec<_>>();
         let claim = Self::claim_retirement(&store, specs.keys().cloned().collect())?;
         self.retire_claimed(&store, &specs, &claim)?;
+        for command in installs.keys() {
+            self.forget_install_attempt(command);
+        }
         if matches!(selection, LoadSelection::All) {
             self.retire_unnamed_quarantined(&store)?;
         }
@@ -5388,8 +5402,15 @@ impl StockDaemonBackend {
         }
         if let Some(store) = store {
             let spec = self.kit_spec_for_workload(workload.clone())?;
-            let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
-            self.register_worker(store, &vm)?;
+            self.begin_install_attempt(&command, &reference, &spec.name);
+            let prepared = self
+                .prepare_one_with_progress(&spec, store, |_| Ok(()))
+                .map_err(|error| {
+                    quarantine_hint(error, &command, self.recovery_note(&spec.name).as_deref())
+                })
+                .and_then(|vm| self.register_worker(store, &vm));
+            self.settle_install_attempt(&command);
+            prepared?;
         }
         self.persist_installed_command(&previous, &updated)?;
         if let Some(tag) = source {
@@ -5400,6 +5421,7 @@ impl StockDaemonBackend {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&command);
+        self.forget_install_attempt(&command);
         self.installed_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
