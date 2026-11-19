@@ -10,7 +10,7 @@
 # package versions are pinned here.
 docker-ce=5:29.10.0-7
 docker-ce-cli=5:29.10.0-7
-containerd.io=2.4.2-23
+containerd.io=2.4.2-24
 bash
 coreutils
 libc-bin
