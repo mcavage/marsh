@@ -1686,6 +1686,16 @@ fn bounded_system_runner_does_not_wait_for_pipe_holders_after_the_leader_exits()
         elapsed < Duration::from_secs(15),
         "waited {elapsed:?} for output EOF after the leader exited"
     );
+    // A distinct, typed failure (not "ran out of time"): the leader's
+    // status is known but its output may be incomplete, so it is no success.
+    let drain = OutputDrainTimeout::of(&error).expect("a typed drain failure");
+    assert_eq!(drain.status, Some(3));
+    let message = error.to_string();
+    assert!(
+        message.contains("output pipes stayed open for 2s")
+            && message.contains("captured 0 bytes of stdout"),
+        "{message}"
+    );
     assert!(reaped_and_gone(leader), "the leader was left unreaped");
     assert!(
         exits(descendant),

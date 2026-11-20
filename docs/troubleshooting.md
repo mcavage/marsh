@@ -198,28 +198,31 @@ says `Kit NAME worker VM is quarantined: marsh-...-k-xxxx` and `marsh status`
 lists the VM under `NAME`. Run `marsh workers reset NAME` with the name you
 gave `kit install` (or `marsh workers reset all`): it removes that VM by the
 UUID marsh recorded for it, as for any Kit VM, and never a VM marsh did not
-record. While the install is still running, `workers reset NAME` says so and
-`workers reset all` leaves it alone; the VM can be reset once the install has
-failed (a create is given up after an hour).
+record.
+
+- While the install is still running (including its last steps, registering
+  the command), `workers reset NAME` says so and `workers reset all` leaves it
+  alone; the VM can be reset once the install has failed (a create is given up
+  after an hour).
+- For two minutes after a create that did not report, with no VM listed yet,
+  `workers reset NAME` removes nothing and says when to retry, and
+  `workers reset all` skips it: the create may still land, and marsh keeps the
+  quarantine and the record of the VM until it lands (then the next reset
+  removes it) or the two minutes have passed.
+- Installs are tracked per attempt: resetting an older failed attempt never
+  forgets a newer one of the same name. The records are in memory; after a
+  daemon restart `marsh reset` or `marsh stop` removes a leftover VM.
 
 A `sbx` command that marsh gives up on (its time ran out, or it exited while a
 background helper kept its output open) is cut off: marsh stops the command's
 whole process group, reaps it, and waits at most two seconds for its output to
-close, so a stuck helper no longer keeps the daemon busy.
-
-Either way the uncertain jobs stay uncertain, and files the job wrote to your
-project stay as they are. Review them with `git status` and `git diff`, or
-your own tools.
-
-These do not quarantine a VM: a slow image download while a VM is created
-(the create waits up to an hour, as long as `sbx` is working on it), a job
-whose start timed out (marsh cancels it and waits for the worker to confirm
-its container is gone; the job fails with `start_timeout`), a `docker create`
-that did not complete (its container never started, and marsh removes it by
-label), a worker that is slow to answer while busy, reinstalling marsh while
-jobs run (they keep the worker they started on), and a closing shell whose
-mount bookkeeping is busy. A VM create that `sbx` did not report on is held
-back for two minutes in case it still lands, then removed or retried.
+close, so a stuck helper no longer keeps the daemon busy. A command that
+exited but whose output a helper still holds after those two seconds fails
+with `the command exited (status ...) but its output pipes stayed open for 2s
+(a helper process holds them); captured N bytes of stdout and M of stderr,
+stderr tail: ...`, even when its status was 0: its output may be incomplete,
+and for `sbx create` the safe reading is "may still have been created", so the
+VM is quarantined and retired as above.
 
 ## Removing VMs
 

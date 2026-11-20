@@ -179,7 +179,26 @@ pub struct VmQuarantine {
 /// Whether a failed `sbx create` may still finish later: it timed out or its
 /// reply was lost. A create stock SBX reported as failed is over.
 fn create_may_land(error: &SbxError) -> bool {
-    matches!(error, SbxError::PreparationTimeout { .. } | SbxError::Io(_))
+    matches!(
+        error,
+        SbxError::PreparationTimeout { .. } | SbxError::OutputDrain { .. } | SbxError::Io(_)
+    )
+}
+
+/// A stock call's failed `run_bounded`. A drain failure (the command exited,
+/// a helper holds its pipes) keeps its own text and captured output: it is not
+/// the call running out of time.
+fn stock_call_error(error: io::Error, operation: &'static str, timeout: Duration) -> SbxError {
+    if let Some(drain) = marsh_runtime::OutputDrainTimeout::of(&error) {
+        SbxError::OutputDrain {
+            operation,
+            detail: drain.to_string(),
+        }
+    } else if error.kind() == io::ErrorKind::TimedOut {
+        SbxError::PreparationTimeout { operation, timeout }
+    } else {
+        SbxError::Io(error)
+    }
 }
 
 /// A registry Kit reference as stock must read it. Stock's `ResolveReference`
@@ -207,6 +226,8 @@ struct PreparationTimeouts {
     build: Duration,
     load: Duration,
     docker: Duration,
+    /// How long a create that did not report may still land under its name.
+    create_settle: Duration,
     /// A retained worker's Start frame must be written within this.
     start_write: Duration,
     /// Longest a recovery operation waits for a VM's lifecycle fence, however
@@ -222,6 +243,7 @@ impl Default for PreparationTimeouts {
             build: PREPARATION_BUILD_TIMEOUT,
             load: PREPARATION_LOAD_TIMEOUT,
             docker: PREPARATION_DOCKER_TIMEOUT,
+            create_settle: CREATE_SETTLE,
             start_write: KEEPALIVE_READY_TIMEOUT,
             fence: LIFECYCLE_FENCE_WAIT,
         }
@@ -5601,11 +5623,14 @@ impl StockSbx {
                 Some(quarantine)
                     if quarantine.create_pending
                         && unix_millis_now().saturating_sub(quarantine.since_unix_ms)
-                            < u64::try_from(CREATE_SETTLE.as_millis()).unwrap_or(u64::MAX) =>
+                            < u64::try_from(
+                                self.preparation_timeouts.create_settle.as_millis(),
+                            )
+                            .unwrap_or(u64::MAX) =>
                 {
                     Err(format!(
                         "its create did not report; waiting up to {} s for it to settle",
-                        CREATE_SETTLE.as_secs()
+                        self.preparation_timeouts.create_settle.as_secs()
                     ))
                 }
                 _ => Ok("the VM no longer exists".into()),
@@ -5646,6 +5671,38 @@ impl StockSbx {
                 }
             }
         }
+    }
+
+    /// How much longer a Kit VM's create, which did not report, may still land
+    /// under its name: `Some` only while the VM is quarantined for that, is
+    /// not (yet) listed, and the settle time has not passed. One absent
+    /// listing is not settlement: retiring the VM then would forget the
+    /// intent a late landing needs. A listing that fails counts as unsettled.
+    #[must_use]
+    pub fn create_settling(&self, vm: &str) -> Option<Duration> {
+        let quarantine = self
+            .quarantined_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(vm)
+            .cloned()?;
+        let settle = self.preparation_timeouts.create_settle;
+        let elapsed =
+            Duration::from_millis(unix_millis_now().saturating_sub(quarantine.since_unix_ms));
+        let remaining = settle
+            .checked_sub(elapsed)
+            .filter(|remaining| quarantine.create_pending && !remaining.is_zero())?;
+        match self.classify_vm(vm, true) {
+            Ok(VmClass::Absent) | Err(_) => Some(remaining),
+            Ok(_) => None,
+        }
+    }
+
+    /// Shorten the time a create that did not report may still land.
+    #[must_use]
+    pub fn with_create_settle_for_test(mut self, settle: Duration) -> Self {
+        self.preparation_timeouts.create_settle = settle;
+        self
     }
 
     /// Retire a quarantined Kit VM that no registered command names any more
@@ -7599,13 +7656,7 @@ impl StockSbx {
     {
         self.runner
             .run_bounded(&self.invocation(arguments), timeout)
-            .map_err(|error| {
-                if error.kind() == io::ErrorKind::TimedOut {
-                    SbxError::PreparationTimeout { operation, timeout }
-                } else {
-                    SbxError::Io(error)
-                }
-            })
+            .map_err(|error| stock_call_error(error, operation, timeout))
     }
 
     /// When a recovery operation gives up waiting for a VM's fence: its own
@@ -7650,13 +7701,7 @@ impl StockSbx {
                 },
                 timeout,
             )
-            .map_err(|error| {
-                if error.kind() == io::ErrorKind::TimedOut {
-                    SbxError::PreparationTimeout { operation, timeout }
-                } else {
-                    SbxError::Io(error)
-                }
-            })
+            .map_err(|error| stock_call_error(error, operation, timeout))
     }
 
     fn run_bounded_in_os<I, S>(
@@ -7672,13 +7717,7 @@ impl StockSbx {
     {
         self.runner
             .run_bounded(&self.invocation_in(directory, arguments), timeout)
-            .map_err(|error| {
-                if error.kind() == io::ErrorKind::TimedOut {
-                    SbxError::PreparationTimeout { operation, timeout }
-                } else {
-                    SbxError::Io(error)
-                }
-            })
+            .map_err(|error| stock_call_error(error, operation, timeout))
     }
 
     fn require_success(operation: &'static str, output: CommandOutput) -> Result<(), SbxError> {
@@ -9271,6 +9310,14 @@ pub enum SbxError {
     PreparationTimeout {
         operation: &'static str,
         timeout: Duration,
+    },
+    /// A stock command exited but a helper kept its output open: its output
+    /// may be incomplete, so it is a failure, and a create that did this may
+    /// still land.
+    #[error("stock SBX {operation}: {detail}")]
+    OutputDrain {
+        operation: &'static str,
+        detail: String,
     },
     #[error("scope lifecycle deadline expired before {operation}")]
     LifecycleDeadline { operation: &'static str },

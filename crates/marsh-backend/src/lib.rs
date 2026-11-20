@@ -157,7 +157,7 @@ pub struct StockDaemonBackend {
     /// Why automatic recovery last left a quarantined Kit VM in place.
     quarantine_recovery: Mutex<BTreeMap<String, String>>,
     /// Installs that have not registered their command (`failed_install.rs`).
-    install_attempts: Mutex<BTreeMap<String, failed_install::InstallAttempt>>,
+    install_attempts: Mutex<BTreeMap<u64, failed_install::InstallAttempt>>,
     /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
     cloud: cloud::CloudPlacement,
     /// Automatic Kit updates; off unless [`Self::with_auto_update`].
@@ -349,7 +349,14 @@ impl StockDaemonBackend {
                         progress.cold_boot(command.clone(), download)
                     })
                     .map_err(|error| {
-                        quarantine_hint(error, &command, self.recovery_note(&spec.name).as_deref())
+                        let note = self.recovery_note(&spec.name);
+                        quarantine_hint(
+                        error,
+                        &command,
+                        Some(note.as_deref().unwrap_or(
+                            "marsh has not verified yet that nothing is still being created in it",
+                        )),
+                    )
                     })?;
                 // Read the Kit's skills and instructions now: they are cached
                 // per image, so the first job after `--load` does not wait on
@@ -1377,6 +1384,7 @@ const fn replace_after(error: &marsh_sbx::SbxError) -> Replace {
         marsh_sbx::SbxError::WorkerNotReady(_) => Replace::Always,
         marsh_sbx::SbxError::CommandFailed { .. }
         | marsh_sbx::SbxError::PreparationTimeout { .. }
+        | marsh_sbx::SbxError::OutputDrain { .. }
         | marsh_sbx::SbxError::IncompatibleVm { .. }
         | marsh_sbx::SbxError::UnreadableVm { .. }
         | marsh_sbx::SbxError::WorkerLeaseLost(_) => Replace::IfResumed,
@@ -1819,8 +1827,8 @@ impl DaemonBackend for StockDaemonBackend {
         };
         // The VM of a `kit install` that has not registered its command is
         // named by the install's name (`failed_install.rs`).
-        let installs = self.failed_install_specs(selection)?;
-        selected.extend(installs.keys().cloned());
+        let installs = self.failed_install_targets(selection)?;
+        selected.extend(installs.iter().map(|target| target.command.clone()));
         selected.sort();
         selected.dedup();
         if selected.is_empty() {
@@ -1831,13 +1839,18 @@ impl DaemonBackend for StockDaemonBackend {
 
         // Resolve every command before making any lifecycle change. Aliases
         // that name the same exact Kit identity collapse to one owned VM.
+        let registered = self.command_names();
         let mut specs = BTreeMap::new();
         for command in &selected {
-            let spec = match installs.get(command) {
-                Some(spec) => spec.clone(),
-                None => self.kit_spec(command)?,
-            };
-            specs.entry(spec.name.clone()).or_insert(spec);
+            if registered.contains(command) || !installs.iter().any(|t| &t.command == command) {
+                let spec = self.kit_spec(command)?;
+                specs.entry(spec.name.clone()).or_insert(spec);
+            }
+        }
+        for target in &installs {
+            specs
+                .entry(target.spec.name.clone())
+                .or_insert_with(|| target.spec.clone());
         }
         let locks = specs
             .values()
@@ -1861,8 +1874,8 @@ impl DaemonBackend for StockDaemonBackend {
             .collect::<Vec<_>>();
         let claim = Self::claim_retirement(&store, specs.keys().cloned().collect())?;
         self.retire_claimed(&store, &specs, &claim)?;
-        for command in installs.keys() {
-            self.forget_install_attempt(command);
+        for target in &installs {
+            self.forget_install_attempt(target.id);
         }
         if matches!(selection, LoadSelection::All) {
             self.retire_unnamed_quarantined(&store)?;
@@ -5400,17 +5413,19 @@ impl StockDaemonBackend {
                 return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; add the matching sbxenvs file".into()));
             }
         }
+        // The record of a store-backed install lasts until the command is
+        // registered: a reset between the VM's preparation and the registry
+        // write is refused as "still running" rather than retiring the
+        // freshly prepared VM.
+        let mut attempt = None;
         if let Some(store) = store {
             let spec = self.kit_spec_for_workload(workload.clone())?;
-            self.begin_install_attempt(&command, &reference, &spec.name);
-            let prepared = self
-                .prepare_one_with_progress(&spec, store, |_| Ok(()))
+            attempt = Some(self.begin_install_attempt(&command, &reference, &spec.name));
+            self.prepare_one_with_progress(&spec, store, |_| Ok(()))
                 .map_err(|error| {
                     quarantine_hint(error, &command, self.recovery_note(&spec.name).as_deref())
                 })
-                .and_then(|vm| self.register_worker(store, &vm));
-            self.settle_install_attempt(&command);
-            prepared?;
+                .and_then(|vm| self.register_worker(store, &vm))?;
         }
         self.persist_installed_command(&previous, &updated)?;
         if let Some(tag) = source {
@@ -5421,11 +5436,13 @@ impl StockDaemonBackend {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&command);
-        self.forget_install_attempt(&command);
         self.installed_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(command, RegisteredKit { workload });
+        if let Some(attempt) = attempt {
+            attempt.succeeded();
+        }
         Ok(reference)
     }
 

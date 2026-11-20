@@ -234,7 +234,12 @@ impl StockDaemonBackend {
         store: &DaemonStore,
     ) -> Result<(), DaemonError> {
         for vm in self.sbx.quarantined_vms().into_keys() {
-            if self.spec_for_vm(&vm).1.is_some() || store.worker_has_unfinished_jobs(&vm) {
+            // A create that did not report may still land: its quarantine and
+            // intent stay until it settles (`failed_install.rs`).
+            if self.spec_for_vm(&vm).1.is_some()
+                || store.worker_has_unfinished_jobs(&vm)
+                || self.sbx.create_settling(&vm).is_some()
+            {
                 continue;
             }
             self.retire_recovered(store, &vm, None)?;
@@ -246,6 +251,7 @@ impl StockDaemonBackend {
     /// `marsh status`: quarantines the adapter holds (with their reasons)
     /// on the store's workers, and VMs that are not registered workers.
     pub(super) fn annotate_quarantines(&self, workers: &mut Vec<WorkerStatus>, scope_id: &str) {
+        self.prune_registered_attempts();
         let notes = self
             .quarantine_recovery
             .lock()

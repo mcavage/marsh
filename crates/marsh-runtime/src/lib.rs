@@ -595,6 +595,45 @@ fn run_attachment_bounded(attachment: Attachment, timeout: Duration) -> io::Resu
 /// its deadline; the group is signaled and the call reports it.
 const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(2);
 
+/// The error (kind `TimedOut`) of a bounded command whose leader exited but
+/// whose output pipes a descendant kept open for [`OUTPUT_DRAIN_GRACE`]. The
+/// leader's status is known, but its output may be incomplete, so the call
+/// is never reported as a success.
+#[derive(Debug)]
+pub struct OutputDrainTimeout {
+    pub status: Option<i32>,
+    pub stdout_bytes: usize,
+    pub stderr_bytes: usize,
+    pub stderr_tail: String,
+}
+
+impl OutputDrainTimeout {
+    /// The grace the output pipes were given after the command exited.
+    pub const GRACE: Duration = OUTPUT_DRAIN_GRACE;
+
+    /// The drain failure inside `error`, if that is what it is.
+    #[must_use]
+    pub fn of(error: &io::Error) -> Option<&Self> {
+        error.get_ref()?.downcast_ref::<Self>()
+    }
+}
+
+impl std::fmt::Display for OutputDrainTimeout {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "the command exited (status {:?}) but its output pipes stayed open for {:?} (a helper process holds them); captured {} bytes of stdout and {} of stderr, stderr tail: {:?}",
+            self.status,
+            Self::GRACE,
+            self.stdout_bytes,
+            self.stderr_bytes,
+            self.stderr_tail
+        )
+    }
+}
+
+impl std::error::Error for OutputDrainTimeout {}
+
 struct BoundedCapture {
     thread: thread::JoinHandle<io::Result<()>>,
     captured: Arc<Mutex<Vec<u8>>>,
@@ -702,16 +741,15 @@ fn run_attachment_interruptible(
             break Ok(());
         }
         if exited_at.is_some_and(|at| at.elapsed() >= OUTPUT_DRAIN_GRACE) {
+            let (stdout_bytes, stderr) = (stdout.captured().len(), stderr.captured());
             break Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                format!(
-                    "command exited (status {exit_code:?}) but a descendant kept its output \
-                     open for {OUTPUT_DRAIN_GRACE:?}; captured {} bytes of stdout and {} of \
-                     stderr, stderr tail: {:?}",
-                    stdout.captured().len(),
-                    stderr.captured().len(),
-                    String::from_utf8_lossy(&tail(&stderr.captured(), 512)),
-                ),
+                OutputDrainTimeout {
+                    status: exit_code,
+                    stdout_bytes,
+                    stderr_bytes: stderr.len(),
+                    stderr_tail: String::from_utf8_lossy(&tail(&stderr, 512)).into_owned(),
+                },
             ));
         }
         if let Err(error) = cancel.check() {
