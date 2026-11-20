@@ -501,14 +501,14 @@ Docker API; BuildKit is different (see [Builds](#builds-and-the-cache)).
 | Works unchanged | Refused |
 |---|---|
 | `docker run`, `exec`, `logs`, `cp`, `attach`, `stop`, `rm` | Privileged containers (`--privileged`) |
-| `docker compose` (up, down, exec, logs, ...) | Host networking, `--pid host`, `--ipc host`, devices |
+| `docker compose` (up, down, exec, logs, ...), but not Compose's `jobs` ([limits](#limits-and-gaps)) | Host networking, `--pid host`, `--ipc host`, devices |
 | Named volumes, `tmpfs` | Bind mounts of folders outside the project |
 | Bind mounts of folders inside the project | Writes to `.git` and `.marsh` through a bind mount, with exceptions (see [risks](security.md#services-risks-marsh-accepts)) |
 | `-p` publishing (rewritten to loopback) | Docker's built-in `bridge` network (each workspace has its own default network) |
 | Mounting the Docker socket | Devices (`--device`) |
 | `docker pull` from `docker.io` and `ghcr.io` | Pulling from other registries, until Internet is on |
 | `docker build` of a project folder | `docker push`, `docker login`, `docker load`, `docker import`, and a build from a remote context (a URL), on the Docker API |
-| Testcontainers, with Ryuk | Plugins, swarm, and anything else not on the filter's list |
+| Testcontainers, with Ryuk | Plugins, swarm, Compose's `jobs` extension, and anything else not on the filter's list |
 | Resource limits up to the caps below | Limits above the caps, and labels that start with `dev.marsh.` |
 
 Examples of refusals:
@@ -772,6 +772,21 @@ In plain words:
   Because a normal `docker build -t` is not covered (above), a lane can build over a tag
   another lane created; closing the first lane then removes that tag from the engine
   (the second lane's image loses its name; nothing else is touched).
+- **Compose's `jobs` (Compose 5.8 and later) is refused.** The `jobs:` element
+  (one-shot and scheduled jobs, `docker compose run JOB`) reaches the engine
+  over a gRPC channel the filter does not relay, and the engine's jobs
+  extension is off by default anyway. Compose probes that channel in a few
+  places even when a project has no jobs: `docker compose -p NAME down` (always,
+  whether or not a compose file is found), and `--remove-orphans` on `down`,
+  `up` and `create`. The probe is refused at once, so these commands print a
+  warning such as `jobs of project NAME not removed: the engine's jobs extension
+  is enabled but not ready: ...`, then carry on and exit 0; the warning can be
+  ignored. A plain `docker compose down` or `down -v` (no `-p`) of a project that declares no `jobs:` does not probe,
+  and neither do `up -d` or `ps` of a project without scheduled
+  jobs. A project that declares scheduled jobs (`jobs:` with a `triggers.schedule`)
+  fails on `docker compose up`, `create` and `start` before anything is
+  created, with the same "jobs extension is enabled but not ready" text; remove
+  the scheduled jobs from the file to run the project here. ([Troubleshooting](troubleshooting.md#docker-compose-prints-a-jobs-warning).)
 - **Docker's built-in `bridge` network is refused.** Containers without a
   network join their workspace's own network, so a plain `docker run` in two
   lanes cannot reach each other. Containers in one stack reach each other by

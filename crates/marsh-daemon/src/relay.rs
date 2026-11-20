@@ -6,7 +6,7 @@
 //! containers receive neither path nor token.
 
 use crate::relay_cleanup::{RelayIdentity, current_identity};
-use crate::{DaemonError, read_frame, write_frame};
+use crate::{DaemonError, ErrorCode, PublicReply, read_frame, write_frame};
 use marsh_contracts::process::{ChannelKind, PortState};
 use serde::{Deserialize, Serialize};
 use std::net::Shutdown;
@@ -22,7 +22,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod forward;
@@ -391,22 +391,33 @@ where
         }
     }
     let connections: Connections = Arc::default();
+    let mut refusals = RefusalLog::default();
     let outcome = loop {
         match read_frame::<TunnelFrame>(&mut from_guest) {
             Ok(TunnelFrame::Open { connection }) => {
-                if connections
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .len()
-                    >= MAX_RELAY_CONNECTIONS
-                {
-                    if let Err(error) = send(&tunnel, &TunnelFrame::Close { connection }) {
+                let open = daemon_connections(&connections);
+                if open >= MAX_RELAY_CONNECTIONS {
+                    if let Some(line) = refusals.note(
+                        Instant::now(),
+                        "marshd: shell relay",
+                        &format!("{open}/{MAX_RELAY_CONNECTIONS} daemon connections open"),
+                    ) {
+                        log_line(&line);
+                    }
+                    if let Err(error) = refuse_open(&tunnel, connection, &busy_message()) {
                         break Err(error);
                     }
                     continue;
                 }
                 let Ok(stream) = marsh_runtime::connect_unix(daemon_socket) else {
-                    if let Err(error) = send(&tunnel, &TunnelFrame::Close { connection }) {
+                    if let Some(line) = refusals.note(
+                        Instant::now(),
+                        "marshd: shell relay",
+                        "the daemon socket did not accept a connection",
+                    ) {
+                        log_line(&line);
+                    }
+                    if let Err(error) = refuse_open(&tunnel, connection, UNREACHABLE_MESSAGE) {
                         break Err(error);
                     }
                     continue;
@@ -514,6 +525,149 @@ fn send_guest_ready<W: Write>(tunnel: &SharedWriter<W>) -> Result<(), DaemonErro
     send(tunnel, &TunnelFrame::Ready)
 }
 
+fn busy_message() -> String {
+    format!(
+        "marsh: this shell holds {MAX_RELAY_CONNECTIONS} daemon{}",
+        marsh_contracts::process::CONNECTIONS_FULL_SUFFIX
+    )
+}
+
+const UNREACHABLE_MESSAGE: &str = marsh_contracts::process::RELAY_UNREACHABLE;
+
+/// One diagnostic line on this process's stderr. Never panics: a closed
+/// stderr (the host dropped the pipe) must not take a relay thread with it.
+pub fn log_line(line: &str) {
+    let _ = writeln!(std::io::stderr(), "{line}");
+}
+
+fn refusal(message: &str) -> PublicReply {
+    PublicReply::Error {
+        code: ErrorCode::InvalidRequest,
+        message: message.to_owned(),
+    }
+}
+
+/// Past the guest relay's cap: tell the caller why rather than close on it. A
+/// bare close reaches a caller that has already written its request as a
+/// reset (`ECONNRESET` on Linux). Best effort, and never blocking the accept
+/// loop.
+fn refuse_guest_connection(mut stream: UnixStream) {
+    if stream.set_nonblocking(true).is_ok() {
+        let _ = write_frame(&mut stream, &refusal(&busy_message()));
+    }
+    let _ = stream.shutdown(Shutdown::Write);
+}
+
+/// The host half's refusal of a connection the guest has already accepted:
+/// the reason as the connection's only data, then its ordered end, so the
+/// guest delivers the frame before it closes.
+fn refuse_open<W: Write>(
+    tunnel: &SharedWriter<W>,
+    connection: u64,
+    message: &str,
+) -> Result<(), DaemonError> {
+    let mut bytes = Vec::new();
+    write_frame(&mut bytes, &refusal(message))?;
+    send(tunnel, &TunnelFrame::Data { connection, bytes })?;
+    send(tunnel, &TunnelFrame::Finished { connection })
+}
+
+/// What the guest relay writes to its stderr that the host passes on to the
+/// daemon's log: only its refusal lines (`RefusalLog`), whole, as plain
+/// one-line text (`sanitize_vm_text`) cut to [`Self::MAX_LINE`] characters,
+/// and at most [`Self::LINES_PER_WINDOW`] per [`REFUSAL_LOG_INTERVAL`]: the
+/// guest rate-limits its own, but what a guest process writes is not trusted.
+/// Anything else the guest says stays in the bounded head kept for a relay
+/// that fails to start. A prefix is not authentication: a process that can
+/// write that stream can write a false line.
+#[derive(Default)]
+pub struct GuestDiagnostics {
+    partial: Vec<u8>,
+    window: Option<Instant>,
+    in_window: usize,
+    left_out: u64,
+}
+
+impl GuestDiagnostics {
+    const LINE_PREFIX: &'static [u8] = b"marsh-relay: refused a connection (";
+    const MAX_LINE: usize = 300;
+    const LINES_PER_WINDOW: usize = 3;
+
+    /// The lines completed by `bytes` (read at `now`) that go to the daemon's
+    /// log.
+    pub fn feed(&mut self, now: Instant, bytes: &[u8]) -> Vec<String> {
+        let mut lines = Vec::new();
+        for &byte in bytes {
+            if byte == b'\n' {
+                let line = std::mem::take(&mut self.partial);
+                if line.starts_with(Self::LINE_PREFIX) {
+                    lines.extend(self.admit(now, &line));
+                }
+            } else if self.partial.len() < Self::MAX_LINE * 2 {
+                self.partial.push(byte);
+            }
+        }
+        lines
+    }
+
+    fn admit(&mut self, now: Instant, line: &[u8]) -> Option<String> {
+        if self
+            .window
+            .is_none_or(|start| now.saturating_duration_since(start) >= REFUSAL_LOG_INTERVAL)
+        {
+            self.window = Some(now);
+            self.in_window = 0;
+        }
+        if self.in_window >= Self::LINES_PER_WINDOW {
+            self.left_out += 1;
+            return None;
+        }
+        self.in_window += 1;
+        let mut text: String =
+            marsh_contracts::terminal::sanitize_vm_text(&String::from_utf8_lossy(line))
+                .take(Self::MAX_LINE)
+                .collect();
+        let left_out = std::mem::take(&mut self.left_out);
+        if left_out > 0 {
+            text = format!("{text} [{left_out} earlier refusal lines left out]");
+        }
+        Some(text)
+    }
+}
+
+/// At most one diagnostic line per this long for refused connections.
+const REFUSAL_LOG_INTERVAL: Duration = Duration::from_secs(10);
+
+/// What a relay half says on its stderr when it refuses connections: one line,
+/// then one more at most every [`REFUSAL_LOG_INTERVAL`], counting those it
+/// left unsaid. Counts and the cap only; nothing a caller sent.
+#[derive(Default)]
+struct RefusalLog {
+    last: Option<Instant>,
+    unsaid: u64,
+}
+
+impl RefusalLog {
+    fn note(&mut self, now: Instant, who: &str, detail: &str) -> Option<String> {
+        if self
+            .last
+            .is_some_and(|last| now.saturating_duration_since(last) < REFUSAL_LOG_INTERVAL)
+        {
+            self.unsaid += 1;
+            return None;
+        }
+        self.last = Some(now);
+        let unsaid = std::mem::take(&mut self.unsaid);
+        Some(if unsaid == 0 {
+            format!("{who}: refused a connection ({detail})")
+        } else {
+            format!(
+                "{who}: refused a connection ({detail}); {unsaid} more refused since the last line"
+            )
+        })
+    }
+}
+
 /// Guest half used by the installed `marsh-relay` helper.
 pub fn run_guest<R, W>(
     from_host: R,
@@ -532,13 +686,36 @@ where
 /// owner-only socket at `endpoint` (the shell's `DOCKER_HOST`), and loopback
 /// listeners for the ports the host reports, in the shell VM, first claimant
 /// wins.
-#[allow(clippy::too_many_lines)] // One frame loop and its acceptors.
 pub fn run_guest_with_endpoint<R, W>(
+    from_host: R,
+    to_host: W,
+    socket_path: &Path,
+    token_path: &Path,
+    endpoint: Option<&Path>,
+) -> Result<(), DaemonError>
+where
+    R: Read,
+    W: Write + Send + 'static,
+{
+    run_guest_logged(
+        from_host,
+        to_host,
+        socket_path,
+        token_path,
+        endpoint,
+        Arc::new(log_line),
+    )
+}
+
+/// [`run_guest_with_endpoint`], saying what it refuses through `log`.
+#[allow(clippy::too_many_lines)] // One frame loop and its acceptors.
+fn run_guest_logged<R, W>(
     mut from_host: R,
     to_host: W,
     socket_path: &Path,
     token_path: &Path,
     endpoint: Option<&Path>,
+    log: Arc<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), DaemonError>
 where
     R: Read,
@@ -570,25 +747,31 @@ where
     let next = Arc::new(std::sync::atomic::AtomicU64::new(1));
     let stopping = Arc::new(AtomicBool::new(false));
     let acceptor = {
-        let (connections, tunnel, stopping, next) = (
+        let (connections, tunnel, stopping, next, log) = (
             Arc::clone(&connections),
             Arc::clone(&tunnel),
             Arc::clone(&stopping),
             Arc::clone(&next),
+            log,
         );
         thread::spawn(move || {
+            let mut refusals = RefusalLog::default();
             while !stopping.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        if connections
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .values()
-                            .filter(|open| !open.service)
-                            .count()
-                            >= MAX_RELAY_CONNECTIONS
-                        {
-                            let _ = stream.shutdown(Shutdown::Both);
+                        let open = daemon_connections(&connections);
+                        if open >= MAX_RELAY_CONNECTIONS {
+                            let services = service_connections(&connections);
+                            if let Some(line) = refusals.note(
+                                Instant::now(),
+                                "marsh-relay",
+                                &format!(
+                                    "{open}/{MAX_RELAY_CONNECTIONS} daemon connections open, {services}/{MAX_SERVICE_CONNECTIONS} service connections"
+                                ),
+                            ) {
+                                log(&line);
+                            }
+                            refuse_guest_connection(stream);
                             continue;
                         }
                         if stream.set_nonblocking(false).is_err() {
@@ -761,6 +944,17 @@ where
     close_all_connections(&connections);
     report_guest_cleaned(&tunnel, runtime, outcome.is_ok());
     outcome
+}
+
+/// Open connections to the daemon (the services' are counted apart): what
+/// both halves of the relay cap at [`MAX_RELAY_CONNECTIONS`].
+fn daemon_connections(connections: &Connections) -> usize {
+    connections
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .filter(|open| !open.service)
+        .count()
 }
 
 fn service_connections(connections: &Connections) -> usize {
@@ -1548,10 +1742,22 @@ mod tests {
             write_frame(&mut guest, &TunnelFrame::Open { connection }).unwrap();
         }
         recv(&accepted_receive, "daemon connections accepted");
+        let refused = MAX_RELAY_CONNECTIONS as u64 + 1;
+        // The reason, then the connection's ordered end; never a bare Close.
+        let TunnelFrame::Data { connection, bytes } =
+            read_frame::<TunnelFrame>(&mut guest).unwrap()
+        else {
+            panic!("the refused connection was not given a reason");
+        };
+        assert_eq!(connection, refused);
+        assert!(matches!(
+            read_frame::<PublicReply>(&mut Cursor::new(bytes)),
+            Ok(PublicReply::Error { message, .. }) if message.contains("try again")
+        ));
         assert_eq!(
             read_frame::<TunnelFrame>(&mut guest).unwrap(),
-            TunnelFrame::Close {
-                connection: MAX_RELAY_CONNECTIONS as u64 + 1
+            TunnelFrame::Finished {
+                connection: refused
             }
         );
         // The host waits for the guest's in-band Cleaned (or EOF) after Shutdown.
@@ -1739,6 +1945,25 @@ mod tests {
 
     impl PairedRelays {
         fn new() -> Self {
+            Self::start(None, Arc::new(|_| {}))
+        }
+
+        /// With the shell's services endpoint (`docker.sock` beside the
+        /// socket) served by `services`.
+        fn with_services(services: Arc<dyn ShellServices>) -> Self {
+            Self::start(Some(services), Arc::new(|_| {}))
+        }
+
+        /// Saying what the guest relay refuses through `log`.
+        fn logging(log: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
+            Self::start(None, log)
+        }
+
+        fn start(
+            services: Option<Arc<dyn ShellServices>>,
+            log: Arc<dyn Fn(&str) + Send + Sync>,
+        ) -> Self {
+            let has_services = services.is_some();
             let root = tempfile::tempdir().unwrap();
             fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
             let daemon_socket = root.path().join("daemon.sock");
@@ -1755,7 +1980,7 @@ mod tests {
                 let tunnel = Arc::clone(&tunnel);
                 let cleaned = Arc::clone(&cleaned);
                 thread::spawn(move || {
-                    run_host_shared(
+                    run_host_shared_with_services(
                         host_reader,
                         &tunnel,
                         &daemon_socket,
@@ -1764,12 +1989,22 @@ mod tests {
                             ready.send(result.map(|_| ())).unwrap();
                         },
                         &cleaned,
+                        services.as_ref(),
                     )
                 })
             };
             let guest_socket = socket.clone();
-            let guest =
-                thread::spawn(move || run_guest(guest_reader, guest_stream, &guest_socket, &token));
+            let endpoint = has_services.then(|| socket.with_file_name("docker.sock"));
+            let guest = thread::spawn(move || {
+                run_guest_logged(
+                    guest_reader,
+                    guest_stream,
+                    &guest_socket,
+                    &token,
+                    endpoint.as_deref(),
+                    log,
+                )
+            });
             recv(&received, "relay readiness").unwrap();
             Self {
                 _root: root,
@@ -2007,6 +2242,430 @@ mod tests {
             retained_clients.len(),
             MAX_RELAY_CONNECTIONS * 2,
             "retained guest sockets consumed closed daemon relay slots"
+        );
+    }
+
+    /// The reason a refused caller reads, from whichever of its write or its
+    /// read carried it.
+    fn refusal_read(result: Result<PublicReply, DaemonError>) -> String {
+        match result {
+            Ok(PublicReply::Error { message, .. }) | Err(DaemonError::Remote(message)) => message,
+            other => panic!("the refused connection read {other:?}, not a refusal"),
+        }
+    }
+
+    fn fill_to_capacity(relays: &PairedRelays) -> Vec<(UnixStream, UnixStream)> {
+        (0..MAX_RELAY_CONNECTIONS)
+            .map(|_| relays.connect())
+            .collect()
+    }
+
+    fn client(relays: &PairedRelays) -> Client {
+        Client::connect_relay(&relays.socket, &relays.socket.with_file_name("token")).unwrap()
+    }
+
+    #[test]
+    fn guest_relay_past_its_capacity_refuses_with_a_frame_not_a_reset() {
+        let relays = PairedRelays::new();
+        let held = fill_to_capacity(&relays);
+        let mut excess = UnixStream::connect(&relays.socket).unwrap();
+        excess.set_read_timeout(Some(PATIENCE)).unwrap();
+        excess.set_write_timeout(Some(PATIENCE)).unwrap();
+        // A client writes its request before it reads the reply; left unread
+        // by the relay, that request turns the close into a reset (ECONNRESET
+        // on Linux, where the shell's relay runs). Whether the write lands
+        // before the relay's close is timing, so only the read is checked.
+        let _ = write_frame(&mut excess, &PublicRequest::Ping);
+        let reply = read_frame::<PublicReply>(&mut excess);
+        drop(held);
+        relays.stop();
+        let message = refusal_read(reply);
+        assert!(
+            message.contains(&MAX_RELAY_CONNECTIONS.to_string()) && message.contains("try again"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_client_that_writes_after_the_refusal_reads_the_reason_not_a_broken_pipe() {
+        let relays = PairedRelays::new();
+        let held = fill_to_capacity(&relays);
+        let mut excess = UnixStream::connect(&relays.socket).unwrap();
+        excess.set_write_timeout(Some(PATIENCE)).unwrap();
+        // The relay refuses within its poll; this client is scheduled later.
+        thread::sleep(Duration::from_millis(100));
+        let result = crate::write_request(&mut excess, &PublicRequest::Ping)
+            .and_then(|()| read_frame::<PublicReply>(&mut excess));
+        drop(held);
+        relays.stop();
+        assert!(refusal_read(result).contains("try again"));
+    }
+
+    #[test]
+    fn a_real_client_with_a_large_request_reads_the_capacity_refusal() {
+        let relays = PairedRelays::new();
+        let held = fill_to_capacity(&relays);
+        // More than the socket buffers hold: the write is still going when
+        // the relay has refused and closed.
+        let reply = client(&relays).request(PublicRequest::OpenUrl {
+            url: "x".repeat(512 * 1024),
+        });
+        drop(held);
+        relays.stop();
+        assert!(refusal_read(reply).contains("try again"));
+    }
+
+    #[test]
+    fn a_real_client_reads_the_refusal_when_the_host_cannot_reach_the_daemon() {
+        let relays = PairedRelays::new();
+        fs::remove_file(
+            relays
+                .socket
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("daemon.sock"),
+        )
+        .unwrap();
+        let client = client(&relays);
+        let small = client.request(PublicRequest::Ping);
+        let large = client.request(PublicRequest::OpenUrl {
+            url: "x".repeat(512 * 1024),
+        });
+        relays.stop();
+        for reply in [small, large] {
+            assert!(refusal_read(reply).contains("could not open a connection to the daemon"));
+        }
+    }
+
+    /// A services channel held open on the host, so the shell has one
+    /// services connection.
+    struct HoldingService(Arc<AtomicBool>);
+
+    struct PendingRead(mpsc::Receiver<()>);
+
+    impl Read for PendingRead {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            let _ = self.0.recv();
+            Ok(0)
+        }
+    }
+
+    impl ShellServices for HoldingService {
+        fn open(&self, _service: ChannelKind) -> Result<ServiceStream, String> {
+            let (finish, finished) = mpsc::channel();
+            let close = finish.clone();
+            self.0.store(true, Ordering::Release);
+            Ok(ServiceStream {
+                reader: Box::new(PendingRead(finished)),
+                writer: Box::new(std::io::sink()),
+                finish: Box::new(move || {
+                    let _ = finish.send(());
+                }),
+                close: Box::new(move || {
+                    let _ = close.send(());
+                }),
+            })
+        }
+
+        fn port_report(&self, _port: u16, _state: &PortState) {}
+    }
+
+    #[test]
+    fn a_services_connection_does_not_take_a_daemon_slot_on_the_host() {
+        let opened = Arc::new(AtomicBool::new(false));
+        let relays = PairedRelays::with_services(Arc::new(HoldingService(Arc::clone(&opened))));
+        let service = UnixStream::connect(relays.socket.with_file_name("docker.sock")).unwrap();
+        wait_until("the service reaches the host", || {
+            opened.load(Ordering::Acquire)
+        });
+        relays.listener.set_nonblocking(true).unwrap();
+        // The guest counts only daemon connections, so with one service open
+        // it admits all of them; the host must too (it once counted the
+        // service and refused the last one with a bare close).
+        let mut held = Vec::new();
+        for _ in 0..MAX_RELAY_CONNECTIONS {
+            let guest = UnixStream::connect(&relays.socket).unwrap();
+            let Some(host) = accept_next(&relays.listener) else {
+                break;
+            };
+            held.push((guest, host));
+        }
+        let admitted = held.len();
+        drop(held);
+        drop(service);
+        relays.stop();
+        assert_eq!(
+            admitted, MAX_RELAY_CONNECTIONS,
+            "the host refused a daemon connection below the cap"
+        );
+    }
+
+    #[test]
+    fn the_guest_says_once_how_full_it_was_when_it_refuses() {
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = Arc::clone(&lines);
+        let relays = PairedRelays::logging(Arc::new(move |line| {
+            sink.lock().unwrap().push(line.to_owned());
+        }));
+        let held = fill_to_capacity(&relays);
+        for _ in 0..3 {
+            let mut excess = UnixStream::connect(&relays.socket).unwrap();
+            excess.set_read_timeout(Some(PATIENCE)).unwrap();
+            refusal_read(read_frame::<PublicReply>(&mut excess));
+        }
+        drop(held);
+        relays.stop();
+        let lines = lines.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("marsh-relay: refused a connection (")
+                && lines[0].contains(&format!(
+                    "{MAX_RELAY_CONNECTIONS}/{MAX_RELAY_CONNECTIONS} daemon connections open"
+                ))
+                && !lines[0].contains('\n'),
+            "{}",
+            lines[0]
+        );
+    }
+
+    const GUEST_LINE: &str = "marsh-relay: refused a connection (128/128 daemon connections open)";
+
+    #[test]
+    fn only_the_guests_refusal_lines_reach_the_daemon_log() {
+        let now = Instant::now();
+        let mut diagnostics = GuestDiagnostics::default();
+        // Split across reads, between other output, with a control character.
+        assert_eq!(
+            diagnostics.feed(now, b"some other noise\nmarsh-relay: refu"),
+            Vec::<String>::new()
+        );
+        let lines = diagnostics.feed(
+            now,
+            format!(
+                "sed a connection (128/128 daemon connections open)\u{1b}[2J\nmore noise\n{GUEST_LINE}\n"
+            )
+            .as_bytes(),
+        );
+        // The escape byte goes; the rest is plain text.
+        assert_eq!(lines, [format!("{GUEST_LINE}[2J"), GUEST_LINE.to_owned()]);
+        assert!(lines.iter().all(|line| !line.contains('\u{1b}')));
+    }
+
+    #[test]
+    fn forwarded_guest_text_is_one_line_of_plain_text() {
+        let mut diagnostics = GuestDiagnostics::default();
+        // Bidi overrides and isolates, line and paragraph separators, a
+        // zero-width space and a tag character: none passes.
+        let hostile =
+            format!("{GUEST_LINE}\u{202e}\u{2066}\u{2028}\u{2029}\u{200b}\u{e0041}\u{85}\r!\n");
+        let lines = diagnostics.feed(Instant::now(), hostile.as_bytes());
+        assert_eq!(lines, [format!("{GUEST_LINE}!")]);
+    }
+
+    #[test]
+    fn a_long_guest_line_is_cut_and_an_endless_one_is_not_kept() {
+        let mut diagnostics = GuestDiagnostics::default();
+        let long = format!("{GUEST_LINE}{}\n", "y".repeat(5_000));
+        let lines = diagnostics.feed(Instant::now(), long.as_bytes());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].chars().count(), GuestDiagnostics::MAX_LINE);
+        // A refusal line that never ends keeps only a bounded part.
+        let mut diagnostics = GuestDiagnostics::default();
+        diagnostics.feed(Instant::now(), GUEST_LINE.as_bytes());
+        diagnostics.feed(Instant::now(), &vec![b'z'; 100_000]);
+        assert!(diagnostics.partial.len() <= GuestDiagnostics::MAX_LINE * 2);
+        let lines = diagnostics.feed(Instant::now(), b"\n");
+        assert!(lines.len() == 1 && lines[0].chars().count() <= GuestDiagnostics::MAX_LINE);
+    }
+
+    #[test]
+    fn a_flood_of_guest_refusal_lines_is_limited_per_window_and_counted() {
+        let start = Instant::now();
+        let mut diagnostics = GuestDiagnostics::default();
+        let flood = format!("{GUEST_LINE}\n").repeat(1_000);
+        let lines = diagnostics.feed(start, flood.as_bytes());
+        assert_eq!(lines.len(), GuestDiagnostics::LINES_PER_WINDOW);
+        // Still the same window.
+        assert_eq!(
+            diagnostics.feed(start + Duration::from_secs(9), flood.as_bytes()),
+            Vec::<String>::new()
+        );
+        // The next window: a few more, the first saying what was left out.
+        let lines = diagnostics.feed(start + REFUSAL_LOG_INTERVAL, flood.as_bytes());
+        assert_eq!(lines.len(), GuestDiagnostics::LINES_PER_WINDOW);
+        assert!(
+            lines[0].ends_with(&format!(
+                "[{} earlier refusal lines left out]",
+                2 * 1_000 - GuestDiagnostics::LINES_PER_WINDOW
+            )),
+            "{}",
+            lines[0]
+        );
+        assert!(!lines[1].contains("left out"));
+    }
+
+    #[test]
+    fn a_large_acp_prompt_at_capacity_reads_the_refusal() {
+        let relays = PairedRelays::new();
+        let held = fill_to_capacity(&relays);
+        let reply = client(&relays).acp_prompt_classified(
+            "agent".into(),
+            session("shell-1", Path::new("/home/u")),
+            "op".into(),
+            "x".repeat(512 * 1024),
+        );
+        drop(held);
+        relays.stop();
+        let message = match reply {
+            Err(crate::acp_session::PromptAdmissionError::Rejected(DaemonError::Remote(
+                message,
+            ))) => message,
+            other => panic!("the prompt was answered {other:?}, not a refusal"),
+        };
+        assert!(message.contains("try again"), "{message}");
+    }
+
+    #[test]
+    fn what_a_link_retries_covers_every_refusal_that_says_try_again() {
+        use marsh_contracts::process::{CONNECTION_REFUSAL, RELAY_UNREACHABLE};
+        let remote = |message: String| DaemonError::Remote(message);
+        for refusal in [
+            remote(busy_message()),
+            remote(crate::daemon_busy_message(1024)),
+            remote(RELAY_UNREACHABLE.into()),
+            remote(CONNECTION_REFUSAL.into()),
+            remote(format!(
+                "{CONNECTION_REFUSAL} (at most 4 at once: twice job-children, plus 4)"
+            )),
+            DaemonError::Io(std::io::ErrorKind::BrokenPipe.into()),
+        ] {
+            assert!(crate::is_retryable_refusal(&refusal), "{refusal:?}");
+        }
+        for other in [
+            remote("marsh: unauthorized".into()),
+            remote("spawn refused: shell is not allowed".into()),
+            DaemonError::InvalidState("busy".into()),
+            DaemonError::JobUncertain("lost".into()),
+            DaemonError::Io(std::io::ErrorKind::NotFound.into()),
+        ] {
+            assert!(!crate::is_retryable_refusal(&other), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn a_process_run_refused_by_the_relay_is_not_admitted_and_retryable() {
+        let run = |client: &Client, bytes: usize| {
+            client.run_process_with_io_attempt(
+                ExecuteSpec {
+                    model: None,
+                    usage: None,
+                    label: None,
+                    kit: None,
+                    command: "fixture".into(),
+                    arguments: vec![vec![b'x'; bytes]],
+                    placement: crate::Placement::Local,
+                    environment: marsh_contracts::ExportedEnvironment::default(),
+                    working_directory: None,
+                    session: session("shell-1", Path::new("/home/u")),
+                    process: None,
+                    acp: false,
+                },
+                std::io::empty(),
+                std::io::sink(),
+                std::io::sink(),
+                &mut |_| panic!("a refused run started"),
+            )
+        };
+        let relays = PairedRelays::new();
+        let held = fill_to_capacity(&relays);
+        let client = client(&relays);
+        // Small, and larger than the socket buffers (written while the relay
+        // refuses and closes): both are refused before admission.
+        let capped = [run(&client, 10), run(&client, 150_000)];
+        drop(held);
+        fs::remove_file(
+            relays
+                .socket
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("daemon.sock"),
+        )
+        .unwrap();
+        let unreachable = run(&client, 10);
+        relays.stop();
+        for result in capped.into_iter().chain([unreachable]) {
+            match result {
+                Err(error @ crate::ProcessRunError::NotAdmitted(_)) => {
+                    assert!(error.is_retryable(), "{error:?}");
+                }
+                other => panic!("expected a refusal before admission, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn every_relay_refusal_a_real_client_reads_is_retryable() {
+        let relays = PairedRelays::new();
+        let held = fill_to_capacity(&relays);
+        let client = client(&relays);
+        let capped = [
+            client.request(PublicRequest::Ping),
+            client.request(PublicRequest::OpenUrl {
+                url: "x".repeat(512 * 1024),
+            }),
+        ];
+        drop(held);
+        fs::remove_file(
+            relays
+                .socket
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("daemon.sock"),
+        )
+        .unwrap();
+        let unreachable = client.request(PublicRequest::Ping);
+        relays.stop();
+        for reply in capped.into_iter().chain([unreachable]) {
+            // A refusal read as the reply, or carried by the failed write.
+            let error = match reply {
+                Ok(reply) => crate::unexpected_reply(reply),
+                Err(error) => error,
+            };
+            assert!(crate::is_retryable_refusal(&error), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn refusal_lines_are_rate_limited_and_count_what_they_skip() {
+        let start = Instant::now();
+        let mut log = RefusalLog::default();
+        let first = log.note(start, "who", "128/128 open").unwrap();
+        assert_eq!(first, "who: refused a connection (128/128 open)");
+        assert!(
+            log.note(start + Duration::from_secs(1), "who", "x")
+                .is_none()
+        );
+        assert!(
+            log.note(start + Duration::from_secs(9), "who", "x")
+                .is_none()
+        );
+        let next = log
+            .note(start + REFUSAL_LOG_INTERVAL, "who", "128/128 open")
+            .unwrap();
+        assert_eq!(
+            next,
+            "who: refused a connection (128/128 open); 2 more refused since the last line"
+        );
+        assert!(
+            !log.note(start + REFUSAL_LOG_INTERVAL * 2, "who", "x")
+                .unwrap()
+                .contains("more refused")
         );
     }
 

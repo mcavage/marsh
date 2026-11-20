@@ -127,6 +127,13 @@ pub const MIN_CHILD_WALL_MS: u64 = 1_000;
 /// can be allowed, plus 4.
 pub const CONNECTION_LIMIT: usize = FAN_OUT_MAX + 4;
 pub const CONNECTION_REFUSAL: &str = "marsh: too many concurrent daemon requests in this job";
+/// How the daemon's and a shell relay's "connections full" refusals end
+/// (`marsh: the daemon is serving N connections, its most; try again`,
+/// `marsh: this shell holds N daemon connections, its most; try again`).
+pub const CONNECTIONS_FULL_SUFFIX: &str = " connections, its most; try again";
+/// A shell relay that could not open a connection to the daemon.
+pub const RELAY_UNREACHABLE: &str =
+    "marsh: this shell's relay could not open a connection to the daemon; try again";
 /// The prompt in an `agent-sessions@1` `prompt` verb.
 pub const PROMPT_PLACEHOLDER: &str = "{{.Prompt}}";
 /// The model in an `org.marsh/agent-model@1` option (marsh's extension,

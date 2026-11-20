@@ -13,10 +13,10 @@
 # copy follow it. To move the pin, change the version and both digests together,
 # and append the release's two digests to tests/release/compose-release-digests.txt.
 set -eu
-COMPOSE_VERSION=5.7.1
+COMPOSE_VERSION=5.8.0
 case "${TARGETARCH:?TARGETARCH is not set}" in
-  arm64) arch=aarch64; sha=f2f49f903240895fa764c0dca3a14548b754ad9426f6b609ccaf55ec5a3aa2a5 ;;
-  amd64) arch=x86_64; sha=af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf ;;
+  arm64) arch=aarch64; sha=1a9c918b2fb49b9c87f0018c64b5abd0d30715155e98dc939779fbaee6c414d3 ;;
+  amd64) arch=x86_64; sha=b8840f5008c447f41fce0a57ae3adeab42c89b1eb6e6012524bcabbfb4ffbaf6 ;;
   *) echo "docker-compose.sh: unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;;
 esac
 plugins="$1/lib/docker/cli-plugins"

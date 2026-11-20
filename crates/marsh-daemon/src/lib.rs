@@ -287,11 +287,67 @@ fn refuse_connection(mut stream: UnixStream, cap: usize) {
             &mut stream,
             &PublicReply::Error {
                 code: ErrorCode::InvalidRequest,
-                message: format!(
-                    "marsh: the daemon is serving {cap} connections, its most; try again"
-                ),
+                message: daemon_busy_message(cap),
             },
         );
+    }
+}
+
+fn daemon_busy_message(cap: usize) -> String {
+    format!(
+        "marsh: the daemon is serving {cap}{}",
+        marsh_contracts::process::CONNECTIONS_FULL_SUFFIX
+    )
+}
+
+/// A failed process run, by how far the daemon had got with it. A run is
+/// retried only after `NotAdmitted`: once the daemon may have admitted it, a
+/// retry could run the user's command twice, so the failure is reported.
+#[derive(Debug)]
+pub enum ProcessRunError {
+    /// The daemon admitted nothing: the request did not reach it whole, or it
+    /// answered with a refusal before `ExecutionAccepted`.
+    NotAdmitted(DaemonError),
+    /// The daemon may have admitted the run (the reply was lost after a whole
+    /// request) or did (every failure after `ExecutionAccepted`, whatever its
+    /// text).
+    MaybeAdmitted(DaemonError),
+}
+
+impl ProcessRunError {
+    /// Whether the run may be started again: refused before admission, with
+    /// a refusal that says to try again.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::NotAdmitted(error) if is_retryable_refusal(error))
+    }
+
+    #[must_use]
+    pub fn into_error(self) -> DaemonError {
+        match self {
+            Self::NotAdmitted(error) | Self::MaybeAdmitted(error) => error,
+        }
+    }
+}
+
+/// Whether `error` is a refusal that read nothing and started nothing and
+/// says to try again: the job's capability socket full, the daemon or a shell
+/// relay at its connection cap, a relay that could not reach the daemon, or
+/// such a refusal that reached the caller as a broken pipe (its request was
+/// still being written when the peer refused and closed).
+#[must_use]
+pub fn is_retryable_refusal(error: &DaemonError) -> bool {
+    use marsh_contracts::process::{
+        CONNECTION_REFUSAL, CONNECTIONS_FULL_SUFFIX, RELAY_UNREACHABLE,
+    };
+    match error {
+        DaemonError::Remote(message) | DaemonError::Refused(message) => {
+            message.contains(CONNECTION_REFUSAL.trim_start_matches("marsh: "))
+                || message.ends_with(CONNECTIONS_FULL_SUFFIX)
+                || message == RELAY_UNREACHABLE
+        }
+        DaemonError::Io(io) => io.kind() == io::ErrorKind::BrokenPipe,
+        _ => false,
     }
 }
 
@@ -8478,7 +8534,7 @@ impl Client {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_read_timeout(Some(read_timeout))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -8517,7 +8573,7 @@ impl Client {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_read_timeout(Some(Duration::from_mins(4)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -8807,7 +8863,7 @@ impl Client {
         stream
             .set_read_timeout(Some(PUBLICATION_REPLY_IDLE_TIMEOUT))
             .map_err(|error| rejected(error.into()))?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -8894,7 +8950,7 @@ impl Client {
     pub fn reset_workers(&self, selection: LoadSelection) -> Result<Vec<String>, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -8918,7 +8974,7 @@ impl Client {
         Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
             let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
             stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-            write_frame(
+            write_request(
                 &mut stream,
                 &Envelope {
                     protocol: PROTOCOL.into(),
@@ -8946,7 +9002,7 @@ impl Client {
         Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
             let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
             stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-            write_frame(
+            write_request(
                 &mut stream,
                 &Envelope {
                     protocol: PROTOCOL.into(),
@@ -8968,7 +9024,7 @@ impl Client {
         Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
             let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
             stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-            write_frame(
+            write_request(
                 &mut stream,
                 &Envelope {
                     protocol: PROTOCOL.into(),
@@ -9068,7 +9124,7 @@ impl Client {
     ) -> Result<ScopeLifecycleReport, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -9126,7 +9182,7 @@ impl Client {
         mut progress_output: impl Write,
     ) -> Result<PreparationResult, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -9241,7 +9297,7 @@ impl Client {
         // signals and loss without ever waiting behind queued input.
         let credited = spec.placement == Placement::Cloud;
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -9288,24 +9344,61 @@ impl Client {
         O: Write,
         E: Write,
     {
-        let execution = self.start_attached(PublicRequest::ProcessRun(spec))?;
+        self.run_process_with_io_attempt(spec, input, output, error, started)
+            .map_err(ProcessRunError::into_error)
+    }
+
+    /// [`Self::run_process_with_io_started`], telling a failure before the
+    /// daemon admitted the run (which may be retried) from every other
+    /// (which never may be).
+    pub fn run_process_with_io_attempt<R, O, E>(
+        &self,
+        spec: ExecuteSpec,
+        input: R,
+        output: O,
+        error: E,
+        started: &mut dyn FnMut(&str),
+    ) -> Result<i32, ProcessRunError>
+    where
+        R: Read + Send + 'static,
+        O: Write,
+        E: Write,
+    {
+        let execution = self.start_attached_phased(PublicRequest::ProcessRun(spec))?;
         relay_attachment_started(&execution, false, input, output, error, started)
-            .map_err(lost_after_accept)
+            .map_err(|error| ProcessRunError::MaybeAdmitted(lost_after_accept(error)))
     }
 
     fn start_attached(&self, body: PublicRequest) -> Result<ClientExecution, DaemonError> {
-        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
-        write_frame(
+        self.start_attached_phased(body)
+            .map_err(ProcessRunError::into_error)
+    }
+
+    /// Sends `body` and reads the admission, saying how far it got when it
+    /// fails: `NotAdmitted` only when the request never reached the daemon
+    /// whole (connect or write failed) or the daemon answered it with a
+    /// refusal instead of `ExecutionAccepted`. A reply lost after a whole
+    /// request, or anything unexpected, may have followed an admission.
+    fn start_attached_phased(
+        &self,
+        body: PublicRequest,
+    ) -> Result<ClientExecution, ProcessRunError> {
+        use ProcessRunError::{MaybeAdmitted, NotAdmitted};
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)
+            .map_err(|error| NotAdmitted(error.into()))?;
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
                 token: self.token.clone(),
                 body,
             },
-        )?;
-        match read_frame::<PublicReply>(&mut stream)? {
-            PublicReply::ExecutionAccepted => ClientExecution::new(stream),
-            reply => Err(unexpected_reply(reply)),
+        )
+        .map_err(NotAdmitted)?;
+        match read_frame::<PublicReply>(&mut stream).map_err(MaybeAdmitted)? {
+            PublicReply::ExecutionAccepted => ClientExecution::new(stream).map_err(MaybeAdmitted),
+            reply @ PublicReply::Error { .. } => Err(NotAdmitted(unexpected_reply(reply))),
+            reply => Err(MaybeAdmitted(unexpected_reply(reply))),
         }
     }
 
@@ -9332,7 +9425,7 @@ impl Client {
     /// (`SplitCreate`, `SplitJoin`).
     pub fn open_request(&self, request: PublicRequest) -> Result<UnixStream, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -9345,7 +9438,7 @@ impl Client {
 
     pub fn start_shell(&self, spec: ShellSpec) -> Result<ClientExecution, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
-        write_frame(
+        write_request(
             &mut stream,
             &Envelope {
                 protocol: PROTOCOL.into(),
@@ -10128,6 +10221,39 @@ pub fn write_frame<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(
     Ok(())
 }
 
+/// Write one request frame. A peer that refuses a connection (a relay or the
+/// daemon past its cap) writes its reason and closes without reading, so a
+/// caller that was slow, or whose request is large, finds its write failing
+/// with a broken pipe or reset while the reason is still queued to be read.
+/// Such a write error gives that reason (one `PublicReply::Error`) instead,
+/// read without waiting: it is already queued, and a peer that is merely
+/// silent must not hold the caller.
+fn write_request<T: Serialize>(stream: &mut UnixStream, request: &T) -> Result<(), DaemonError> {
+    match write_frame(stream, request) {
+        Ok(()) => Ok(()),
+        Err(error) => Err(after_failed_write(stream, error)),
+    }
+}
+
+/// What a request write that failed with `error` reports: the refusal queued
+/// on `stream`, if the failure was the peer closing and it left one, else
+/// `error`. For every writer of a request to the daemon, including one that
+/// frames its own bytes. The caller must give the stream up afterwards.
+fn after_failed_write(stream: &mut UnixStream, error: DaemonError) -> DaemonError {
+    if matches!(
+        &error,
+        DaemonError::Io(io) if matches!(
+            io.kind(),
+            io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+        )
+    ) && stream.set_nonblocking(true).is_ok()
+        && let Ok(PublicReply::Error { message, .. }) = read_frame::<PublicReply>(stream)
+    {
+        return DaemonError::Remote(message);
+    }
+    error
+}
+
 pub fn read_frame<T: DeserializeOwned>(reader: &mut impl Read) -> Result<T, DaemonError> {
     let mut length = [0_u8; 4];
     reader.read_exact(&mut length)?;
@@ -10212,3 +10338,5 @@ mod tests;
 
 #[cfg(test)]
 mod mcp_load_tests;
+#[cfg(test)]
+mod write_request_tests;

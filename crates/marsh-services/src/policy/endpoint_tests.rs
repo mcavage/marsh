@@ -1140,6 +1140,53 @@ fn a_slowly_read_request_obeys_the_whole_call_deadline() {
     drop(reader);
 }
 
+/// A gRPC client (Compose 5.8's jobs probe dials the Docker socket and speaks
+/// HTTP/2 with prior knowledge) gets a prompt `400` and a closed connection:
+/// nothing reaches the engine, and the client fails at once instead of waiting
+/// for HTTP/2 frames. (`filter-off`: the bytes are relayed to the engine and
+/// the client gets no `400`.)
+#[test]
+fn an_http2_preface_gets_a_fast_400_and_the_connection_is_closed() {
+    const LIMIT: Duration = Duration::from_secs(5);
+    let h = H::new("h2preface", false, no_custom(), |_| {});
+    let sock = h.serve(&h.auth);
+    let mut c = UnixStream::connect(&sock).unwrap();
+    c.set_read_timeout(Some(LIMIT)).unwrap();
+    // The preface and an empty SETTINGS frame, as one write, as gRPC sends them.
+    c.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\x00\x00\x00\x04\x00\x00\x00\x00\x00")
+        .unwrap();
+    let started = Instant::now();
+    let mut out = Vec::new();
+    let mut b = [0u8; 512];
+    let closed = loop {
+        match c.read(&mut b) {
+            Ok(0) => break true,
+            Ok(n) => out.extend_from_slice(&b[..n]),
+            // Unread preface bytes left behind make some kernels report the
+            // close as a reset after the reply was delivered.
+            Err(e) if e.kind() == ErrorKind::ConnectionReset => break true,
+            Err(_) => break false,
+        }
+    };
+    let text = String::from_utf8_lossy(&out).into_owned();
+    assert!(
+        closed,
+        "the connection was left open after the preface; got {text:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(text.starts_with("HTTP/1.1 400 "), "{text:?}");
+    assert!(text.contains("Connection: close\r\n"), "{text:?}");
+    assert!(
+        h.engine.log.lock().unwrap().is_empty(),
+        "the engine saw the preface: {:?}",
+        h.engine.log.lock().unwrap()
+    );
+}
+
 /// A volume create is made by the agent, not through the client's connection:
 /// the client leaving cannot end it early. Lane A's create is held at the
 /// engine and A disconnects; lane B's create of the name waits (it is not let

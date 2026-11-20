@@ -2119,10 +2119,15 @@ impl crate::Client {
         // a request; the daemon cannot dispatch it on EOF.
         let length = u32::try_from(bytes.len())
             .map_err(|_| Rejected(DaemonError::FrameTooLarge(bytes.len())))?;
-        stream
+        if let Err(error) = stream
             .write_all(&length.to_be_bytes())
             .and_then(|()| stream.write_all(&bytes))
-            .map_err(|error| Rejected(error.into()))?;
+        {
+            return Err(Rejected(crate::after_failed_write(
+                &mut stream,
+                error.into(),
+            )));
+        }
         match crate::read_frame(&mut stream).map_err(Uncertain)? {
             crate::PublicReply::AcpPromptAccepted { turn_id } => Ok(turn_id),
             reply @ crate::PublicReply::Error { .. } => {

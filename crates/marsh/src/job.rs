@@ -7,7 +7,9 @@ use marsh_contracts::process::{
     self as contract, CONTEXT, JOB_JSON, JobDocument, LinkDecision, SOCKET,
 };
 use marsh_contracts::terminal::{display_safe_text, is_terminal_unsafe};
-use marsh_daemon::{DaemonError, ExecuteSpec, PublicReply, PublicRequest, SessionSpec};
+use marsh_daemon::{
+    DaemonError, ExecuteSpec, ProcessRunError, PublicReply, PublicRequest, SessionSpec,
+};
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::IsTerminal as _;
@@ -287,11 +289,8 @@ fn child_at(
         acp: false,
     };
     let client = marsh_daemon::Client::capability(Path::new(SOCKET));
-    // The connection cap is transient: a refused connection read nothing
-    // and started nothing, so it is retried briefly.
-    let mut result = Err(DaemonError::Refused(String::new()));
-    for attempt in 0..30 {
-        result = client.run_process_with_io_started(
+    let result = retry_refusals(30, std::time::Duration::from_millis(100), || {
+        client.run_process_with_io_attempt(
             spec.clone(),
             std::io::stdin(),
             std::io::stdout(),
@@ -302,23 +301,8 @@ fn child_at(
                     let _ = std::fs::write(path, job);
                 }
             },
-        );
-        match &result {
-            // A refused connection may also surface as a broken pipe: the
-            // refusal closed the socket before the request was fully
-            // written, so the daemon never read it and nothing started.
-            // (Loss after acceptance is `JobUncertain`, never retried.)
-            Err(error)
-                if attempt < 29
-                    && (remote_message(error).contains("too many concurrent daemon requests")
-                        || matches!(error, DaemonError::Io(io)
-                            if io.kind() == std::io::ErrorKind::BrokenPipe)) =>
-            {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            _ => break,
-        }
-    }
+        )
+    });
     match result {
         Ok(code) => code,
         Err(error) => {
@@ -331,6 +315,32 @@ fn child_at(
             }
         }
     }
+}
+
+/// Runs `attempt` up to `attempts` times, `pause` apart, while it fails with a
+/// refusal that is worth retrying, and only a refusal that came before the
+/// daemon admitted the run (`ProcessRunError::is_retryable`). The connection
+/// cap is transient: such a refusal read nothing and started nothing. A
+/// failure once the daemon may have admitted the run is reported, never
+/// retried, whatever its text: a retry could run the command twice.
+fn retry_refusals<T>(
+    attempts: usize,
+    pause: std::time::Duration,
+    mut attempt: impl FnMut() -> Result<T, ProcessRunError>,
+) -> Result<T, DaemonError> {
+    let mut result = Err(ProcessRunError::NotAdmitted(DaemonError::Refused(
+        String::new(),
+    )));
+    for number in 0..attempts {
+        result = attempt();
+        match &result {
+            Err(error) if number + 1 < attempts && error.is_retryable() => {
+                std::thread::sleep(pause);
+            }
+            _ => break,
+        }
+    }
+    result.map_err(ProcessRunError::into_error)
 }
 
 fn remote_message(error: &DaemonError) -> String {
@@ -1178,7 +1188,267 @@ fn quote(argument: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{JobScope, render_jobs};
+    use super::{JobScope, render_jobs, retry_refusals};
+    use marsh_daemon::{
+        AttachmentFrame, DaemonError, ExecuteSpec, Placement, ProcessRunError, PublicReply,
+        read_frame, write_frame,
+    };
+    use std::{
+        os::unix::net::{UnixListener, UnixStream},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
+
+    const BUSY: &str = "marsh: this shell holds 128 daemon connections, its most; try again";
+
+    fn refused(message: &str) -> ProcessRunError {
+        ProcessRunError::NotAdmitted(DaemonError::Remote(message.to_owned()))
+    }
+
+    #[test]
+    fn a_link_retries_a_refusal_before_admission_and_then_succeeds() {
+        // What a shell relay at its cap, the daemon at its cap and a relay
+        // that cannot reach the daemon send, and the job socket's own cap.
+        for refusal in [
+            BUSY,
+            "marsh: the daemon is serving 1024 connections, its most; try again",
+            "marsh: this shell's relay could not open a connection to the daemon; try again",
+            "marsh: too many concurrent daemon requests in this job",
+        ] {
+            let mut calls = 0;
+            let result = retry_refusals(30, Duration::ZERO, || {
+                calls += 1;
+                if calls < 3 {
+                    Err(refused(refusal))
+                } else {
+                    Ok(7)
+                }
+            });
+            assert_eq!((result.ok(), calls), (Some(7), 3), "{refusal}");
+        }
+        // The same refusal that reached the caller as a broken pipe while the
+        // request was being written.
+        let mut calls = 0;
+        let result = retry_refusals(30, Duration::ZERO, || {
+            calls += 1;
+            if calls == 1 {
+                Err(ProcessRunError::NotAdmitted(DaemonError::Io(
+                    std::io::ErrorKind::BrokenPipe.into(),
+                )))
+            } else {
+                Ok(0)
+            }
+        });
+        assert_eq!((result.ok(), calls), (Some(0), 2));
+    }
+
+    #[test]
+    fn a_link_does_not_retry_what_is_not_a_retryable_refusal_and_gives_up_at_the_last_attempt() {
+        let mut calls = 0;
+        let result: Result<i32, _> = retry_refusals(30, Duration::ZERO, || {
+            calls += 1;
+            Err(refused("spawn refused: not in this job's spawn set"))
+        });
+        assert!(result.is_err() && calls == 1, "{calls}");
+        let mut calls = 0;
+        let result: Result<i32, _> = retry_refusals(5, Duration::ZERO, || {
+            calls += 1;
+            Err(refused(BUSY))
+        });
+        assert!(result.is_err() && calls == 5, "{calls}");
+        // Once the run may have been admitted, nothing is retried, whatever
+        // the failure says.
+        for error in [
+            DaemonError::Remote(BUSY.into()),
+            DaemonError::Io(std::io::ErrorKind::BrokenPipe.into()),
+        ] {
+            let mut calls = 0;
+            let result: Result<i32, _> = retry_refusals(30, Duration::ZERO, || {
+                calls += 1;
+                Err(ProcessRunError::MaybeAdmitted(match &error {
+                    DaemonError::Remote(message) => DaemonError::Remote(message.clone()),
+                    _ => DaemonError::Io(std::io::ErrorKind::BrokenPipe.into()),
+                }))
+            });
+            assert!(result.is_err() && calls == 1, "{error:?}: {calls}");
+        }
+    }
+
+    /// What the fake daemon does with one connection.
+    #[derive(Clone)]
+    enum Peer {
+        /// Reads the request, answers with a refusal before admission.
+        Refuse(&'static str),
+        /// Reads the request and closes without a word.
+        DropAfterRequest,
+        /// Admits the run, reports it started, then ends with `end`.
+        Admit(AttachmentFrame),
+    }
+
+    /// A fake daemon on a Unix socket: its connections follow `script`, the
+    /// last entry repeating. `requests` counts the requests it read.
+    struct FakeDaemon {
+        _root: tempfile::TempDir,
+        socket: std::path::PathBuf,
+        requests: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl FakeDaemon {
+        fn new(script: Vec<Peer>) -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let socket = root.path().join("cap.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let (requests, stop) = (
+                Arc::new(AtomicUsize::new(0)),
+                Arc::new(AtomicBool::new(false)),
+            );
+            let (count, halt) = (Arc::clone(&requests), Arc::clone(&stop));
+            let thread = std::thread::spawn(move || {
+                let mut served = 0;
+                while !halt.load(Ordering::Acquire) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        std::thread::sleep(Duration::from_millis(2));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    let peer = script[served.min(script.len() - 1)].clone();
+                    served += 1;
+                    let _: serde_json::Value = read_frame(&mut stream).unwrap();
+                    count.fetch_add(1, Ordering::AcqRel);
+                    Self::serve(&mut stream, peer);
+                }
+            });
+            Self {
+                _root: root,
+                socket,
+                requests,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn serve(stream: &mut UnixStream, peer: Peer) {
+            match peer {
+                Peer::Refuse(message) => {
+                    let _ = write_frame(
+                        stream,
+                        &PublicReply::Error {
+                            code: marsh_daemon::ErrorCode::InvalidRequest,
+                            message: message.into(),
+                        },
+                    );
+                }
+                Peer::DropAfterRequest => {}
+                Peer::Admit(end) => {
+                    write_frame(stream, &PublicReply::ExecutionAccepted).unwrap();
+                    write_frame(
+                        stream,
+                        &AttachmentFrame::JobStarted {
+                            job_id: "job-1".into(),
+                        },
+                    )
+                    .unwrap();
+                    // The client's stdin ends.
+                    let _: AttachmentFrame = read_frame(stream).unwrap();
+                    write_frame(stream, &end).unwrap();
+                }
+            }
+        }
+
+        /// One link attempt loop against this daemon: (result, starts).
+        fn run(&self, attempts: usize) -> (Result<i32, DaemonError>, usize, usize) {
+            let client = marsh_daemon::Client::capability(&self.socket);
+            let spec = ExecuteSpec {
+                model: None,
+                usage: None,
+                label: None,
+                kit: None,
+                command: "non-idempotent".into(),
+                arguments: vec![],
+                placement: Placement::Local,
+                environment: marsh_contracts::ExportedEnvironment::default(),
+                working_directory: None,
+                session: super::placeholder_session(false),
+                process: None,
+                acp: false,
+            };
+            let (mut tries, mut starts) = (0, 0);
+            let result = retry_refusals(attempts, Duration::ZERO, || {
+                tries += 1;
+                client.run_process_with_io_attempt(
+                    spec.clone(),
+                    std::io::empty(),
+                    std::io::sink(),
+                    std::io::sink(),
+                    &mut |_| starts += 1,
+                )
+            });
+            (result, tries, starts)
+        }
+    }
+
+    impl Drop for FakeDaemon {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    #[test]
+    fn a_refused_run_is_retried_against_a_daemon_and_started_once() {
+        let daemon = FakeDaemon::new(vec![
+            Peer::Refuse(BUSY),
+            Peer::Refuse("marsh: the daemon is serving 1024 connections, its most; try again"),
+            Peer::Admit(AttachmentFrame::Exited { code: 0 }),
+        ]);
+        let (result, tries, starts) = daemon.run(30);
+        assert_eq!(result.ok(), Some(0));
+        assert_eq!(
+            (tries, starts, daemon.requests.load(Ordering::Acquire)),
+            (3, 1, 3)
+        );
+    }
+
+    #[test]
+    fn a_run_that_started_is_never_retried_whatever_its_failure_says() {
+        // The peer admits the run, starts it, then fails with the text of a
+        // capacity refusal: the failure is reported, once.
+        let daemon = FakeDaemon::new(vec![Peer::Admit(AttachmentFrame::Failed {
+            message: BUSY.into(),
+        })]);
+        let (result, tries, starts) = daemon.run(2);
+        assert!(
+            matches!(&result, Err(DaemonError::Remote(message)) if message == BUSY),
+            "{result:?}"
+        );
+        assert_eq!(
+            (tries, starts, daemon.requests.load(Ordering::Acquire)),
+            (1, 1, 1),
+            "a started run was submitted again"
+        );
+    }
+
+    #[test]
+    fn a_reply_lost_after_a_whole_request_is_not_retried() {
+        // The daemon read the request and went away without answering: the
+        // run may have been admitted, so it is reported, not replayed.
+        let daemon = FakeDaemon::new(vec![
+            Peer::DropAfterRequest,
+            Peer::Admit(AttachmentFrame::Exited { code: 0 }),
+        ]);
+        let (result, tries, starts) = daemon.run(30);
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!((tries, starts), (1, 0));
+        assert_eq!(daemon.requests.load(Ordering::Acquire), 1);
+    }
 
     #[test]
     fn run_records_only_its_own_model_option() {

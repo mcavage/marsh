@@ -488,7 +488,7 @@ mod linux {
     /// The engine's compose version, for labels, when `compose version` fails:
     /// the upstream version of `packaging/svc-engine/Dockerfile`'s
     /// `docker-compose-plugin` pin (`tests/release/test_compose_pins.py`).
-    const COMPOSE_FALLBACK_VERSION: &str = "5.7.1";
+    const COMPOSE_FALLBACK_VERSION: &str = "5.8.0";
     /// Unprivileged fallback when the lane folder is owned by root.
     const NOBODY: u32 = 65534;
     /// Ports reserved for a prepared restore are forgotten after this long.

@@ -703,7 +703,10 @@ black-box scenarios and the gaps they do not cover.
   refused launches count toward their tree's launch rate (up to 8).
 - The daemon applies the split environment filter to `ProcessRun` itself.
 - A connection slot on `cap.sock` is freed only when the daemon side closes;
-  a link retries a refused connection briefly (nothing was started).
+  a link retries a refused connection briefly (nothing was started): the job
+  socket's cap, the daemon's or a shell relay's connection cap, and a relay that
+  could not reach the daemon, all of which say to try again, and only when
+  they come before the daemon accepted the run (never after `ExecutionAccepted`).
 - `job uncertain` is reported only for transport loss after the daemon
   accepted the job or shell.
 - Deferred: the stdin credit window (stdin uses the existing per-connection

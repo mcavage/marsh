@@ -7,16 +7,16 @@
 FROM debian:trixie-slim AS build
 ARG TARGETARCH
 ARG DOCKER_VERSION=29.9.3
-ARG COMPOSE_VERSION=5.7.1
+ARG COMPOSE_VERSION=5.8.0
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
 RUN set -eu; \
     case "$TARGETARCH" in \
       arm64) arch=aarch64; \
              docker_sha=1b27fd739378ef938401e81ce5afb73b7ad7432d4f598814a9ff5f826bb464d2; \
-             compose_sha=f2f49f903240895fa764c0dca3a14548b754ad9426f6b609ccaf55ec5a3aa2a5 ;; \
+             compose_sha=1a9c918b2fb49b9c87f0018c64b5abd0d30715155e98dc939779fbaee6c414d3 ;; \
       amd64) arch=x86_64; \
              docker_sha=3fb5d1f13014c18cc54945bc177c58a9056a482dada031e17d12cf2e6922c973; \
-             compose_sha=af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf ;; \
+             compose_sha=b8840f5008c447f41fce0a57ae3adeab42c89b1eb6e6012524bcabbfb4ffbaf6 ;; \
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
     plugins=/out/usr/local/lib/docker/cli-plugins; \

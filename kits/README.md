@@ -131,7 +131,7 @@ A pull request that touches one builds and tests it and pushes nothing.
 
 `marsh-docker-cli` is a v3 **mixin**, not an agent. Its image holds only
 `/usr/local/bin/docker` (Docker's official static CLI, 29.9.3) and the Compose
-plugin (`/usr/local/lib/docker/cli-plugins/docker-compose`, v5.7.1), each
+plugin (`/usr/local/lib/docker/cli-plugins/docker-compose`, v5.8.0), each
 downloaded from the vendor at build time and checked against a pinned SHA-256
 (a mismatch fails the build; move a pin by changing the version and both
 digests together). The Compose version is the services engine's

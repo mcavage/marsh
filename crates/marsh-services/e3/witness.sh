@@ -23,6 +23,7 @@ ROWS=(
   "$P::a_silent_hijacked_stream_is_closed_at_the_idle_limit hijack-deadlines-off"
   "$P::a_vanished_client_frees_the_slot hijack-deadlines-off"
   "$P::a_client_that_stops_reading_is_cut hijack-deadlines-off"
+  "$P::an_http2_preface_gets_a_fast_400_and_the_connection_is_closed filter-off"
   "$P::the_project_cap_counts_every_workspace_root project-cap-per-root"
   "$P::a_ledger_write_failure_refuses_and_leaves_no_engine_object ledger-persist-ignore"
   "$P::a_freeze_waits_for_a_mutation_whose_body_is_still_arriving freeze-no-wait"

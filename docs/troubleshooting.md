@@ -28,6 +28,7 @@ marsh results
 | `ephemeral home capacity exhausted` | [Ephemeral home slots](#ephemeral-home-slots) |
 | `Author identity unknown`, or `SSL certificate problem` from `git` or `curl` in the shell | [Git in the shell and Kits](#git-in-the-shell-and-kits) |
 | A local Kit's image digest does not match | [Local Kit builds](#local-kit-build-does-not-match) |
+| `docker compose` prints `jobs of project ... not removed`, or `up` fails with `jobs extension is enabled but not ready` | [Docker Compose prints a jobs warning](#docker-compose-prints-a-jobs-warning) |
 
 ## The first command is slow
 
@@ -341,6 +342,20 @@ not be read` it says to check `sbx ls` and try again (`marsh docker stop`, then
 the command) before it names `marsh docker rm` as a last resort. Run that in the
 project folder: it deletes that project's Docker containers, volumes, images and
 saved Docker data (not the project files), and asks first.
+
+## Docker Compose prints a jobs warning
+
+Compose 5.8 and later asks the engine whether its `jobs` extension is
+available. The [Docker filter](docker.md#limits-and-gaps) refuses that request,
+and Compose reports it like this:
+
+| Command | What you see |
+|---|---|
+| `docker compose -p NAME down`, or `down`, `up`, `create` with `--remove-orphans` | `level=warning msg="jobs of project NAME not removed: the engine's jobs extension is enabled but not ready: ..."`. The command still finishes and exits 0. Ignore the warning. |
+| `docker compose up`, `create` or `start` of a project that declares scheduled jobs (`jobs:` with `triggers.schedule`) | Exit 1 with `jobs extension is enabled but not ready`, before anything is created. Marsh does not support Compose jobs; remove the scheduled jobs from the compose file. |
+| `docker compose run JOB` for a job declared under `jobs:` | The same error. |
+
+A plain `docker compose down` or `down -v` without `-p`, of a project that declares no `jobs:`, does not print it.
 
 ## A split was kept
 

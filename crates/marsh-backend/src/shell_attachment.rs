@@ -12,7 +12,7 @@ use marsh_daemon::{
 };
 use marsh_runtime::{AttachedProcess, Attachment, AttachmentControl};
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -413,6 +413,34 @@ fn run_with_drain(
     }
 }
 
+/// Reads the guest relay's stderr to its end: the first 2 KB are kept in
+/// `head` (for a relay that dies before it is ready), and its refusal lines,
+/// bounded and rate-limited (`relay::GuestDiagnostics`), go to `emit`.
+fn drain_guest_stderr(
+    mut stderr: impl Read,
+    head: &Mutex<Vec<u8>>,
+    emit: &mut dyn FnMut(&str),
+) -> io::Result<u64> {
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 1024];
+    let mut diagnostics = relay::GuestDiagnostics::default();
+    loop {
+        let count = stderr.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(total);
+        }
+        total += count as u64;
+        for line in diagnostics.feed(Instant::now(), &buffer[..count]) {
+            emit(&line);
+        }
+        let mut head = head
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let room = 2048_usize.saturating_sub(head.len());
+        head.extend_from_slice(&buffer[..count.min(room)]);
+    }
+}
+
 /// Retains local relay ownership through cancellable drain and finite reaping.
 pub(super) struct Relay {
     process: Box<dyn AttachedProcess>,
@@ -478,20 +506,9 @@ impl Relay {
         let stderr_head = Arc::new(Mutex::new(Vec::new()));
         let head = Arc::clone(&stderr_head);
         let stderr = thread::spawn(move || {
-            let mut total = 0_u64;
-            let mut buffer = [0_u8; 1024];
-            loop {
-                let count = attachment.stderr.read(&mut buffer)?;
-                if count == 0 {
-                    return Ok(total);
-                }
-                total += count as u64;
-                let mut head = head
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let room = 2048_usize.saturating_sub(head.len());
-                head.extend_from_slice(&buffer[..count.min(room)]);
-            }
+            drain_guest_stderr(attachment.stderr, &head, &mut |line| {
+                relay::log_line(&format!("marshd: shell relay, in the VM: {line}"));
+            })
         });
         Ok(Self {
             process: attachment.process,
@@ -630,6 +647,30 @@ impl Relay {
                         .into(),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use super::*;
+
+    #[test]
+    fn the_guest_relays_refusal_lines_reach_the_daemons_log_and_its_head_is_kept() {
+        let refusal = "marsh-relay: refused a connection (128/128 daemon connections open)";
+        let said = format!("starting\n{refusal}\nother words\n");
+        let head = Mutex::new(Vec::new());
+        let mut logged = Vec::new();
+        let total = drain_guest_stderr(said.as_bytes(), &head, &mut |line| {
+            logged.push(line.to_owned());
+        })
+        .unwrap();
+        assert_eq!(logged, [refusal]);
+        assert_eq!(total, said.len() as u64);
+        assert_eq!(head.lock().unwrap().as_slice(), said.as_bytes());
+        // The head stays bounded, whatever the guest says.
+        let head = Mutex::new(Vec::new());
+        drain_guest_stderr(vec![b'q'; 100_000].as_slice(), &head, &mut |_| {}).unwrap();
+        assert_eq!(head.lock().unwrap().len(), 2048);
     }
 }
 
