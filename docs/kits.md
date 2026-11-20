@@ -370,7 +370,7 @@ children it starts get no home either. A call from a project folder under the
 guest home mounts only that project, as for a project elsewhere. A call from
 the home itself or from a dot-directory of it (any path component under the
 home starting with `.`, such as `~/.config`), or from a project that is the
-home or a dot-directory (after symlinks), is refused. A lane of `marsh split` (`<project>/.marsh/split/<id>/<lane>`) counts as the project it forks, so a Kit that declares no home runs from a lane of a project under the home; the home's own `~/.marsh` does not. In a Kit set, any component that declares `none` wins.
+home, a folder above it (that would mount the home with it, including macOS's `/System/Volumes/Data` and its `Users`, which are the same directories under another name; a Linux bind mount of the home is not recognised), or a dot-directory (after symlinks), is refused. A lane of `marsh split` (`<project>/.marsh/split/<id>/<lane>`) counts as the project it forks, so a Kit that declares no home runs from a lane of a project under the home; the home's own `~/.marsh` does not. In a Kit set, any component that declares `none` wins.
 
 marsh reads the declaration from the Kit's descriptor the first time the Kit
 runs (from the registry for a published Kit) and keeps it. If it can't read
