@@ -488,6 +488,7 @@ impl StockDaemonBackend {
             }
             Err(error) => return Err(Removal::Failed(backend_error(error).to_string())),
         }
+        self.forget_install_attempts_for_vm(&vm.name);
         self.registered_workers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

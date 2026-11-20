@@ -207,6 +207,9 @@ pub(super) enum Fault {
     FailAfterEffect(CommandOutput),
     /// The bounded call expired; `applied` says whether the effect landed.
     TimedOut { applied: bool },
+    /// The command exited but a helper held its output pipes open past the
+    /// drain grace (`marsh_runtime::OutputDrainTimeout`); `applied` as above.
+    OutputDrain { applied: bool },
     /// An attached spawn fails before starting.
     SpawnError(String),
 }
@@ -805,6 +808,20 @@ impl StockModel {
         let result = match fault {
             Some(Fault::Respond(output)) => Ok(output),
             Some(Fault::FailAfterEffect(output)) => self.apply(call).map(|_| output),
+            Some(Fault::OutputDrain { applied }) => {
+                if applied {
+                    self.apply(call)?;
+                }
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    marsh_runtime::OutputDrainTimeout {
+                        status: Some(0),
+                        stdout_bytes: 7,
+                        stderr_bytes: 11,
+                        stderr_tail: "pulling image".into(),
+                    },
+                ))
+            }
             Some(Fault::TimedOut { applied }) => {
                 if applied {
                     self.apply(call)?;

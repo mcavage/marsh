@@ -205,6 +205,7 @@ impl StockDaemonBackend {
         if store.begin_workers_reset(&[vm.to_owned()]).is_ok() {
             store.finish_worker_reset(vm, true)?;
         }
+        self.forget_install_attempts_for_vm(vm);
         Ok(())
     }
 

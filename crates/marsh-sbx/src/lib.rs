@@ -3594,14 +3594,7 @@ impl StockSbx {
             .runner
             .run_bounded(&invocation, self.preparation_timeouts.create)
             .map_err(|error| {
-                if error.kind() == io::ErrorKind::TimedOut {
-                    SbxError::PreparationTimeout {
-                        operation: "create shell VM",
-                        timeout: self.preparation_timeouts.create,
-                    }
-                } else {
-                    SbxError::Io(error)
-                }
+                stock_call_error(error, "create shell VM", self.preparation_timeouts.create)
             })
             .and_then(|output| Self::require_success("create shell VM", output));
         if let Err(error) = outcome {
@@ -5698,6 +5691,14 @@ impl StockSbx {
         }
     }
 
+    /// Whether `vm` is a name whose create never reported a VM: the ownership
+    /// intent stays, so a VM landing under it later is adopted (and removable
+    /// by `marsh reset` or `marsh stop`, or by a reset that still names it).
+    #[must_use]
+    pub fn create_intent_pending(&self, vm: &str) -> bool {
+        self.ownership.is_unadopted_intent(vm)
+    }
+
     /// Shorten the time a create that did not report may still land.
     #[must_use]
     pub fn with_create_settle_for_test(mut self, settle: Duration) -> Self {
@@ -5927,14 +5928,11 @@ impl StockSbx {
                 self.runner
                     .run_bounded(&invocation, self.preparation_timeouts.create)
                     .map_err(|error| {
-                        if error.kind() == io::ErrorKind::TimedOut {
-                            SbxError::PreparationTimeout {
-                                operation: "create local kit VM",
-                                timeout: self.preparation_timeouts.create,
-                            }
-                        } else {
-                            SbxError::Io(error)
-                        }
+                        stock_call_error(
+                            error,
+                            "create local kit VM",
+                            self.preparation_timeouts.create,
+                        )
                     })
             };
             let output = self.create_withholding_clashing_skills(spec, create)?;

@@ -961,6 +961,20 @@ impl StockDaemonBackend {
     /// The VM does not depend on the environment files: they change while it
     /// runs, and servers are loaded into it (`sbxenv.rs`).
     fn kit_spec_for_workload(&self, workload: NativeKitRef) -> Result<KitVmSpec, DaemonError> {
+        let name = self
+            .sbx
+            .vm_name(VmPurpose::Kit, workload.identity())
+            .map_err(backend_error)?;
+        self.kit_spec_for_workload_named(workload, name)
+    }
+
+    /// The spec of `workload`'s VM under a given name, never assigning one:
+    /// how a retirement addresses a VM it recorded earlier.
+    fn kit_spec_for_workload_named(
+        &self,
+        workload: NativeKitRef,
+        name: String,
+    ) -> Result<KitVmSpec, DaemonError> {
         let kit_digest = identity_digest(workload.identity());
         let lifecycle_root = self.config.control_home.join("kit-lifecycle");
         fs::create_dir_all(&lifecycle_root)?;
@@ -971,10 +985,7 @@ impl StockDaemonBackend {
         fs::set_permissions(&lifecycle_workspace, fs::Permissions::from_mode(0o700))?;
         selected_home_identity(&lifecycle_workspace).map_err(backend_error)?;
         Ok(KitVmSpec {
-            name: self
-                .sbx
-                .vm_name(VmPurpose::Kit, workload.identity())
-                .map_err(backend_error)?,
+            name,
             worker_binary: self.config.worker_binary.clone(),
             workload_kit: workload,
             lifecycle_workspace,
@@ -1027,7 +1038,10 @@ impl StockDaemonBackend {
             }
             Ok(removed) => removed
                 .into_iter()
-                .map(|vm| component(ScopeCleanupState::Removed, Some(vm), None))
+                .map(|vm| {
+                    self.forget_install_attempts_for_vm(&vm);
+                    component(ScopeCleanupState::Removed, Some(vm), None)
+                })
                 .collect(),
             Err(error) => vec![component(
                 ScopeCleanupState::CleanupUncertain,
@@ -1827,14 +1841,19 @@ impl DaemonBackend for StockDaemonBackend {
         };
         // The VM of a `kit install` that has not registered its command is
         // named by the install's name (`failed_install.rs`).
-        let installs = self.failed_install_targets(selection)?;
+        let (installs, deferred) = self.failed_install_targets(selection)?;
         selected.extend(installs.iter().map(|target| target.command.clone()));
         selected.sort();
         selected.dedup();
         if selected.is_empty() {
-            return Err(DaemonError::InvalidState(
-                "worker reset selection cannot be empty".into(),
-            ));
+            return Err(DaemonError::InvalidState(if deferred.is_empty() {
+                "worker reset selection cannot be empty".into()
+            } else {
+                format!(
+                    "nothing to reset yet: {}; nothing was removed. Try `marsh workers reset all` again in a few minutes, or run `marsh stop` to remove the scope's VMs now",
+                    deferred.join("; ")
+                )
+            }));
         }
 
         // Resolve every command before making any lifecycle change. Aliases
@@ -1847,26 +1866,27 @@ impl DaemonBackend for StockDaemonBackend {
                 specs.entry(spec.name.clone()).or_insert(spec);
             }
         }
-        for target in &installs {
+        for spec in installs.iter().flat_map(|target| &target.specs) {
             specs
-                .entry(target.spec.name.clone())
-                .or_insert_with(|| target.spec.clone());
+                .entry(spec.name.clone())
+                .or_insert_with(|| spec.clone());
         }
-        let locks = specs
-            .values()
-            .map(|spec| {
-                let key = self.kit_flight_key(spec, false)?;
-                Ok(self
-                    .kit_locks
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .entry(key)
-                    .or_insert_with(|| Arc::new(Mutex::new(())))
-                    .clone())
-            })
-            .collect::<Result<Vec<_>, DaemonError>>()?;
+        // One lock per Kit identity, taken once and in key order: several
+        // VMs of one Kit (a failed install's and its retry's) share a lock.
+        let mut locks = BTreeMap::new();
+        for spec in specs.values() {
+            let key = self.kit_flight_key(spec, false)?;
+            let lock = self
+                .kit_locks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone();
+            locks.insert(key, lock);
+        }
         let _guards = locks
-            .iter()
+            .values()
             .map(|lock| {
                 lock.lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1875,7 +1895,7 @@ impl DaemonBackend for StockDaemonBackend {
         let claim = Self::claim_retirement(&store, specs.keys().cloned().collect())?;
         self.retire_claimed(&store, &specs, &claim)?;
         for target in &installs {
-            self.forget_install_attempt(target.id);
+            self.forget_retired_install_attempt(target);
         }
         if matches!(selection, LoadSelection::All) {
             self.retire_unnamed_quarantined(&store)?;
@@ -1981,6 +2001,9 @@ impl DaemonBackend for StockDaemonBackend {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .remove(&worker_id);
+            }
+            if state != ScopeCleanupState::CleanupUncertain {
+                self.forget_install_attempts_for_vm(&worker_id);
             }
             components.push(ScopeCleanupComponent {
                 kind: "kit".into(),
@@ -5504,7 +5527,15 @@ impl StockDaemonBackend {
         // freshly prepared VM.
         let mut attempt = None;
         if let Some(store) = store {
-            let spec = self.kit_spec_for_workload(workload.clone())?;
+            let mut spec = self.kit_spec_for_workload(workload.clone())?;
+            if self.vm_quarantined(store, &spec.name) {
+                // Recovery retires the quarantined VM and forgets its name
+                // (and intent): a create under that stale name would land
+                // as a VM the ownership map does not know, out of every
+                // reset's reach. Take the name again afterwards.
+                let _ = self.recover_quarantined_vm(store, &spec.name);
+                spec = self.kit_spec_for_workload(workload.clone())?;
+            }
             attempt = Some(self.begin_install_attempt(&command, &reference, &spec.name));
             self.prepare_one_with_progress(&spec, store, |_| Ok(()))
                 .map_err(|error| {
@@ -6485,6 +6516,7 @@ impl StockDaemonBackend {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(worker_id);
             store.finish_worker_reset(worker_id, true)?;
+            self.forget_install_attempts_for_vm(worker_id);
         }
         Ok(())
     }

@@ -554,6 +554,34 @@ fn shell_reset_refuses_a_foreign_vm_and_an_expired_deadline_before_any_effect() 
     assert!(model.vm(SHELL).is_some());
 }
 
+/// What the user reads when the command exited but a helper held its output:
+/// the drain failure's own text with the captured output, never "timed out
+/// after ...".
+fn assert_drain_message(error: &SbxError, operation: &str) {
+    let message = error.to_string();
+    assert!(matches!(error, SbxError::OutputDrain { .. }), "{message}");
+    assert!(
+        message.starts_with(&format!(
+            "stock SBX {operation}: the command exited (status Some(0))"
+        )) && message.contains("output pipes stayed open for 2s (a helper process holds them)")
+            && message.contains("captured 7 bytes of stdout and 11 of stderr")
+            && message.contains("pulling image"),
+        "{message}"
+    );
+    assert!(!message.contains("timed out after"), "{message}");
+}
+
+#[test]
+fn shell_create_drain_failure_keeps_its_own_message() {
+    let model = StockModel::new();
+    model.fault(verb("create"), Fault::OutputDrain { applied: false });
+    let error = model
+        .adapter()
+        .ensure_shell_vm(&ShellFixture::new().spec)
+        .unwrap_err();
+    assert_drain_message(&error, "create shell VM");
+}
+
 #[test]
 fn shell_create_timeout_is_typed_and_a_later_open_retries() {
     let model = StockModel::new();

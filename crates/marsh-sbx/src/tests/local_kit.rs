@@ -157,6 +157,38 @@ fn failed_local_preparation_leaves_no_vm_and_no_scratch() {
     }
 }
 
+/// What the user reads when the command exited but a helper held its output:
+/// the drain failure's own text with the captured output, never "timed out
+/// after ...".
+fn assert_drain_message(error: &SbxError, operation: &str) {
+    let message = error.to_string();
+    assert!(matches!(error, SbxError::OutputDrain { .. }), "{message}");
+    assert!(
+        message.starts_with(&format!(
+            "stock SBX {operation}: the command exited (status Some(0))"
+        )) && message.contains("output pipes stayed open for 2s (a helper process holds them)")
+            && message.contains("captured 7 bytes of stdout and 11 of stderr")
+            && message.contains("pulling image"),
+        "{message}"
+    );
+    assert!(!message.contains("timed out after"), "{message}");
+}
+
+#[test]
+fn local_create_drain_failure_keeps_its_own_message_and_quarantines() {
+    let model = StockModel::new();
+    model.fault(verb("create"), Fault::OutputDrain { applied: false });
+    let adapter = model.adapter();
+    let kit = KitFixture::local(KIT);
+    let error = adapter.ensure_kit_vm(&kit.spec).unwrap_err();
+    assert_drain_message(&error, "create local kit VM");
+    // Like a timed-out create, it may still land: no implicit retry.
+    assert!(matches!(
+        adapter.ensure_kit_vm(&kit.spec),
+        Err(SbxError::QuarantinedVm(_))
+    ));
+}
+
 #[test]
 fn local_create_timeout_is_typed_quarantined_and_released_by_reset() {
     let model = StockModel::new();

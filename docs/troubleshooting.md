@@ -209,9 +209,22 @@ record.
   `workers reset all` skips it: the create may still land, and marsh keeps the
   quarantine and the record of the VM until it lands (then the next reset
   removes it) or the two minutes have passed.
+- `workers reset all` with no registered Kit and only such an install says
+  `nothing to reset yet: ... may still land (try again in N s)` (or that an
+  install is still running), and what to do: try again, or `marsh stop`.
 - Installs are tracked per attempt: resetting an older failed attempt never
-  forgets a newer one of the same name. The records are in memory; after a
-  daemon restart `marsh reset` or `marsh stop` removes a leftover VM.
+  forgets a newer one of the same name, and any path that removes the VM of
+  an attempt (automatic recovery, a reset, `marsh reset`/`stop`, the VM
+  garbage collection) ends that attempt's record. A reset addresses the VM
+  the attempt recorded; it never gives the Kit a new VM name.
+- A slow `sbx create` can land long after the two minutes. While the name is
+  only an intent (no VM was ever seen under it), a reset still succeeds and
+  keeps the record, so a later `workers reset NAME` or `all` removes the VM
+  when it appears. The records are in memory: after a daemon restart, the
+  ownership intent remains (it is persisted), so such a VM is adopted when it
+  is next seen and `marsh reset` or `marsh stop` removes it. The VM garbage
+  collection keeps a running VM, so a late-landing VM that nothing names can
+  stay until one of those runs.
 
 A `sbx` command that marsh gives up on (its time ran out, or it exited while a
 background helper kept its output open) is cut off: marsh stops the command's

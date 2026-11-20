@@ -917,6 +917,27 @@ fn a_kit_vm_is_sized_to_fit_one_job_when_the_job_limit_exceeds_stock_default() {
 }
 
 #[test]
+fn published_kit_create_drain_failure_keeps_its_own_message_and_quarantines() {
+    let model = StockModel::new();
+    model.fault(verb("create"), Fault::OutputDrain { applied: false });
+    let adapter = model.adapter();
+    let kit = KitFixture::published(KIT);
+    let error = adapter.ensure_kit_vm(&kit.spec).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        matches!(error, SbxError::OutputDrain { .. })
+            && message.contains("stock SBX create kit VM: the command exited")
+            && message.contains("pulling image")
+            && !message.contains("timed out after"),
+        "{message}"
+    );
+    assert!(matches!(
+        adapter.ensure_kit_vm(&kit.spec),
+        Err(SbxError::QuarantinedVm(_))
+    ));
+}
+
+#[test]
 fn published_kit_create_timeout_is_typed_and_quarantines_the_name() {
     let model = StockModel::new();
     model.fault(verb("create"), Fault::TimedOut { applied: false });

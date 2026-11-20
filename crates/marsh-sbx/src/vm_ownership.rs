@@ -721,6 +721,15 @@ impl VmOwnership {
             .map(|(name, _)| name.clone())
     }
 
+    /// Whether `name` is an intent no VM has been adopted under: its create
+    /// may still land, and the intent is what authorizes cleaning that up.
+    pub(crate) fn is_unadopted_intent(&self, name: &str) -> bool {
+        self.lock()
+            .entries
+            .get(name)
+            .is_some_and(|entry| entry.uuid.is_none())
+    }
+
     pub(crate) fn host_names(&self) -> BTreeSet<String> {
         self.lock().entries.keys().cloned().collect()
     }
