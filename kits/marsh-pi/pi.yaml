@@ -15,7 +15,7 @@ args:
     buildArg: PI_VERSION
 
 # ACP mode (`pi --acp`) ships the pinned community pi-acp adapter (package.json).
-provides: ["pi@${{ kit.args.version }}", "pi-acp@0.0.34"]
+provides: ["pi@${{ kit.args.version }}", "pi-acp@0.0.35"]
 
 dockerfile: ./pi.dockerfile
 

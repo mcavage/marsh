@@ -5,7 +5,7 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.6.0",
     "@modelcontextprotocol/sdk": "1.32.2",
-    "pi-acp": "0.0.34",
+    "pi-acp": "0.0.35",
     "typebox": "1.4.7",
     "undici": "8.12.4"
   }
