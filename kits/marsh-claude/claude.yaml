@@ -94,9 +94,12 @@ capabilities:
         # is well-formed no matter what the values contain.
         credentialFile:
           # v3 credentialFile paths resolve against the workload image's
-          # declared home and cannot interpolate MARSH_SELECTED_HOME. The
-          # marsh entrypoint never copies raw credentials; selected-home jobs
-          # use proxy sentinels surfaced by the adapter instead.
+          # declared home and cannot interpolate MARSH_SELECTED_HOME, so a
+          # job never sees this file. SBX_CRED_ANTHROPIC_MODE does not report
+          # a claude.ai login either (it is apikey or none). The marsh
+          # entrypoint therefore asks the proxy whether it holds one and, if
+          # so, passes the access-token sentinel above as
+          # CLAUDE_CODE_OAUTH_TOKEN. Keep the two values identical.
           path: ~/.claude/.credentials.json
           structure:
             claudeAiOauth:
