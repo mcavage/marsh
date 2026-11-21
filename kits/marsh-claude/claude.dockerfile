@@ -43,7 +43,7 @@ RUN case "$TARGETARCH" in \
 # Claude ACP adapter, pinned by package-lock.json. Its Agent SDK carries the
 # matching native Claude Code build, which the adapter drives through
 # claude-cli.sh so the container, not bubblewrap, stays the sandbox.
-FROM dhi.io/node:26-debian13-dev@sha256:c60298e2cbf6ca2f82bb25e827b1c361491c30e92dec7f8804dc6f6dede6c639 AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:5101bfdf585a219118dbd5c3ed6554d778e95ff1b9d83aad6da1ebb87f26e3fc AS npm
 WORKDIR /opt/marsh/claude-acp
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
