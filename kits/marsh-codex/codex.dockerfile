@@ -7,7 +7,7 @@
 # publishes, so the provide cannot claim a version the image does not ship.
 # codex-code-mode-host rides along: codex spawns it as a sibling executable
 # for Code Mode and fails that feature closed when it is missing.
-FROM dhi.io/node:26-debian13@sha256:de8059011a5c409edeb514882b1f7093b8f0610bb3ca582c5470cec9106f6056 AS base
+FROM dhi.io/node:26-debian13@sha256:956e3bbaf3118bb2917b10b468cd9669f5a29f281a55de5f39a2ecf4d29c9e39 AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:1aa0a2307eea88ae00d07c7b3c8e804187ee272ccc89cde7b51667b3b065fb1d AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
@@ -46,7 +46,7 @@ RUN case "$TARGETARCH" in \
 # ACP mode (`--acp`, the Kit's acp@1 adapter): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
 # depends on kept inside its own node_modules (never on PATH).
-FROM dhi.io/node:26-debian13-dev@sha256:5101bfdf585a219118dbd5c3ed6554d778e95ff1b9d83aad6da1ebb87f26e3fc AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:1e91de4150a2814738074722988b0d17e025a1f5fd615e5a678207466cfa9fb3 AS npm
 WORKDIR /opt/marsh/codex-acp
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \

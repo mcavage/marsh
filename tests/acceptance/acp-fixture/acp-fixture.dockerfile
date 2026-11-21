@@ -1,7 +1,7 @@
 # The DHI Node.js runtime base plus the Kit VM floor (Docker Engine, which
 # runs this Kit's jobs from this same image), assembled from Debian packages
 # in a -dev build stage (packaging/image-base/assemble-packages.sh).
-FROM dhi.io/node:26-debian13@sha256:de8059011a5c409edeb514882b1f7093b8f0610bb3ca582c5470cec9106f6056 AS base
+FROM dhi.io/node:26-debian13@sha256:956e3bbaf3118bb2917b10b468cd9669f5a29f281a55de5f39a2ecf4d29c9e39 AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:1aa0a2307eea88ae00d07c7b3c8e804187ee272ccc89cde7b51667b3b065fb1d AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
