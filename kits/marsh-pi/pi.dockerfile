@@ -4,7 +4,7 @@
 # poppler-utils (pdftoppm, pdftotext: the agent reads PDFs), assembled
 # from Debian packages in a -dev build stage (image-base/assemble-packages.sh).
 # npm runs only in the Node -dev stage.
-FROM dhi.io/node:26-debian13@sha256:0a0708c15fb356fdde7d8cc1bd3ece997877a8f7388d7445966001046624c431 AS base
+FROM dhi.io/node:26-debian13@sha256:acec53cea8977a846e33c1aaa26f139039780327604a2ed59e27b63ad970f9ba AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:1aa0a2307eea88ae00d07c7b3c8e804187ee272ccc89cde7b51667b3b065fb1d AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
@@ -14,7 +14,7 @@ RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userlan
 
 # Pi, its MCP Gateway and task-tool extensions, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
-FROM dhi.io/node:26-debian13-dev@sha256:868a98e7c5f2f80aaf77ced2908949653ce3483efa7e0422ee4a1ecdd88a5c5b AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:7ddf2a15a09294322b6508b4dbc97be8cbd792ba3d76559d338b4bbe84baf8b5 AS npm
 ARG PI_VERSION
 WORKDIR /opt/marsh/pi-gateway
 COPY package.json package-lock.json ./
