@@ -112,6 +112,21 @@ Claude's old outer-only block volumes were removed. Selected-home persistence
 is the single state mechanism for nested jobs, avoiding hidden state that the
 user cannot see or carry between worker VMs.
 
+## ACP smoke
+
+Every packaged Kit image with an ACP adapter (`com.docker.sandbox/acp@1`) must
+pass `scripts/kit-acp-smoke.py` before a version or `:latest` tag names it
+(release.yml), and on every pull request that changes a Kit (ci.yml, `make kits
+KIT_LOAD=marsh-validate && make kit-acp-smoke`). The script starts the adapter
+in the image the way a marsh ACP job does, with a job's `/run/marsh` (context,
+`job.json` and a `marsh task-mcp`), and checks `initialize`, `session/new` and
+a prompt that must end with `stopReason: end_turn`. The prompt goes to a local
+fake model endpoint, so no credentials are needed. To check a published image:
+
+```sh
+python3 scripts/kit-acp-smoke.py codex=docker.io/mcavage/marsh-codex:latest
+```
+
 ## Kits that publish themselves
 
 Not every directory here ships inside marsh. `make kits` and `make kit-publish`

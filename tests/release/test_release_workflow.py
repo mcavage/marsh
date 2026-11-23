@@ -221,6 +221,26 @@ class ReleaseGate(unittest.TestCase):
         self.assertEqual(sorted(listed), RUST_LANES)
         self.assertGreaterEqual(len(RUST_LANES), 6)
 
+    def test_every_pushed_kit_passes_its_acp_smoke_before_any_version_or_latest_tag(self):
+        names = [step.get("name") for step in self.jobs["images"]["steps"]]
+        smoke = names.index("ACP smoke of the pushed Kits")
+        self.assertLess(names.index("Kits"), smoke)
+        for later in ("Tag every image with this version",
+                      "Move the stable Kit tag (:latest) when the newest stable marsh supports it"):
+            self.assertLess(smoke, names.index(later))
+        step = find_step("release.yml", "images", "ACP smoke of the pushed Kits")
+        self.assertNotIn("continue-on-error", step)
+        self.assertNotIn("if", step)
+        self.assertIn('scripts/kit-acp-smoke.py --commands "$RUNNER_TEMP/out/commands.json"', step["run"])
+
+    def test_the_image_lane_smokes_the_kits_it_built(self):
+        names = [step.get("name") for step in self.ci["jobs"]["images"]["steps"]]
+        built = find_step("ci.yml", "images", "Kits and the acceptance fixture")["run"]
+        smoke = find_step("ci.yml", "images", "ACP smoke of the Kits")["run"]
+        self.assertLess(names.index("Kits and the acceptance fixture"), names.index("ACP smoke of the Kits"))
+        self.assertIn("KIT_LOAD=marsh-validate", built)
+        self.assertIn("make kit-acp-smoke KIT_LOAD=marsh-validate", smoke)
+
     def test_ci_passed_counts_every_lane(self):
         jobs = self.ci["jobs"]
         self.assertEqual(sorted(needs(jobs["passed"])), sorted(set(jobs) - {"changes", "passed"}))

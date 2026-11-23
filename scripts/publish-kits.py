@@ -771,8 +771,13 @@ def run(args):
         # validation is a full build: run EVERY cache-only build before ANY push.
         # This can execute Dockerfile instructions and change builder cache.
         for source, plan in plans.items():
-            build(source, plan, temporary, "type=cacheonly", "check")
-            print(f"Validated native Kit: {source.name}", flush=True)
+            # --load: the same build, kept in the local image store for the
+            # ACP smoke (scripts/kit-acp-smoke.py); nothing is pushed.
+            output = (f"type=docker,name={args.load}/{source.name}:validate" if args.load
+                      else "type=cacheonly")
+            build(source, plan, temporary, output, "check")
+            print(f"Validated native Kit: {source.name}"
+                  + (f" (loaded as {args.load}/{source.name}:validate)" if args.load else ""), flush=True)
         recheck()
         if args.validate_only:
             return
@@ -833,12 +838,18 @@ def main():
     parser.add_argument("--insecure-registry", action="store_true", help="allow an explicitly selected HTTP registry")
     parser.add_argument("--build-inputs", type=Path, help="nonsecret descriptor args and explicit file inputs keyed by Kit source")
     parser.add_argument("--validate-only", action="store_true", help="run full cache-only builds (may execute Dockerfile instructions); no push or registry write")
+    parser.add_argument("--load", metavar="NAME",
+                        help="with --validate-only: load each built image into the local Docker image store "
+                             "as NAME/KIT:validate instead of keeping only the build cache")
     args = parser.parse_args()
     try:
         if not TAG.fullmatch(args.tag):
             raise ValueError("--tag must be a valid image tag")
         if args.repository_name_prefix and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", args.repository_name_prefix):
             raise ValueError("--repository-name-prefix must be at most 64 lowercase repository-name characters")
+        if args.load is not None and (not args.validate_only
+                                      or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", args.load)):
+            raise ValueError("--load takes a lowercase local image name and needs --validate-only")
         if not args.validate_only:
             if not args.output.name or args.output.name in (".", ".."):
                 raise ValueError("--output must name a registry file")

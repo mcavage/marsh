@@ -11,7 +11,7 @@ fi
 ci='^(\.github/workflows/ci\.yml|scripts/ci-changes\.sh)$'
 # Kit and shell image inputs: CI builds the images, and a passing main run
 # publishes them (release.yml).
-images="^(kits/marsh-(claude|codex|pi|shell)/|packaging/(shell|shell-image|svc-engine/|commands\\.json|agents\\.json|image-base|dhi-notices|notice-overrides)|tests/acceptance/(fixture/|acp-fixture/(acp-fixture[.](dockerfile|yaml)|agent[.]mjs)$)|scripts/(publish-kits|prepare-shell-image|prepare-svc-engine-image|prepare-kit-inputs|build_inputs|image_observations|stage-kits|owned_process|stock_sdk)\\.py|scripts/requirements-publish\\.txt\$|Makefile\$)|$ci"
+images="^(kits/marsh-(claude|codex|pi|shell)/|packaging/(shell|shell-image|svc-engine/|commands\\.json|agents\\.json|image-base|dhi-notices|notice-overrides)|tests/acceptance/(fixture/|acp-fixture/(acp-fixture[.](dockerfile|yaml)|agent[.]mjs)$)|scripts/(publish-kits|prepare-shell-image|prepare-svc-engine-image|prepare-kit-inputs|build_inputs|image_observations|stage-kits|owned_process|stock_sdk|kit-acp-smoke)\\.py|scripts/requirements-publish\\.txt\$|Makefile\$)|$ci"
 # Rust tests, real binary callers, and the shell differential harness, plus
 # the files the Rust tests read: every Kit (marsh-contracts), the packaged
 # command tables and the ACP fixture (tests/release/test_ci_changes.py

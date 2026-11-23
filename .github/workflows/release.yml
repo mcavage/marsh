@@ -56,7 +56,9 @@ name: Release
 #     new digest. An image without the annotation falls back to comparing
 #     descriptors; a :latest without it counts as different.
 # scripts/promote-stable-kits.py makes that decision. A stable tag still moves
-# :latest to the release's own images. :nightly behaves as before.
+# :latest to the release's own images. :nightly behaves as before. Before
+# either, every pushed Kit image must pass its ACP smoke
+# (scripts/kit-acp-smoke.py), or the job stops.
 #
 # Stages: version, guest (Linux arm64 binaries), images (shell template and Kit
 # images to docker.io/mcavage/marsh-*, digests recorded), host (macOS binaries;
@@ -372,6 +374,13 @@ jobs:
         run: |
           make kit-publish KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_TAG="$IMAGE_TAG" \
             TARGET_DIR="$RUNNER_TEMP/target" KIT_RELEASE_COMMANDS="$RUNNER_TEMP/out/commands.json"
+      # Each pushed Kit's ACP adapter, started in its image as a marsh job
+      # starts it, must answer initialize, session/new and a prompt (against
+      # a local fake model endpoint; scripts/kit-acp-smoke.py) before a
+      # version or :latest tag names the image. A failure stops this job, so
+      # no tag moves past the moving one just pushed and no release is made.
+      - name: ACP smoke of the pushed Kits
+        run: python3 scripts/kit-acp-smoke.py --commands "$RUNNER_TEMP/out/commands.json"
       - name: Acceptance fixture Kit
         env:
           IMAGE_TAG: ${{ steps.fresh.outputs.image_tag }}
