@@ -384,7 +384,14 @@ class Agent:
             except queue.Empty:
                 continue
             if message is None:
-                code = self.process.wait()
+                # stdout closed: the result can no longer come. Wait for the
+                # exit status within the same deadline; an adapter that closed
+                # stdout but lives on is killed by the caller (close()).
+                try:
+                    code = self.process.wait(timeout=max(0.0, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    raise SmokeError(f"{method}: the adapter closed its stdout before its result "
+                                     "and is still running") from None
                 raise SmokeError(f"{method}: the adapter exited ({code}) before its result")
             if "invalid" in message:
                 raise SmokeError(f"{method}: the adapter wrote a line that is not JSON: {message['invalid']}")
@@ -439,8 +446,10 @@ def exchange(agent, timeouts, prompt, provider):
         "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
         "clientInfo": {"name": "marsh-acp-smoke", "version": "1"},
     }, timeouts["start"])
-    if not isinstance(initialized.get("protocolVersion"), int):
-        raise SmokeError(f"initialize: no protocolVersion in {json.dumps(initialized)[:300]}")
+    # marsh refuses any other version (marsh-acp client.rs, ACP_V1_PROTOCOL_VERSION).
+    if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
+        raise SmokeError(f"initialize: protocolVersion {initialized.get('protocolVersion')!r}, "
+                         "not 1 (marsh speaks ACP v1 only)")
     session = agent.request("session/new", {"cwd": PROJECT, "mcpServers": []}, timeouts["session"])
     if not isinstance(session.get("sessionId"), str) or not session["sessionId"]:
         raise SmokeError(f"session/new: no sessionId in {json.dumps(session)[:300]}")

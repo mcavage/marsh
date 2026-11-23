@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 try:
@@ -37,8 +38,13 @@ FAKE_DOCKER = textwrap.dedent(
     elif args[:2] == ["image", "inspect"]:
         if "--format" in args:
             print(json.dumps(["PATH=/usr/local/bin:/usr/bin:/bin", "OTHER=1"]))
-    elif args[0] in ("pull", "kill"):
+    elif args[0] == "pull":
         log({"command": args})
+    elif args[0] == "kill":
+        log({"command": args})
+        pidfile = os.path.join(os.path.dirname(os.environ["FAKE_LOG"]), args[1] + ".pid")
+        if os.path.exists(pidfile):
+            os.kill(int(open(pidfile).read()), 9)
     elif args[0] == "run":
         booleans = {"--rm", "--interactive", "--init"}
         env, mounts, at = {}, {}, 1
@@ -58,6 +64,9 @@ FAKE_DOCKER = textwrap.dedent(
             at += 2
         image, rest = args[at], args[at + 1:]
         log({"command": args, "image": image, "entrypoint": [entrypoint, *rest], "env": env, "mounts": mounts})
+        name = args[args.index("--name") + 1]
+        with open(os.path.join(os.path.dirname(os.environ["FAKE_LOG"]), name + ".pid"), "w") as stream:
+            stream.write(str(os.getpid()))
         os.environ.update({key: value.replace("host.docker.internal", "127.0.0.1") for key, value in env.items()})
         os.environ["FAKE_RUN"] = mounts["/run/marsh"]["source"]
         os.environ["FAKE_HOME"] = mounts[env["HOME"]]["source"]
@@ -101,11 +110,17 @@ FAKE_AGENT = textwrap.dedent(
         message = json.loads(line)
         method, ident = message.get("method"), message.get("id")
         if method == "initialize":
-            send({"id": ident, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+            send({"id": ident, "result": {"protocolVersion": 2 if behaviour == "version2" else 1,
+                                          "agentCapabilities": {}}})
         elif method == "session/new":
             if behaviour == "broken-session":
                 send({"id": ident, "error": {"code": -32603, "message": "Internal error", "data": {
                     "details": "failed to load configuration: invalid transport in `mcp_servers.marsh`"}}})
+            elif behaviour == "close-stdout":
+                import time
+                sys.stdout.close()
+                os.close(1)
+                time.sleep(600)
             elif behaviour == "exit":
                 print("adapter crashed", file=sys.stderr)
                 sys.exit(3)
@@ -222,6 +237,31 @@ class KitAcpSmoke(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("session/new: the adapter exited (3) before its result", result.stdout)
         self.assertIn("adapter crashed", result.stdout)
+
+    def test_an_adapter_that_is_not_acp_v1_fails(self):
+        self.image("reg/a@sha256:1", "claude", "version2")
+        result = self.smoke("a=reg/a@sha256:1")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAILED a: initialize: protocolVersion 2, not 1", result.stdout)
+        self.assertEqual(len(self.runs()), 1)
+
+    def test_an_adapter_that_closes_stdout_but_lives_on_fails_within_the_deadline_and_is_killed(self):
+        self.image("reg/a@sha256:1", "claude", "close-stdout")
+        started = time.monotonic()
+        result = self.smoke("--session-timeout", "3", "a=reg/a@sha256:1")
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAILED a: session/new: the adapter closed its stdout before its result "
+                      "and is still running", result.stdout)
+        # The 3 s deadline, then close(): stdin closed, a short wait, docker kill.
+        self.assertLess(elapsed, 40)
+        kills = [entry["command"] for entry in map(json.loads, self.log.read_text().splitlines())
+                 if entry["command"][0] == "kill"]
+        self.assertEqual(len(kills), 1)
+        self.assertTrue(kills[0][1].startswith("marsh-acp-smoke-a-"))
+        pid = int((self.root / f"{kills[0][1]}.pid").read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
 
     def test_agent_to_client_requests_are_refused_and_the_turn_still_ends(self):
         self.image("reg/a@sha256:1", "claude", "permission")
