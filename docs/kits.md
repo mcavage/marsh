@@ -78,7 +78,8 @@ provider:
 `sbx secret import` takes keys from your environment variables instead. The
 Claude and Codex Kits also accept an OAuth login that `sbx` holds. The `sbx`
 proxy adds the credential to the agent's requests, and the container sees a
-placeholder.
+placeholder. A Claude job's own key, token, saved login or custom endpoint
+always wins over a login that `sbx` holds.
 
 If nothing is bound, an agent can still sign in from inside its container
 (`codex login`, or Claude's `/login`). That login is stored in the guest home
