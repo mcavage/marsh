@@ -36,6 +36,8 @@ class FakeGitHub(BaseHTTPRequestHandler):
     pending = []    # the attempts each re-run will produce, in order
     reruns = 0
     queued_polls = 0
+    flaky_polls = []  # after a re-run, how each failing poll of the run fails: 503 or "drop"
+    refuse = None     # the status a re-run is refused with
 
     def log_message(self, *args):
         pass
@@ -60,6 +62,12 @@ class FakeGitHub(BaseHTTPRequestHandler):
             return self.reply(401, {"message": "unauthorized"})
         url = urlparse(self.path)
         parts = url.path.split("/")
+        if url.path == "/repos/acme/marsh/actions/runs/42" and cls.reruns and cls.flaky_polls:
+            how = cls.flaky_polls.pop(0)
+            if how == "drop":
+                self.close_connection = True
+                return self.wfile.flush()
+            return self.reply(how, {"message": "Server Error"})
         if url.path == "/repos/acme/marsh/actions/runs/42":
             status = "completed"
             if cls.queued_polls:
@@ -84,6 +92,8 @@ class FakeGitHub(BaseHTTPRequestHandler):
 
     def do_POST(self):
         cls = type(self)
+        if cls.refuse:
+            return self.reply(cls.refuse, {"message": "::error::This workflow is already running"})
         if self.path != "/repos/acme/marsh/actions/runs/42/rerun-failed-jobs" or not cls.pending:
             return self.reply(403, {"message": "cannot re-run"})
         cls.reruns += 1
@@ -95,6 +105,7 @@ class FakeGitHub(BaseHTTPRequestHandler):
 class RerunLostRunners(unittest.TestCase):
     def setUp(self):
         FakeGitHub.attempts, FakeGitHub.pending, FakeGitHub.reruns, FakeGitHub.queued_polls = [], [], 0, 0
+        FakeGitHub.flaky_polls, FakeGitHub.refuse = [], None
         self.server = HTTPServer(("127.0.0.1", 0), FakeGitHub)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -103,7 +114,7 @@ class RerunLostRunners(unittest.TestCase):
     def run_script(self, *extra, attempt=1):
         env = {**os.environ, "GH_TOKEN": "token", "GITHUB_API_URL": f"http://127.0.0.1:{self.server.server_port}"}
         return subprocess.run([sys.executable, SCRIPT, "--repo", "acme/marsh", "--run", "42",
-                               "--attempt", str(attempt), "--poll", "0.01", *extra],
+                               "--attempt", str(attempt), "--poll", "0.01", "--retry-delay", "0.01", *extra],
                               capture_output=True, text=True, env=env, timeout=60)
 
     def test_a_lost_macos_runner_is_re_run_and_waited_for(self):
@@ -165,11 +176,60 @@ class RerunLostRunners(unittest.TestCase):
         self.assertEqual(FakeGitHub.reruns, 0)
         self.assertIn("would re-run its failed jobs (dry run)", result.stdout)
 
-    def test_a_refused_re_run_fails(self):
+    def test_a_failed_gate_with_no_lost_lane_is_never_re_run(self):
+        FakeGitHub.attempts = [[job("Linux unit", "success"), job("macOS arm64", "success"),
+                                job("CI passed", "failure")]]
+        FakeGitHub.pending = [ci_attempt(job("macOS arm64", "success"))]
+        result = self.run_script("--apply")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(FakeGitHub.reruns, 0)
+        self.assertIn("not re-run: no job lost its runner", result.stdout)
+
+    def test_transient_errors_while_waiting_are_tried_again(self):
         FakeGitHub.attempts = [ci_attempt(lost("macOS arm64"))]
+        FakeGitHub.pending = [ci_attempt(job("macOS arm64", "success"))]
+        FakeGitHub.flaky_polls = [503, "drop", 502]
+        result = self.run_script("--apply")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(FakeGitHub.flaky_polls, [])
+        self.assertEqual(result.stdout.count("trying again in"), 3)
+        self.assertIn("attempt 2: completed success; nothing to do", result.stdout)
+
+    def test_a_lasting_api_failure_fails_after_its_tries(self):
+        FakeGitHub.attempts = [ci_attempt(lost("macOS arm64"))]
+        FakeGitHub.pending = [ci_attempt(job("macOS arm64", "success"))]
+        FakeGitHub.flaky_polls = [503] * 5
+        result = self.run_script("--apply", "--tries", "3")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("HTTP 503", result.stderr)
+        self.assertEqual(result.stdout.count("trying again in"), 2)
+
+    def test_a_refused_re_run_is_left_with_a_notice(self):
+        for status in (403, 409):
+            with self.subTest(status=status):
+                FakeGitHub.attempts, FakeGitHub.reruns, FakeGitHub.refuse = [ci_attempt(lost("macOS arm64"))], 0, status
+                result = self.run_script("--apply")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("::notice::run 42 attempt 1: GitHub refused the re-run, leaving it", result.stdout)
+                self.assertEqual(FakeGitHub.reruns, 0)
+                self.assertNotIn("::error::", result.stdout)
+
+    def test_another_rejected_re_run_fails(self):
+        FakeGitHub.attempts = [ci_attempt(lost("macOS arm64"))]
+        FakeGitHub.refuse = 404
         result = self.run_script("--apply")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("rerun-failed-jobs", result.stderr)
+        self.assertIn("rerun-failed-jobs: HTTP 404", result.stderr)
+
+    def test_job_names_cannot_issue_workflow_commands(self):
+        FakeGitHub.attempts = [[job("x\n::error::pwned", "failure"), job("CI passed", "failure")]]
+        result = self.run_script("--apply")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("::error::", result.stdout)
+        self.assertFalse([line for line in result.stdout.splitlines() if line.startswith("::")])
+        FakeGitHub.attempts = [ci_attempt(lost("::add-mask::macOS"))]
+        result = self.run_script()
+        self.assertNotIn("::add-mask::", result.stdout)
 
 
 if __name__ == "__main__":

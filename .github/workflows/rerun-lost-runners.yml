@@ -26,6 +26,9 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-26.04
     # A Release re-run can take hours; at most two of them are waited for.
+    # Best effort: 360 minutes is the most a hosted job may run. If the wait
+    # outlasts it, this job is cancelled and the attempt it was waiting for is
+    # not checked or re-run (re-run it by hand if it lost a runner too).
     timeout-minutes: 360
     permissions:
       contents: read # check out the script

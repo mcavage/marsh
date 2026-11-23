@@ -128,7 +128,10 @@ hosted even after multiple attempts"), which fails `CI passed` or a release's
 re-runs the failed jobs of a CI or Release run that failed only that way, up
 to attempt 3; a run that still has no runner then needs
 `gh run rerun --failed` by hand. It never re-runs a failed, timed-out or
-user-cancelled job.
+user-cancelled job, and leaves a run GitHub refuses to re-run (say you re-ran
+it first). Waiting is best effort: the watching job stops after 360 minutes,
+GitHub's limit for a hosted job, so a re-run still going then is not checked
+again.
 
 TLA+ checks run when specs, configs, their runner or shared build/CI inputs
 change. Normal CI excludes the huge configs; those run weekly and in
