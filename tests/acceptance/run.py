@@ -575,6 +575,17 @@ class Harness(IsolatedScope):
                     raise AssertionError(f"retired worker VM {run.get('vm_id')} still exists")
                 self.deleted_containers_verified.add(container_id)
                 continue
+            if not worker and run.get("state") != "running" and run.get("cleanup") == "uncertain":
+                # Recovery retires a quarantined VM once it verifies nothing can
+                # run there (a stopped VM): its job stays uncertain, the status
+                # view records the retirement, and the VM is gone from stock.
+                retired = any(run.get("job_id") in (item.get("jobs") or []) and item.get("vm_id") == run.get("vm_id")
+                              and item.get("retired") for item in state.get("worker_recoveries") or [])
+                if not retired:
+                    raise AssertionError(f"uncertain job {run.get('job_id')} lost its worker without a recorded retirement")
+                if run.get("vm_id") in stock_vm_inventory(self.sbx):
+                    raise AssertionError(f"retired quarantined VM {run.get('vm_id')} still exists")
+                continue
             if not worker or worker.get("vm_id") != run.get("vm_id"):
                 raise AssertionError("run worker/VM identity is inconsistent")
             if worker.get("scope_id") != scope or not kit_profile_matches(
@@ -1757,6 +1768,8 @@ class Harness(IsolatedScope):
         victim = active[0]
         vm_id = victim.get("vm_id")
         quarantined_uuid = stock_vm_inventory(self.sbx).get(str(vm_id))
+        if not quarantined_uuid:
+            raise AssertionError(f"the acceptance VM {vm_id} has no stable ID in stock inventory")
         stopped = self.run([self.sbx, "stop", str(vm_id)], cwd=self.root, timeout=20)
         if stopped.returncode != 0:
             raise AssertionError("stock sbx could not stop the exact acceptance VM")
@@ -1771,15 +1784,28 @@ class Harness(IsolatedScope):
         # Worker quarantine is self-healing (docs/architecture.md): the VM is stopped, so no job
         # can still run there, and the next command replaces it and says why. What must hold is
         # that the quarantined VM itself is never reused and its job stays uncertain.
-        # The replacement keeps the VM's name under a new stable ID: re-learn it.
+        # The replacement is a new VM (the same name under a new stable ID, or a
+        # new name once recovery retired the stopped one): re-learn the name.
         self.owned_vm_identities.pop(str(vm_id), None)
         replaced = self.shell("fixture identity", timeout=120)
         message = replaced.stderr.decode(errors="replace").lower()
         if replaced.returncode != 0 or "replacing the fixture worker vm" not in message or "quarantined because" not in message:
             raise AssertionError(f"a stopped quarantined VM was not replaced with an explanation: {replaced.stderr!r}")
+        # Read the victim's receipt afresh: a terminal receipt is cached, and the
+        # daemon must not have changed it after recovery.
+        self.receipt_cache.pop(victim.get("job_id"), None)
         final = self.state_snapshot("quarantined-worker-not-reused")
-        replacement_uuid = stock_vm_inventory(self.sbx).get(str(vm_id))
-        if not replacement_uuid or replacement_uuid == quarantined_uuid:
+        # The replacement is a different VM: the same name under a new stable ID,
+        # or (recovery retired the quarantined VM first) a new name, the old one
+        # gone from stock, and the fixture worker on another VM.
+        inventory = stock_vm_inventory(self.sbx)
+        replacement_uuid = inventory.get(str(vm_id))
+        if replacement_uuid is None:
+            fixture_vms = [item.get("vm_id") for item in final.get("workers", [])
+                           if kit_profile_matches(item.get("kit_profile"), self.fixture_ref)]
+            if quarantined_uuid in inventory.values() or not fixture_vms or str(vm_id) in fixture_vms:
+                raise AssertionError("the quarantined VM was neither replaced nor retired")
+        elif replacement_uuid == quarantined_uuid:
             raise AssertionError("the quarantined VM was reused instead of replaced")
         run = next((item for item in self.runs(final) if item.get("job_id") == victim.get("job_id")), None)
         if not run or run.get("cleanup") != "uncertain":
