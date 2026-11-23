@@ -298,7 +298,9 @@ class KitAcpSmoke(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("FAILED a: session/new: the adapter closed its stdout before its result "
                       "and is still running", result.stdout)
-        # The 3 s deadline, then close(): stdin closed, a short wait, docker kill.
+        # The 3 s deadline, then close() kills it at once, with no wait for an
+        # exit that cannot come: about 4 s. The bound is generous for loaded
+        # runners; the old 15 s wait made this take 54 s on CI's Mac.
         self.assertLess(elapsed, 40)
         kills = [entry["command"] for entry in map(json.loads, self.log.read_text().splitlines())
                  if entry["command"][0] == "kill"]

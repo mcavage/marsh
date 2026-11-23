@@ -55,6 +55,7 @@ import queue
 import re
 import secrets
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -163,6 +164,12 @@ class Provider(http.server.ThreadingHTTPServer):
         self.requests = []
         self.lock = threading.Lock()
         threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    def server_bind(self):
+        # HTTPServer.server_bind looks up the host's FQDN (reverse DNS), which
+        # takes about 35 s on GitHub's macOS runners; the name is never used.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     @property
     def port(self):
@@ -449,6 +456,7 @@ class Agent:
         self.updates = []
         self.client_requests = []
         self.next_id = 0
+        self.stdout_closed_alive = False
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._drain, daemon=True).start()
 
@@ -496,6 +504,7 @@ class Agent:
                 try:
                     code = self.process.wait(timeout=max(0.0, deadline - time.monotonic()))
                 except subprocess.TimeoutExpired:
+                    self.stdout_closed_alive = True
                     raise SmokeError(f"{method}: the adapter closed its stdout before its result "
                                      "and is still running") from None
                 raise SmokeError(f"{method}: the adapter exited ({code}) before its result")
@@ -526,7 +535,9 @@ class Agent:
         except OSError:
             pass
         try:
-            self.process.wait(timeout=15)
+            # An adapter that closed its stdout and outlived the deadline will
+            # not end because stdin closed: it is killed at once.
+            self.process.wait(timeout=0 if self.stdout_closed_alive else 15)
         except subprocess.TimeoutExpired:
             kill()
             try:
