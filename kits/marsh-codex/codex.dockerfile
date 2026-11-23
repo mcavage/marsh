@@ -46,7 +46,7 @@ RUN case "$TARGETARCH" in \
 # ACP mode (`--acp`, the Kit's acp@1 adapter): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
 # depends on kept inside its own node_modules (never on PATH).
-FROM dhi.io/node:26-debian13-dev@sha256:f93de13abcc8050541e2787a7ef71e776e197545b66f3479d57fbfc2c937609f AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:a06c9ce7ac94ecf31b85b6b82baa685479ca3fe4e28a61fdafc9676f7d313c0c AS npm
 WORKDIR /opt/marsh/codex-acp
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
