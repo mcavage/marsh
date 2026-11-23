@@ -1768,6 +1768,8 @@ class Harness(IsolatedScope):
         victim = active[0]
         vm_id = victim.get("vm_id")
         quarantined_uuid = stock_vm_inventory(self.sbx).get(str(vm_id))
+        if not quarantined_uuid:
+            raise AssertionError(f"the acceptance VM {vm_id} has no stable ID in stock inventory")
         stopped = self.run([self.sbx, "stop", str(vm_id)], cwd=self.root, timeout=20)
         if stopped.returncode != 0:
             raise AssertionError("stock sbx could not stop the exact acceptance VM")
@@ -1782,7 +1784,8 @@ class Harness(IsolatedScope):
         # Worker quarantine is self-healing (docs/architecture.md): the VM is stopped, so no job
         # can still run there, and the next command replaces it and says why. What must hold is
         # that the quarantined VM itself is never reused and its job stays uncertain.
-        # The replacement keeps the VM's name under a new stable ID: re-learn it.
+        # The replacement is a new VM (the same name under a new stable ID, or a
+        # new name once recovery retired the stopped one): re-learn the name.
         self.owned_vm_identities.pop(str(vm_id), None)
         replaced = self.shell("fixture identity", timeout=120)
         message = replaced.stderr.decode(errors="replace").lower()
