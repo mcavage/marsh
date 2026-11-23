@@ -595,7 +595,13 @@ jobs:
       - name: Services engine image
         run: python3 scripts/prepare-svc-engine-image.py --docker docker --output "$RUNNER_TEMP/svc-engine"
       - name: Kits and the acceptance fixture
-        run: make kits TARGET_DIR="$RUNNER_TEMP/target"
+        run: make kits TARGET_DIR="$RUNNER_TEMP/target" KIT_LOAD=marsh-validate
+      # Each Kit's ACP adapter, started in its image as a marsh job starts it,
+      # must answer initialize, session/new and a prompt (against a local fake
+      # model endpoint; no credentials). release.yml runs the same smoke on
+      # the pushed images before :latest moves.
+      - name: ACP smoke of the Kits
+        run: make kit-acp-smoke KIT_LOAD=marsh-validate
 
   renovate-config:
     name: Renovate config

@@ -56,7 +56,10 @@ name: Release
 #     new digest. An image without the annotation falls back to comparing
 #     descriptors; a :latest without it counts as different.
 # scripts/promote-stable-kits.py makes that decision. A stable tag still moves
-# :latest to the release's own images. :nightly behaves as before.
+# :latest to the release's own images. :nightly behaves as before. The Kit
+# images are pushed by digest only and get no tag at all (moving, version or
+# :latest) until each passes its ACP smoke (scripts/kit-acp-smoke.py); a
+# failure stops the job.
 #
 # Stages: version, guest (Linux arm64 binaries), images (shell template and Kit
 # images to docker.io/mcavage/marsh-*, digests recorded), host (macOS binaries;
@@ -366,12 +369,50 @@ jobs:
             ${IMAGE_TAG:+--tag "$IMAGE_TAG"} --output "$RUNNER_TEMP/out/shell-image"
       - name: Services engine image
         run: python3 scripts/prepare-svc-engine-image.py --docker docker --output "$RUNNER_TEMP/out"
+      # The Kits are pushed by digest only: no tag names them until they pass
+      # the ACP smoke below.
       - name: Kits
+        run: |
+          make kit-publish KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_UNTAGGED=1 \
+            TARGET_DIR="$RUNNER_TEMP/target" KIT_RELEASE_COMMANDS="$RUNNER_TEMP/out/commands.json"
+      # Each pushed Kit's ACP adapter, started in its image as a marsh job
+      # starts it, must answer initialize, session/new and a prompt (against
+      # a local fake model endpoint; scripts/kit-acp-smoke.py) before any tag
+      # names the image. A failure stops this job: no Kit tag moves (not the
+      # moving tag, a version tag or :latest) and no release is made.
+      - name: ACP smoke of the pushed Kits
+        run: python3 scripts/kit-acp-smoke.py --commands "$RUNNER_TEMP/out/commands.json"
+      # Now the moving tag (:release, :nightly, or an older stable release's
+      # version); empty is the publisher's default, :release. Each create is
+      # tried three times (5 s and 15 s apart), and the tag must then resolve
+      # to the digest that passed the smoke.
+      - name: Tag the Kits with the moving tag
         env:
           IMAGE_TAG: ${{ steps.fresh.outputs.image_tag }}
         run: |
-          make kit-publish KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_TAG="$IMAGE_TAG" \
-            TARGET_DIR="$RUNNER_TEMP/target" KIT_RELEASE_COMMANDS="$RUNNER_TEMP/out/commands.json"
+          set -euo pipefail
+          refs=$(jq -er '.[]' "$RUNNER_TEMP/out/commands.json")
+          refs=$(printf '%s\n' "$refs" | sort -u)
+          if [ -z "$refs" ]; then
+            echo "::error::no Kit images in $RUNNER_TEMP/out/commands.json"
+            exit 1
+          fi
+          for ref in $refs; do
+            tag="${ref%@*}:${IMAGE_TAG:-release}"
+            for pause in 5 15 ""; do
+              if docker buildx imagetools create --tag "$tag" "$ref"; then break; fi
+              if [ -z "$pause" ]; then
+                echo "::error::tagging $tag failed after 3 tries"
+                exit 1
+              fi
+              sleep "$pause"
+            done
+            resolved=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -er .digest)
+            if [ "$resolved" != "${ref#*@}" ]; then
+              echo "::error::$tag resolves to $resolved, not ${ref#*@}"
+              exit 1
+            fi
+          done
       - name: Acceptance fixture Kit
         env:
           IMAGE_TAG: ${{ steps.fresh.outputs.image_tag }}
@@ -380,8 +421,8 @@ jobs:
             TARGET_DIR="$RUNNER_TEMP/target" KIT_FIXTURE_COMMANDS="$RUNNER_TEMP/out/fixture-commands.json"
           python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fixture"])' \
             "$RUNNER_TEMP/out/fixture-commands.json" > "$RUNNER_TEMP/out/fixture-ref.txt"
-      # The moving tag (:release or :nightly) was pushed above; add the tags
-      # that name this build. Consumers still pin by digest.
+      # The moving tag (:release or :nightly) is on every image now; add the
+      # tags that name this build. Consumers still pin by digest.
       - name: Tag every image with this version
         env:
           EXTRA_TAGS: ${{ steps.fresh.outputs.extra_tags }}

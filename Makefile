@@ -15,6 +15,10 @@ KIT_COMMANDS ?= packaging/commands.json
 KIT_RELEASE_COMMANDS ?= $(TARGET_DIR)/kit-release/commands.json
 KIT_FIXTURE_COMMANDS ?= $(TARGET_DIR)/kit-release/fixture-commands.json
 KIT_BUILD_INPUTS ?=
+# make kits KIT_LOAD=NAME also loads each Kit image as NAME/KIT:validate (make kit-acp-smoke).
+KIT_LOAD ?=
+# make kit-publish KIT_UNTAGGED=1 pushes the Kits by digest only (no tag moves).
+KIT_UNTAGGED ?=
 KIT_PREPARED_INPUTS ?= $(TARGET_DIR)/kit-release/build-inputs.json
 KIT_FIXTURE_INPUTS ?= $(TARGET_DIR)/kit-release/fixture-inputs.json
 SHELL_IMAGE_REPOSITORY ?=
@@ -79,7 +83,7 @@ LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
 
-.PHONY: help build build-host build-linux prepare-shell-image prepare-svc-engine-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
+.PHONY: help build build-host build-linux prepare-shell-image prepare-svc-engine-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-acp-smoke kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
@@ -114,6 +118,7 @@ help:
 		'make uninstall         Remove installed marsh files under PREFIX; preserve user state' \
 		'make mcp               Run installed host stdio MCP server for this workspace' \
 		'make kits              Validate native Kit v3 source with Buildx' \
+		'make kit-acp-smoke     ACP smoke of the Kit images make kits KIT_LOAD=marsh-validate loaded' \
 		'make kit-publish KIT_REPOSITORY_PREFIX=registry/repository  Publish Kits and pin their digests' \
 		'make kit-publish-fixture KIT_REPOSITORY_PREFIX=registry/repository  Publish acceptance fixture' \
 		'make fixture-ref       Fetch the published acceptance fixture ref into $$(FIXTURE_REF_FILE)' \
@@ -253,7 +258,7 @@ test-tools:
 	node --test tests/kits/pi-acp-patch.test.mjs
 	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
 	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py \
-		tests/release/test_release_workflow.py
+		tests/release/test_release_workflow.py tests/release/test_kit_acp_smoke.py
 
 # The publisher's one dependency, hash-pinned.
 $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
@@ -288,17 +293,22 @@ kits:
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
 		$(if $(KIT_BUILD_INPUTS),--extra-inputs "$(KIT_BUILD_INPUTS)",)
 	$(PYTHON) scripts/publish-kits.py --validate-only --commands "$(KIT_COMMANDS)" \
-		--build-inputs "$(KIT_PREPARED_INPUTS)"
+		--build-inputs "$(KIT_PREPARED_INPUTS)" $(if $(KIT_LOAD),--load "$(KIT_LOAD)")
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands tests/acceptance/fixture/commands.json --output "$(KIT_FIXTURE_INPUTS)"
 	$(PYTHON) scripts/publish-kits.py --validate-only --commands tests/acceptance/fixture/commands.json \
 		--build-inputs "$(KIT_FIXTURE_INPUTS)"
+
+# The ACP smoke of each Kit image `make kits KIT_LOAD=marsh-validate` loaded
+# (scripts/kit-acp-smoke.py); release CI runs it on the pushed images.
+kit-acp-smoke:
+	$(PYTHON) scripts/kit-acp-smoke.py --sources "$(KIT_COMMANDS)" --loaded "$(if $(KIT_LOAD),$(KIT_LOAD),marsh-validate)"
 
 kit-publish:
 	@test -n "$(KIT_REPOSITORY_PREFIX)" || { echo 'make kit-publish: set KIT_REPOSITORY_PREFIX=registry/repository'; exit 1; }
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
 		$(if $(KIT_BUILD_INPUTS),--extra-inputs "$(KIT_BUILD_INPUTS)",)
 	$(PYTHON) scripts/publish-kits.py --repository-prefix "$(KIT_REPOSITORY_PREFIX)" \
-		$(if $(KIT_TAG),--tag "$(KIT_TAG)",) \
+		$(if $(KIT_TAG),--tag "$(KIT_TAG)",) $(if $(KIT_UNTAGGED),--untagged,) \
 		--commands "$(KIT_COMMANDS)" --build-inputs "$(KIT_PREPARED_INPUTS)" \
 		--output "$(KIT_RELEASE_COMMANDS)"
 

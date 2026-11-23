@@ -157,6 +157,31 @@ Claude's old outer-only block volumes were removed. Selected-home persistence
 is the single state mechanism for nested jobs, avoiding hidden state that the
 user cannot see or carry between worker VMs.
 
+## ACP smoke
+
+Every packaged Kit image with an ACP adapter (`com.docker.sandbox/acp@1`) must
+pass `scripts/kit-acp-smoke.py` before any tag names it. release.yml pushes the
+Kits by digest only (`make kit-publish KIT_UNTAGGED=1`), runs the smoke, and
+only then applies the moving tag (`:release`, `:nightly`, or an older stable
+release's version), the version tags and `:latest`. ci.yml runs it on every
+pull request that changes a Kit (`make kits KIT_LOAD=marsh-validate && make
+kit-acp-smoke`).
+
+The script starts the adapter in the image the way a marsh ACP job does on
+stock SBX: a job's `/run/marsh` (context, `job.json` and a `marsh task-mcp`),
+the SBX proxy and MCP Gateway variables, and credential modes as if a key were
+bound. It checks `initialize` (ACP v1), `session/new`, and a prompt that must
+end with `stopReason: end_turn` after the agent called the model with its
+apikey-mode sentinel. One local fake server stands in for the proxy, the model
+endpoint and the MCP Gateway, so no credentials are needed. Not covered: SBX's
+real proxy and credential injection, the Kit's network policy, real
+authentication and OAuth, running a task, and Pi's built-in providers. To check
+a published image:
+
+```sh
+python3 scripts/kit-acp-smoke.py codex=docker.io/mcavage/marsh-codex:latest
+```
+
 ## Kits that publish themselves
 
 Not every directory here ships inside marsh. `make kits` and `make kit-publish`

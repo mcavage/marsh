@@ -7,11 +7,13 @@ the commit it builds, and the version step (run for real, against a scratch
 repository) accepts and refuses the right triggers. make test-tools runs it
 with the publisher venv, which has PyYAML.
 """
+import json
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -220,6 +222,161 @@ class ReleaseGate(unittest.TestCase):
         listed = re.search(r"rust_lanes=\$'([^']*)'", step).group(1).split("\\n")
         self.assertEqual(sorted(listed), RUST_LANES)
         self.assertGreaterEqual(len(RUST_LANES), 6)
+
+    def test_every_pushed_kit_passes_its_acp_smoke_before_any_version_or_latest_tag(self):
+        names = [step.get("name") for step in self.jobs["images"]["steps"]]
+        smoke = names.index("ACP smoke of the pushed Kits")
+        self.assertLess(names.index("Kits"), smoke)
+        for later in ("Tag the Kits with the moving tag", "Tag every image with this version",
+                      "Move the stable Kit tag (:latest) when the newest stable marsh supports it"):
+            self.assertLess(smoke, names.index(later))
+        step = find_step("release.yml", "images", "ACP smoke of the pushed Kits")
+        self.assertNotIn("continue-on-error", step)
+        self.assertNotIn("if", step)
+        self.assertIn('scripts/kit-acp-smoke.py --commands "$RUNNER_TEMP/out/commands.json"', step["run"])
+
+    def test_no_kit_tag_moves_before_the_acp_smoke(self):
+        """Run every images-job step from the Kits publish up to the smoke, with
+        the real Makefile and publisher and a recording docker: no push may
+        name a tag and nothing may be tagged. Then the tag step applies the
+        moving tag to each smoked digest."""
+        steps = self.jobs["images"]["steps"]
+        names = [step.get("name") for step in steps]
+        before = names[names.index("Kits"):names.index("ACP smoke of the pushed Kits")]
+        with tempfile.TemporaryDirectory(prefix="release-kit-tags-") as directory:
+            root = pathlib.Path(directory).resolve()
+            (root / "bin").mkdir()
+            log = root / "docker.jsonl"
+            docker = root / "bin/docker"
+            docker.write_text(f"#!{sys.executable}\n" + textwrap.dedent("""\
+                import json, os, pathlib, sys
+                args = sys.argv[1:]
+                with open(os.environ["DOCKER_LOG"], "a") as stream:
+                    stream.write(json.dumps(args) + "\\n")
+                if args[:2] == ["buildx", "build"]:
+                    pathlib.Path(args[args.index("--metadata-file") + 1]).write_text(
+                        json.dumps({"containerimage.digest": "sha256:" + "b" * 64}))
+                """))
+            docker.chmod(0o755)
+            temp = root / "runner"
+            temp.mkdir()
+            (temp / "out").mkdir(mode=0o700)
+            context = {"steps.fresh.outputs.image_tag": "nightly"}
+            base = {"PATH": os.pathsep.join([str(root / "bin"), os.path.dirname(sys.executable), os.environ["PATH"]]),
+                    "HOME": str(root), "RUNNER_TEMP": str(temp), "DOCKER_LOG": str(log),
+                    "TMPDIR": str(root), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                    **{key: str(value) for key, value in self.release.get("env", {}).items()}}
+
+            def run(name):
+                script = root / "step.sh"
+                script.write_text(step_script("release.yml", "images", name))
+                result = subprocess.run([*shell_argv("release.yml", "images", name), str(script)], cwd=ROOT,
+                                        env={**base, **step_env("release.yml", "images", name, context)},
+                                        capture_output=True, text=True, timeout=900)
+                self.assertEqual(result.returncode, 0, f"{name}: {result.stdout[-2000:]}{result.stderr[-2000:]}")
+
+            for name in before:
+                run(name)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            outputs = [call[call.index("--output") + 1] for call in calls if call[:2] == ["buildx", "build"]]
+            pushes = [output for output in outputs if output != "type=cacheonly"]
+            self.assertEqual(len(pushes), len(json.loads((ROOT / "packaging/commands.json").read_text())))
+            for output in pushes:
+                fields = dict(field.split("=", 1) for field in output.split(",") if "=" in field)
+                self.assertEqual(fields.get("push-by-digest"), "true", output)
+                self.assertNotIn(":", fields["name"].rsplit("/", 1)[-1], output)
+            self.assertFalse([call for call in calls if call[:2] == ["buildx", "imagetools"]])
+
+            commands = (temp / "out/commands.json").read_text()
+        registry = json.loads(commands)
+        result, calls, _ = self.tag_kits(commands)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        tagged = sorted(call[call.index("--tag") + 1:] for call in calls if call[2] == "create")
+        self.assertEqual(tagged, sorted([f"{ref.rsplit('@', 1)[0]}:nightly", ref]
+                                        for ref in set(registry.values())))
+
+    def tag_kits(self, commands, **fake):
+        """Run the step that tags the smoked Kits, with a docker whose creates
+        fail FAIL_CREATES times first and whose tags resolve to the created
+        digest (or, with WRONG_DIGEST, another), and a recording sleep.
+        COMMANDS is the commands.json text, or None for no file."""
+        with tempfile.TemporaryDirectory(prefix="release-kit-tag-step-") as directory:
+            root = pathlib.Path(directory).resolve()
+            (root / "bin").mkdir()
+            (root / "out").mkdir()
+            if commands is not None:
+                (root / "out/commands.json").write_text(commands)
+            (root / "bin/docker").write_text(f"#!{sys.executable}\n" + textwrap.dedent("""\
+                import json, os, pathlib, sys
+                args = sys.argv[1:]
+                root = pathlib.Path(os.environ["FAKE_ROOT"])
+                with open(root / "docker.jsonl", "a") as stream:
+                    stream.write(json.dumps(args) + "\\n")
+                state = root / "tags.json"
+                tags = json.loads(state.read_text()) if state.exists() else {}
+                if args[:3] == ["buildx", "imagetools", "create"]:
+                    failures = root / "failures"
+                    done = int(failures.read_text()) if failures.exists() else 0
+                    if done < int(os.environ.get("FAIL_CREATES", "0")):
+                        failures.write_text(str(done + 1))
+                        sys.exit("ERROR: failed to push: 503 Service Unavailable")
+                    tags[args[args.index("--tag") + 1]] = args[-1].split("@", 1)[1]
+                    state.write_text(json.dumps(tags))
+                elif args[:3] == ["buildx", "imagetools", "inspect"]:
+                    digest = "sha256:" + "c" * 64 if os.environ.get("WRONG_DIGEST") else tags[args[3]]
+                    print(json.dumps({"mediaType": "application/vnd.oci.image.index.v1+json", "digest": digest}))
+                else:
+                    sys.exit(f"fake docker: {args}")
+                """))
+            (root / "bin/sleep").write_text(f"#!{sys.executable}\nimport os, sys\n"
+                                            "open(os.environ['FAKE_ROOT'] + '/sleeps', 'a').write(sys.argv[1] + '\\n')\n")
+            for name in ("docker", "sleep"):
+                (root / "bin" / name).chmod(0o755)
+            script = root / "step.sh"
+            name = "Tag the Kits with the moving tag"
+            script.write_text(step_script("release.yml", "images", name))
+            env = {"PATH": os.pathsep.join([str(root / "bin"), os.environ["PATH"]]), "HOME": str(root),
+                   "RUNNER_TEMP": str(root), "FAKE_ROOT": str(root),
+                   **step_env("release.yml", "images", name, {"steps.fresh.outputs.image_tag": "nightly"}),
+                   **fake}
+            result = subprocess.run([*shell_argv("release.yml", "images", name), str(script)], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=120)
+            log = root / "docker.jsonl"
+            calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+            sleeps = (root / "sleeps").read_text().split() if (root / "sleeps").exists() else []
+            return result, calls, sleeps
+
+    def test_the_kit_tag_step_refuses_a_missing_bad_or_empty_registry(self):
+        for commands in (None, "not json", "{}"):
+            with self.subTest(commands=commands):
+                result, calls, _ = self.tag_kits(commands)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(calls, [])
+
+    def test_a_flaky_tag_create_is_retried_and_a_lasting_failure_fails(self):
+        commands = json.dumps({"pi": "docker.io/mcavage/marsh-pi@sha256:" + "a" * 64})
+        result, calls, sleeps = self.tag_kits(commands, FAIL_CREATES="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([call[2] for call in calls], ["create", "create", "create", "inspect"])
+        self.assertEqual(sleeps, ["5", "15"])
+        result, calls, sleeps = self.tag_kits(commands, FAIL_CREATES="3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("tagging docker.io/mcavage/marsh-pi:nightly failed after 3 tries", result.stdout)
+        self.assertEqual([call[2] for call in calls], ["create"] * 3)
+
+    def test_a_kit_tag_that_resolves_to_another_digest_fails(self):
+        commands = json.dumps({"pi": "docker.io/mcavage/marsh-pi@sha256:" + "a" * 64})
+        result, _, _ = self.tag_kits(commands, WRONG_DIGEST="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("docker.io/mcavage/marsh-pi:nightly resolves to sha256:" + "c" * 64, result.stdout)
+
+    def test_the_image_lane_smokes_the_kits_it_built(self):
+        names = [step.get("name") for step in self.ci["jobs"]["images"]["steps"]]
+        built = find_step("ci.yml", "images", "Kits and the acceptance fixture")["run"]
+        smoke = find_step("ci.yml", "images", "ACP smoke of the Kits")["run"]
+        self.assertLess(names.index("Kits and the acceptance fixture"), names.index("ACP smoke of the Kits"))
+        self.assertIn("KIT_LOAD=marsh-validate", built)
+        self.assertIn("make kit-acp-smoke KIT_LOAD=marsh-validate", smoke)
 
     def test_ci_passed_counts_every_lane(self):
         jobs = self.ci["jobs"]
@@ -498,14 +655,15 @@ class Publication(unittest.TestCase):
         fresh = dict(line.split("=", 1) for line in output.read_text().splitlines())
         context = {f"steps.fresh.outputs.{key}": value for key, value in fresh.items()}
         steps = {name: step_env("release.yml", "images", name, context)
-                 for name in ("Shell VM template", "Kits", "Acceptance fixture Kit", "Tag every image with this version")}
+                 for name in ("Shell VM template", "Tag the Kits with the moving tag", "Acceptance fixture Kit",
+                              "Tag every image with this version")}
         return fresh, steps
 
     def test_an_older_tag_re_run_after_a_newer_release_pushes_its_version_tag_only(self):
         fresh, steps = self.images("1.2.3", "v1.2.2", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
         self.assertEqual(fresh, {"image_tag": "1.2.3", "extra_tags": "1.2.3"})
         # Every publishing step gets the narrowed tags, not the version job's.
-        for name in ("Shell VM template", "Kits", "Acceptance fixture Kit"):
+        for name in ("Shell VM template", "Tag the Kits with the moving tag", "Acceptance fixture Kit"):
             self.assertEqual(steps[name]["IMAGE_TAG"], "1.2.3", name)
         self.assertEqual(steps["Tag every image with this version"]["EXTRA_TAGS"], "1.2.3")
 
@@ -513,7 +671,7 @@ class Publication(unittest.TestCase):
         # A nightly tag ranks above its base version under sort -V; it is not a release.
         fresh, steps = self.images("1.2.4", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
         self.assertEqual(fresh, {"image_tag": "", "extra_tags": "1.2.4 latest"})
-        self.assertEqual(steps["Kits"]["IMAGE_TAG"], "")
+        self.assertEqual(steps["Tag the Kits with the moving tag"]["IMAGE_TAG"], "")
         self.assertEqual(steps["Tag every image with this version"]["EXTRA_TAGS"], "1.2.4 latest")
 
     def test_versions_compare_by_number(self):

@@ -408,6 +408,39 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
             self.assertIn("type=cacheonly", record["args"])
             self.assertFalse(any("push=true" in arg for arg in record["args"]))
 
+    def test_validate_only_can_load_each_image_for_the_acp_smoke(self):
+        result = self.call("--validate-only", "--load", "marsh-validate")
+        self.assertEqual(result.returncode, 0, result)
+        self.assertFalse(self.output.exists())
+        outputs = [record["args"][record["args"].index("--output") + 1] for record in self.records()]
+        self.assertEqual(outputs, ["type=docker,name=marsh-validate/first:validate",
+                                   "type=docker,name=marsh-validate/last:validate"])
+        self.assertFalse(any("push=true" in arg for record in self.records() for arg in record["args"]))
+
+    def test_untagged_pushes_by_digest_and_moves_no_tag(self):
+        result = self.call("--untagged", "--tag", "nightly")
+        self.assertEqual(result.returncode, 0, result)
+        pushes = [record["args"][record["args"].index("--output") + 1] for record in self.records()
+                  if "push=true" in record["args"][record["args"].index("--output") + 1]]
+        self.assertEqual(len(pushes), 2)
+        for output, name in zip(pushes, ("first", "last")):
+            self.assertTrue(output.startswith(f"type=image,name=reg.example/test/{name},push-by-digest=true,push=true,"),
+                            output)
+        self.assertEqual(json.loads(self.output.read_text()),
+                         {"a": "reg.example/test/first@sha256:" + "b" * 64,
+                          "z": "reg.example/test/last@sha256:" + "b" * 64})
+
+    def test_load_needs_validate_only_and_a_local_name(self):
+        self.refused_without_build_with("--load", "marsh-validate")
+        self.assertNotEqual(self.call("--validate-only", "--load", "Reg.example/x").returncode, 0)
+        self.assertEqual(self.records(), [])
+
+    def refused_without_build_with(self, *extra):
+        result = self.call(*extra)
+        self.assertNotEqual(result.returncode, 0, result)
+        self.assertIn("--load", result.stderr)
+        self.assertEqual(self.records(), [], result)
+
     def canonical_checkout(self, all_notices=False):
         """Actual product sources in a private Git checkout, not empty-map wiring.
 
