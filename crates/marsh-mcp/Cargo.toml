@@ -20,7 +20,7 @@ path = "src/main.rs"
 [dependencies]
 base64 = "0.23"
 futures = "0.3"
-nix = { version = "0.31", features = ["signal", "user"] }
+nix = { version = "0.32", features = ["signal", "user"] }
 rmcp = { version = "3.4", default-features = false, features = ["server", "macros", "schemars", "transport-io", "transport-async-rw"] }
 rustix = { version = "1.1", features = ["fs", "net", "process"] }
 schemars = "1.0"
