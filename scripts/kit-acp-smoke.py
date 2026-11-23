@@ -449,6 +449,7 @@ class Agent:
         self.updates = []
         self.client_requests = []
         self.next_id = 0
+        self.stdout_closed_alive = False
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._drain, daemon=True).start()
 
@@ -496,6 +497,7 @@ class Agent:
                 try:
                     code = self.process.wait(timeout=max(0.0, deadline - time.monotonic()))
                 except subprocess.TimeoutExpired:
+                    self.stdout_closed_alive = True
                     raise SmokeError(f"{method}: the adapter closed its stdout before its result "
                                      "and is still running") from None
                 raise SmokeError(f"{method}: the adapter exited ({code}) before its result")
@@ -526,7 +528,9 @@ class Agent:
         except OSError:
             pass
         try:
-            self.process.wait(timeout=15)
+            # An adapter that closed its stdout and outlived the deadline will
+            # not end because stdin closed: it is killed at once.
+            self.process.wait(timeout=0 if self.stdout_closed_alive else 15)
         except subprocess.TimeoutExpired:
             kill()
             try:
