@@ -1,0 +1,47 @@
+name: Re-run lost runners
+# GitHub sometimes has no macOS arm64 runner for a queued job: about 15 minutes
+# after the job was created it is cancelled with no runner and the annotation
+# "The job was not acquired by Runner of type hosted even after multiple
+# attempts", and the CI or Release run fails although nothing in it failed.
+# When a CI or Release run fails only that way, this re-runs its failed jobs
+# (gh run rerun --failed) and waits for the new attempt, up to attempt 3 in
+# all. Anything else (a failed job, a user's cancel, a timeout, a fork's run)
+# is left alone. scripts/rerun-lost-runners.py decides; see its docstring.
+# workflow_run runs with this repository's token, so nothing here reads the
+# finished run's code, artifacts or text: it checks out the default branch and
+# passes the script only the run's id and attempt number.
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [CI, Release]
+    types: [completed]
+permissions: {}
+concurrency:
+  group: rerun-lost-runners-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+jobs:
+  rerun:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 3 &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-26.04
+    # A Release re-run can take hours; at most two of them are waited for.
+    # Best effort: 360 minutes is the most a hosted job may run. If the wait
+    # outlasts it, this job is cancelled and the attempt it was waiting for is
+    # not checked or re-run (re-run it by hand if it lost a runner too).
+    timeout-minutes: 360
+    permissions:
+      contents: read # check out the script
+      actions: write # read the run's jobs and re-run its failed ones
+      checks: read # read the jobs' annotations
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Re-run the failed jobs if only runners were lost
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: python3 scripts/rerun-lost-runners.py --repo "$REPO" --run "$RUN_ID" --attempt "$ATTEMPT" --max-attempts 3 --apply

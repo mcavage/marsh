@@ -364,6 +364,8 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.fresh.outputs.image_tag }}
         run: |
+          # $RUNNER_TEMP exists, so -m applies to out, the one directory -p makes.
+          # shellcheck disable=SC2174
           mkdir -m 700 -p "$RUNNER_TEMP/out"
           python3 scripts/prepare-shell-image.py --repository "$SHELL_IMAGE_REPOSITORY" \
             ${IMAGE_TAG:+--tag "$IMAGE_TAG"} --output "$RUNNER_TEMP/out/shell-image"

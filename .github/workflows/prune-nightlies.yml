@@ -42,5 +42,7 @@ jobs:
           APPLY: ${{ github.event_name != 'workflow_dispatch' || inputs.apply }}
         shell: bash
         run: |
+          args=()
+          if [ "$APPLY" = true ]; then args+=(--apply); fi
           python3 scripts/prune-nightlies.py --namespace mcavage --prefix marsh- --keep 10 \
-            $([ "$APPLY" = true ] && echo --apply) | tee -a "$GITHUB_STEP_SUMMARY"
+            "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

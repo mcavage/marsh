@@ -121,6 +121,18 @@ lane on the commit they build (a nightly still picks its commit from push CI);
 per-commit Kit images follow the push run, and move a Kit's stable tag only
 when that run passed the Rust lanes.
 
+When GitHub has no macOS arm64 runner, a queued macOS job is cancelled after
+about 15 minutes with no runner ("The job was not acquired by Runner of type
+hosted even after multiple attempts"), which fails `CI passed` or a release's
+`host` job. [rerun-lost-runners.yml](.github/workflows/rerun-lost-runners.yml)
+re-runs the failed jobs of a CI or Release run that failed only that way, up
+to attempt 3; a run that still has no runner then needs
+`gh run rerun --failed` by hand. It never re-runs a failed, timed-out or
+user-cancelled job, and leaves a run GitHub refuses to re-run (say you re-ran
+it first). Waiting is best effort: the watching job stops after 360 minutes,
+GitHub's limit for a hosted job, so a re-run still going then is not checked
+again.
+
 TLA+ checks run when specs, configs, their runner or shared build/CI inputs
 change. Normal CI excludes the huge configs; those run weekly and in
 a manual `make regress` ([model.yml](.github/workflows/model.yml)); no

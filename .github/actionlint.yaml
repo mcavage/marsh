@@ -1,6 +1,11 @@
 # actionlint 1.7.12 does not know concurrency's queue key yet (GitHub added
 # queue: max in May 2026); release.yml relies on it to keep every pending
 # stable tag.
+# GitHub-hosted labels newer than actionlint 1.7.12's built-in list.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm
 paths:
   .github/workflows/release.yml:
     ignore:
