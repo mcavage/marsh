@@ -55,6 +55,7 @@ import queue
 import re
 import secrets
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -163,6 +164,12 @@ class Provider(http.server.ThreadingHTTPServer):
         self.requests = []
         self.lock = threading.Lock()
         threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    def server_bind(self):
+        # HTTPServer.server_bind looks up the host's FQDN (reverse DNS), which
+        # takes about 35 s on GitHub's macOS runners; the name is never used.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     @property
     def port(self):
