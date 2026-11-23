@@ -1791,6 +1791,9 @@ class Harness(IsolatedScope):
         message = replaced.stderr.decode(errors="replace").lower()
         if replaced.returncode != 0 or "replacing the fixture worker vm" not in message or "quarantined because" not in message:
             raise AssertionError(f"a stopped quarantined VM was not replaced with an explanation: {replaced.stderr!r}")
+        # Read the victim's receipt afresh: a terminal receipt is cached, and the
+        # daemon must not have changed it after recovery.
+        self.receipt_cache.pop(victim.get("job_id"), None)
         final = self.state_snapshot("quarantined-worker-not-reused")
         # The replacement is a different VM: the same name under a new stable ID,
         # or (recovery retired the quarantined VM first) a new name, the old one
