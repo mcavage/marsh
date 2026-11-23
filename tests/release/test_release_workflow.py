@@ -287,12 +287,88 @@ class ReleaseGate(unittest.TestCase):
                 self.assertNotIn(":", fields["name"].rsplit("/", 1)[-1], output)
             self.assertFalse([call for call in calls if call[:2] == ["buildx", "imagetools"]])
 
-            log.unlink()
-            run("Tag the Kits with the moving tag")
-            registry = json.loads((temp / "out/commands.json").read_text())
-            tagged = sorted(call[call.index("--tag") + 1:] for call in map(json.loads, log.read_text().splitlines()))
-            self.assertEqual(tagged, sorted([f"{ref.rsplit('@', 1)[0]}:nightly", ref]
-                                            for ref in set(registry.values())))
+            commands = (temp / "out/commands.json").read_text()
+        registry = json.loads(commands)
+        result, calls, _ = self.tag_kits(commands)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        tagged = sorted(call[call.index("--tag") + 1:] for call in calls if call[2] == "create")
+        self.assertEqual(tagged, sorted([f"{ref.rsplit('@', 1)[0]}:nightly", ref]
+                                        for ref in set(registry.values())))
+
+    def tag_kits(self, commands, **fake):
+        """Run the step that tags the smoked Kits, with a docker whose creates
+        fail FAIL_CREATES times first and whose tags resolve to the created
+        digest (or, with WRONG_DIGEST, another), and a recording sleep.
+        COMMANDS is the commands.json text, or None for no file."""
+        with tempfile.TemporaryDirectory(prefix="release-kit-tag-step-") as directory:
+            root = pathlib.Path(directory).resolve()
+            (root / "bin").mkdir()
+            (root / "out").mkdir()
+            if commands is not None:
+                (root / "out/commands.json").write_text(commands)
+            (root / "bin/docker").write_text(f"#!{sys.executable}\n" + textwrap.dedent("""\
+                import json, os, pathlib, sys
+                args = sys.argv[1:]
+                root = pathlib.Path(os.environ["FAKE_ROOT"])
+                with open(root / "docker.jsonl", "a") as stream:
+                    stream.write(json.dumps(args) + "\\n")
+                state = root / "tags.json"
+                tags = json.loads(state.read_text()) if state.exists() else {}
+                if args[:3] == ["buildx", "imagetools", "create"]:
+                    failures = root / "failures"
+                    done = int(failures.read_text()) if failures.exists() else 0
+                    if done < int(os.environ.get("FAIL_CREATES", "0")):
+                        failures.write_text(str(done + 1))
+                        sys.exit("ERROR: failed to push: 503 Service Unavailable")
+                    tags[args[args.index("--tag") + 1]] = args[-1].split("@", 1)[1]
+                    state.write_text(json.dumps(tags))
+                elif args[:3] == ["buildx", "imagetools", "inspect"]:
+                    digest = "sha256:" + "c" * 64 if os.environ.get("WRONG_DIGEST") else tags[args[3]]
+                    print(json.dumps({"mediaType": "application/vnd.oci.image.index.v1+json", "digest": digest}))
+                else:
+                    sys.exit(f"fake docker: {args}")
+                """))
+            (root / "bin/sleep").write_text(f"#!{sys.executable}\nimport os, sys\n"
+                                            "open(os.environ['FAKE_ROOT'] + '/sleeps', 'a').write(sys.argv[1] + '\\n')\n")
+            for name in ("docker", "sleep"):
+                (root / "bin" / name).chmod(0o755)
+            script = root / "step.sh"
+            name = "Tag the Kits with the moving tag"
+            script.write_text(step_script("release.yml", "images", name))
+            env = {"PATH": os.pathsep.join([str(root / "bin"), os.environ["PATH"]]), "HOME": str(root),
+                   "RUNNER_TEMP": str(root), "FAKE_ROOT": str(root),
+                   **step_env("release.yml", "images", name, {"steps.fresh.outputs.image_tag": "nightly"}),
+                   **fake}
+            result = subprocess.run([*shell_argv("release.yml", "images", name), str(script)], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=120)
+            log = root / "docker.jsonl"
+            calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+            sleeps = (root / "sleeps").read_text().split() if (root / "sleeps").exists() else []
+            return result, calls, sleeps
+
+    def test_the_kit_tag_step_refuses_a_missing_bad_or_empty_registry(self):
+        for commands in (None, "not json", "{}"):
+            with self.subTest(commands=commands):
+                result, calls, _ = self.tag_kits(commands)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(calls, [])
+
+    def test_a_flaky_tag_create_is_retried_and_a_lasting_failure_fails(self):
+        commands = json.dumps({"pi": "docker.io/mcavage/marsh-pi@sha256:" + "a" * 64})
+        result, calls, sleeps = self.tag_kits(commands, FAIL_CREATES="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([call[2] for call in calls], ["create", "create", "create", "inspect"])
+        self.assertEqual(sleeps, ["5", "15"])
+        result, calls, sleeps = self.tag_kits(commands, FAIL_CREATES="3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("tagging docker.io/mcavage/marsh-pi:nightly failed after 3 tries", result.stdout)
+        self.assertEqual([call[2] for call in calls], ["create"] * 3)
+
+    def test_a_kit_tag_that_resolves_to_another_digest_fails(self):
+        commands = json.dumps({"pi": "docker.io/mcavage/marsh-pi@sha256:" + "a" * 64})
+        result, _, _ = self.tag_kits(commands, WRONG_DIGEST="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("docker.io/mcavage/marsh-pi:nightly resolves to sha256:" + "c" * 64, result.stdout)
 
     def test_the_image_lane_smokes_the_kits_it_built(self):
         names = [step.get("name") for step in self.ci["jobs"]["images"]["steps"]]

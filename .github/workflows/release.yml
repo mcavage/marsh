@@ -383,13 +383,35 @@ jobs:
       - name: ACP smoke of the pushed Kits
         run: python3 scripts/kit-acp-smoke.py --commands "$RUNNER_TEMP/out/commands.json"
       # Now the moving tag (:release, :nightly, or an older stable release's
-      # version); empty is the publisher's default, :release.
+      # version); empty is the publisher's default, :release. Each create is
+      # tried three times (5 s and 15 s apart), and the tag must then resolve
+      # to the digest that passed the smoke.
       - name: Tag the Kits with the moving tag
         env:
           IMAGE_TAG: ${{ steps.fresh.outputs.image_tag }}
         run: |
-          for ref in $(jq -r '.[]' "$RUNNER_TEMP/out/commands.json" | sort -u); do
-            docker buildx imagetools create --tag "${ref%@*}:${IMAGE_TAG:-release}" "$ref"
+          set -euo pipefail
+          refs=$(jq -er '.[]' "$RUNNER_TEMP/out/commands.json")
+          refs=$(printf '%s\n' "$refs" | sort -u)
+          if [ -z "$refs" ]; then
+            echo "::error::no Kit images in $RUNNER_TEMP/out/commands.json"
+            exit 1
+          fi
+          for ref in $refs; do
+            tag="${ref%@*}:${IMAGE_TAG:-release}"
+            for pause in 5 15 ""; do
+              if docker buildx imagetools create --tag "$tag" "$ref"; then break; fi
+              if [ -z "$pause" ]; then
+                echo "::error::tagging $tag failed after 3 tries"
+                exit 1
+              fi
+              sleep "$pause"
+            done
+            resolved=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -er .digest)
+            if [ "$resolved" != "${ref#*@}" ]; then
+              echo "::error::$tag resolves to $resolved, not ${ref#*@}"
+              exit 1
+            fi
           done
       - name: Acceptance fixture Kit
         env:
