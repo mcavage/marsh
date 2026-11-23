@@ -1,35 +1,48 @@
 #!/usr/bin/env python3
-"""ACP smoke of built Kit images: the gate before a Kit's :latest moves.
+"""ACP smoke of built Kit images: the gate before any tag names a Kit image.
 
 For each image whose Kit declares an ACP adapter (com.docker.sandbox/acp@1),
-start that adapter in the image the way marsh starts an ACP job (docker run
-with marsh's user, capability and environment shape; a read-only /run/marsh
-with job.json, context.md and a `marsh task-mcp` that serves MCP, so the
-Kit's task-tool wiring runs as in a real job) and check, over stdio:
+start that adapter in the image the way marsh starts an ACP job on stock SBX
+(docker run with marsh's user, capability and environment shape; a read-only
+/run/marsh with job.json, context.md and a `marsh task-mcp` that serves MCP,
+so the Kit's task-tool wiring runs as in a real job; the SBX proxy and MCP
+Gateway variables, so the Gateway server the Kits add to each session is
+set up too) and check, over stdio:
 
-  initialize       a result, not an error;
+  initialize       a result with protocolVersion 1 (marsh speaks ACP v1 only);
   session/new      (cwd the job's folder, mcpServers []) a result with a
                    sessionId, not an error: Friday's codex image failed here;
   session/prompt   when this script knows how to point the agent at its fake
-                   model endpoint (a local HTTP server that streams "ok"; no
-                   credentials anywhere), a result with stopReason end_turn
-                   within --prompt-timeout, after the agent called the
-                   endpoint. ACP clients end a turn on that result.
+                   model endpoint, a result with stopReason end_turn within
+                   --prompt-timeout, after the agent called the endpoint with
+                   the apikey-mode sentinel (claude, codex) and showed its
+                   reply. ACP clients end a turn on that result.
+
+A Kit whose prompt setup changes the adapter's own configuration (codex:
+CODEX_CONFIG) is also started once without it, as a real job starts it.
+marsh's own agent Kits (claude, codex, pi, pix) fail if they declare no ACP
+adapter; other Kits without one are skipped.
 
 The Kit's credential modes are set as if the host had bound a key
-(SBX_CRED_<SERVICE>_MODE=apikey): the Kits then use proxy sentinels, which
-reach only the fake endpoint here.
+(SBX_CRED_<SERVICE>_MODE=apikey). One local fake server, on the SBX proxy's
+port and reached through host-gateway, is the proxy, the model endpoint
+(streams "ok") and the MCP Gateway (no tools); nothing reaches the internet
+and no credentials exist anywhere.
+
+Out of scope: SBX's real proxy and credential injection, the Kit's network
+policy, real authentication and OAuth, running a task (the job capability
+socket), and Pi's built-in providers (Pi is pointed at a custom provider).
 
 Images come from a command registry (--commands, as publish-kits.py writes
 it: NAME -> REPOSITORY@DIGEST), from the local images `publish-kits.py
 --validate-only --load NAME` built (--loaded NAME, with --sources), or
-NAME=IMAGE arguments. The ACP command is the
-image's Kit descriptor annotation; for a local image that has none, the
-descriptor YAML of the Kit source named in --sources (packaging/commands.json).
+NAME=IMAGE arguments. The ACP command is the image's Kit descriptor
+annotation (registry calls are retried); for a local image, the descriptor
+YAML of the Kit source named in --sources (packaging/commands.json).
 
 Prints one line per Kit and exits 1 if any Kit failed. CI runs it on the
-images it builds (ci.yml, `make kit-acp-smoke`) and on the pushed images
-before any version or :latest tag moves (release.yml).
+images it builds (ci.yml, `make kit-acp-smoke`) and on the pushed images,
+which carry no tag until it passes (release.yml).
 """
 from __future__ import annotations
 
@@ -57,8 +70,24 @@ PROJECT = "/marsh-smoke/project"
 HOME = "/marsh-smoke/home"
 # Every service a packaged Kit binds a credential for.
 SERVICES = ("ANTHROPIC", "OPENAI", "GOOGLE", "MISTRAL", "XAI")
-PROVIDER_HOST = "host.docker.internal"
+# A marsh job's stock SBX network shape (marsh-runtime PROXY_VARIABLES and
+# STOCK_SBX_*): every request goes through the SBX HTTP proxy, and the MCP
+# Gateway's URL and bearer-sentinel name are in the environment. Here the
+# proxy, the model endpoint and the gateway are one local fake server on the
+# proxy's port, reached through the bridge gateway (host-gateway).
+PROXY_PORT = int(os.environ.get("MARSH_SMOKE_PROXY_PORT", "3128"))  # tests only: another port
+PROXY = f"http://gateway.docker.internal:{PROXY_PORT}"
+GATEWAY_URL = "http://mcp-gateway.docker.internal/mcp"
+SENTINEL_NAME = "MARSH_SMOKE_MCP_TOKEN"
+LOOPBACK_NO_PROXY = "localhost,127.0.0.1,::1"
+HOSTS = ("gateway.docker.internal", "mcp-gateway.docker.internal", "host.docker.internal")
+MODEL_URL = f"http://host.docker.internal:{PROXY_PORT}"
 REPLY = "ok"
+# What a Kit in apikey mode sends for its key: the sentinel SBX's proxy
+# replaces with the real key (kits/*/marsh-entrypoint.sh, acp-entrypoint.sh).
+SENTINELS = {"claude": ("x-api-key", "proxy-managed"), "codex": ("authorization", "Bearer proxy-managed")}
+# Command names of marsh's own agent Kits: each must declare an ACP adapter.
+AGENT_KITS = ("claude", "codex", "pi", "pix")
 # Pi-based agents: their Pi agent directory under the selected home.
 PI_AGENT_DIRECTORIES = {"pi": ".pi/agent", "pix": ".pix-agent/agent"}
 
@@ -104,13 +133,33 @@ class SmokeError(Exception):
 
 # --- the fake model endpoint -------------------------------------------------
 
+def bind_address(docker):
+    """Where containers reach the host through host-gateway: Docker Desktop
+    forwards it to the Mac's loopback; on Linux it is the default bridge's
+    gateway address (docker0). Falls back to every interface."""
+    if sys.platform == "darwin":
+        return "127.0.0.1"
+    try:
+        address = docker.output("network", "inspect", "bridge", "--format",
+                                "{{range .IPAM.Config}}{{.Gateway}}{{end}}", timeout=30).strip()
+    except (SmokeError, subprocess.SubprocessError):
+        address = ""
+    return address if re.fullmatch(r"[0-9.]+", address) else "0.0.0.0"
+
+
 class Provider(http.server.ThreadingHTTPServer):
-    """Answers every chat, messages and responses request with a streamed "ok"."""
+    """The SBX proxy, model endpoint and MCP Gateway stand-in: answers every
+    chat, messages and responses request with a streamed "ok", and MCP with
+    no tools. Requests come as proxy requests (absolute URIs) or direct."""
 
     daemon_threads = True
+    allow_reuse_address = True
 
-    def __init__(self, address=("0.0.0.0", 0)):
-        super().__init__(address, ProviderHandler)
+    def __init__(self, host="127.0.0.1", port=PROXY_PORT):
+        try:
+            super().__init__((host, port), ProviderHandler)
+        except OSError as error:
+            raise SmokeError(f"cannot serve the fake proxy on {host}:{port}: {error}") from error
         self.requests = []
         self.lock = threading.Lock()
         threading.Thread(target=self.serve_forever, daemon=True).start()
@@ -119,9 +168,12 @@ class Provider(http.server.ThreadingHTTPServer):
     def port(self):
         return self.server_address[1]
 
-    def count(self):
+    def model_calls(self):
         with self.lock:
-            return len(self.requests)
+            return [request for request in self.requests if request["kind"] == "model"]
+
+    def count(self):
+        return len(self.model_calls())
 
 
 class ProviderHandler(http.server.BaseHTTPRequestHandler):
@@ -131,9 +183,24 @@ class ProviderHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path.split("?", 1)[0].rstrip("/").endswith("/mcp"):
+            return self.send_error(405)  # no server-sent event stream
         if self.path.rstrip("/").endswith("/models"):
             return self.json({"object": "list", "data": [{"id": "marsh-smoke", "object": "model"}]})
         self.send_error(404)
+
+    def do_CONNECT(self):
+        """A proxy tunnel (undici's ProxyAgent tunnels plain HTTP too): the
+        requests in it are served here as well. TLS in it fails, so nothing
+        reaches the internet."""
+        self.send_response(200, "Connection Established")
+        self.end_headers()
+        self.close_connection = False
+
+    def do_DELETE(self):
+        self.send_response(200)
+        self.send_header("content-length", "0")
+        self.end_headers()
 
     def do_POST(self):
         try:
@@ -142,8 +209,12 @@ class ProviderHandler(http.server.BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             body = {}
         path = self.path.split("?", 1)[0].rstrip("/")
+        gateway = path.endswith("/mcp")
+        auth = {name: self.headers.get(name) for name in ("authorization", "x-api-key") if self.headers.get(name)}
         with self.server.lock:
-            self.server.requests.append(path)
+            self.server.requests.append({"path": path, "kind": "gateway" if gateway else "model", "auth": auth})
+        if gateway:
+            return self.mcp(body)
         stream = body.get("stream", False) is not False
         if path.endswith("/messages/count_tokens"):
             return self.json({"input_tokens": 5})
@@ -154,6 +225,27 @@ class ProviderHandler(http.server.BaseHTTPRequestHandler):
         if path.endswith("/responses"):
             return self.responses_api()
         self.send_error(404)
+
+    def mcp(self, body):
+        """The MCP Gateway (streamable HTTP, JSON responses): no tools."""
+        if not isinstance(body, dict) or "id" not in body:
+            self.send_response(202)
+            self.send_header("content-length", "0")
+            self.end_headers()
+            return
+        method, ident = body.get("method"), body.get("id")
+        if method == "initialize":
+            result = {"protocolVersion": (body.get("params") or {}).get("protocolVersion", "2025-06-18"),
+                      "capabilities": {"tools": {}}, "serverInfo": {"name": "mcp-gateway", "version": "smoke"}}
+        elif method == "tools/list":
+            result = {"tools": []}
+        elif method in ("prompts/list", "resources/list", "resources/templates/list"):
+            result = {method.split("/")[0]: [], **({"resourceTemplates": []} if "templates" in method else {})}
+        elif method == "ping":
+            result = {}
+        else:
+            return self.json({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": "not found"}})
+        self.json({"jsonrpc": "2.0", "id": ident, "result": result})
 
     def json(self, value):
         data = json.dumps(value).encode()
@@ -259,8 +351,22 @@ def prompt_setup(agent, home, url):
 # --- images and descriptors --------------------------------------------------
 
 class Docker:
-    def __init__(self, program):
+    # Registry calls are retried after these pauses (seconds).
+    RETRY_PAUSES = (5, 15)
+
+    def __init__(self, program, pauses=None):
         self.program = program
+        self.pauses = self.RETRY_PAUSES if pauses is None else pauses
+
+    def retried(self, what, *arguments, timeout=300):
+        for pause in (*self.pauses, None):
+            try:
+                return self.output(*arguments, timeout=timeout)
+            except (SmokeError, subprocess.TimeoutExpired) as error:
+                if pause is None:
+                    tries = len(self.pauses) + 1
+                    raise SmokeError(f"registry: {what} failed after {tries} tries: {error}") from error
+                time.sleep(pause)
 
     def output(self, *arguments, timeout=300):
         result = subprocess.run([self.program, *arguments], capture_output=True, text=True,
@@ -271,18 +377,17 @@ class Docker:
 
     def annotated_descriptor(self, reference):
         """The Kit descriptor annotation of REFERENCE's linux/arm64 manifest, or
-        None when the registry has none (a local image)."""
-        try:
-            top = json.loads(self.output("buildx", "imagetools", "inspect", "--raw", reference))
-        except (SmokeError, json.JSONDecodeError, subprocess.TimeoutExpired):
-            return None
+        None when its manifest has none. A registry that cannot be read
+        (after retries) raises."""
+        top = json.loads(self.retried(f"reading {reference}", "buildx", "imagetools", "inspect", "--raw",
+                                      reference))
         manifest = top
         for entry in top.get("manifests", []):
             platform = entry.get("platform", {})
             if platform.get("os") == "linux" and platform.get("architecture") == "arm64":
                 repository = reference.rsplit("@", 1)[0] if "@" in reference else reference.rsplit(":", 1)[0]
-                manifest = json.loads(self.output("buildx", "imagetools", "inspect", "--raw",
-                                                  f"{repository}@{entry['digest']}"))
+                manifest = json.loads(self.retried(f"reading {reference}", "buildx", "imagetools", "inspect",
+                                                   "--raw", f"{repository}@{entry['digest']}"))
                 break
         value = (manifest.get("annotations") or {}).get(DESCRIPTOR)
         return json.loads(value) if value else None
@@ -290,7 +395,8 @@ class Docker:
     def image_path(self, reference):
         if subprocess.run([self.program, "image", "inspect", reference], capture_output=True,
                           check=False, timeout=60).returncode != 0:
-            self.output("pull", "--platform", "linux/arm64", "--quiet", reference, timeout=1800)
+            self.retried(f"pulling {reference}", "pull", "--platform", "linux/arm64", "--quiet", reference,
+                         timeout=1800)
         env = json.loads(self.output("image", "inspect", "--format", "{{json .Config.Env}}", reference)) or []
         for item in env:
             if item.startswith("PATH="):
@@ -439,7 +545,7 @@ def agent_text(updates):
     return text
 
 
-def exchange(agent, timeouts, prompt, provider):
+def exchange(agent, timeouts, prompt, provider, sentinel=None):
     """The checks, in order; returns what passed."""
     initialized = agent.request("initialize", {
         "protocolVersion": 1,
@@ -464,12 +570,19 @@ def exchange(agent, timeouts, prompt, provider):
     }, timeouts["prompt"])
     if result.get("stopReason") != "end_turn":
         raise SmokeError(f"session/prompt: stopReason {result.get('stopReason')!r}, not 'end_turn'")
-    if provider.count() == before:
+    calls = provider.model_calls()[before:]
+    if not calls:
         raise SmokeError("session/prompt: ended without calling the model endpoint")
+    if sentinel:
+        header, value = sentinel
+        wrong = sorted({str(call["auth"].get(header)) for call in calls if call["auth"].get(header) != value})
+        if wrong:
+            raise SmokeError(f"session/prompt: the model call's {header} was {', '.join(wrong)}, not the "
+                             f"apikey-mode sentinel {value!r} that SBX's proxy replaces")
     if REPLY not in agent_text(agent.updates):
         raise SmokeError(f"session/prompt: the agent's message was {agent_text(agent.updates)[:200]!r}, "
                          f"not the endpoint's {REPLY!r}")
-    passed.append("session/prompt (end_turn)")
+    passed.append("session/prompt (end_turn" + (f", {sentinel[0]} sentinel" if sentinel else "") + ")")
     return passed
 
 
@@ -484,7 +597,8 @@ def job_capability(directory, name, context):
     text = context.read_text() if context.is_file() else "# marsh: you are running as a marsh job\n"
     (run / "context.md").write_text(text)
     job = {"version": 1, "job": f"smoke-{name}", "name": name, "spawn": [name], "registered": [name],
-           "socket": "/run/marsh/cap.sock", "path": "/run/marsh/bin", "limits": {}, "env": {}}
+           "socket": "/run/marsh/cap.sock", "path": "/run/marsh/bin", "env": {},
+           "limits": {"pool": 64, "depth": 4, "fan_out": 16, "launch_rate": {"launches": 60, "window_seconds": 60}}}
     (run / "job.json").write_text(json.dumps(job))
     for path in (run, run / "bin"):
         path.chmod(0o755)
@@ -494,9 +608,25 @@ def job_capability(directory, name, context):
     return run
 
 
-def smoke(docker, name, reference, adapter, args, provider):
+# Variables that change an adapter's own configuration: a Kit whose prompt
+# setup sets one is also started once without it, as a real job starts it.
+CONFIG_VARIABLES = ("CODEX_CONFIG",)
+
+
+def job_environment(name, image_path):
+    """A marsh ACP job's environment on stock SBX, credentials bound as keys."""
+    return {
+        "HOME": HOME, "USER": "smoke", "LOGNAME": "smoke", "MARSH_SELECTED_HOME": HOME,
+        "PATH": f"/run/marsh/bin:{image_path}", "MARSH_JOB": f"smoke-{name}", "MARSH_ENTRY": "1",
+        **{f"SBX_CRED_{service}_MODE": "apikey" for service in SERVICES},
+        "HTTP_PROXY": PROXY, "HTTPS_PROXY": PROXY, "NODE_USE_ENV_PROXY": "1",
+        "NO_PROXY": LOOPBACK_NO_PROXY, "no_proxy": LOOPBACK_NO_PROXY,
+        "MCP_GATEWAY_URL": GATEWAY_URL, "MCP_SENTINEL_TOKEN_NAME": SENTINEL_NAME,
+    }
+
+
+def run_once(docker, name, reference, adapter, args, provider, image_path, prompt, drop=()):
     agent_name, command = adapter
-    image_path = docker.image_path(reference)
     with tempfile.TemporaryDirectory(prefix=f"marsh-acp-smoke-{name}-") as temporary:
         directory = pathlib.Path(temporary).resolve()
         run = job_capability(directory, name, pathlib.Path(args.context))
@@ -505,45 +635,67 @@ def smoke(docker, name, reference, adapter, args, provider):
         home.mkdir()
         project.mkdir()
         (project / "README.md").write_text("ACP smoke project\n")
-        url = f"http://{PROVIDER_HOST}:{provider.port}"
-        extra = prompt_setup(agent_name, home, url) if args.prompt else None
+        extra = prompt_setup(agent_name, home, MODEL_URL) if prompt else None
         for path in (home, project):
             path.chmod(0o777)
         container = f"marsh-acp-smoke-{name}-{secrets.token_hex(4)}"
-        environment = {
-            "HOME": HOME, "USER": "smoke", "LOGNAME": "smoke", "MARSH_SELECTED_HOME": HOME,
-            "PATH": f"/run/marsh/bin:{image_path}", "MARSH_JOB": f"smoke-{name}", "MARSH_ENTRY": "1",
-            **{f"SBX_CRED_{service}_MODE": "apikey" for service in SERVICES},
-            **(extra or {}),
-        }
+        environment = {**job_environment(name, image_path), **(extra or {})}
+        for variable in drop:
+            environment.pop(variable, None)
         argv = [docker.program, "run", "--rm", "--interactive", "--init", "--name", container,
                 "--platform", "linux/arm64", "--workdir", PROJECT, "--user", f"{os.getuid()}:{os.getgid()}",
-                "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true", "--pids-limit", "4096",
-                "--add-host", f"{PROVIDER_HOST}:host-gateway",
-                "--mount", f"type=bind,source={run},target=/run/marsh,readonly",
-                "--mount", f"type=bind,source={home},target={HOME}",
-                "--mount", f"type=bind,source={project},target={PROJECT}"]
+                "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true", "--pids-limit", "4096"]
+        for host in HOSTS:
+            argv += ["--add-host", f"{host}:host-gateway"]
+        argv += ["--mount", f"type=bind,source={run},target=/run/marsh,readonly",
+                 "--mount", f"type=bind,source={home},target={HOME}",
+                 "--mount", f"type=bind,source={project},target={PROJECT}"]
         for key, value in sorted(environment.items()):
             argv += ["--env", f"{key}={value}"]
         argv += ["--entrypoint", command[0], reference, *command[1:]]
         timeouts = {"start": args.start_timeout, "session": args.session_timeout, "prompt": args.prompt_timeout}
-        before_calls = provider.count()
+        with provider.lock:
+            before = len(provider.requests)
         agent = Agent(argv)
         try:
-            passed = exchange(agent, timeouts, extra is not None, provider)
+            passed = exchange(agent, timeouts, extra is not None, provider, SENTINELS.get(agent_name))
+            with provider.lock:
+                gateway = [request for request in provider.requests[before:] if request["kind"] == "gateway"]
+            wrong = sorted({str(request["auth"].get("authorization")) for request in gateway
+                            if request["auth"].get("authorization") != f"Bearer {SENTINEL_NAME}"})
+            if wrong:
+                raise SmokeError(f"the MCP Gateway was called with authorization {', '.join(wrong)}, "
+                                 f"not the sentinel name the proxy replaces (Bearer {SENTINEL_NAME})")
+            if gateway:
+                passed.append(f"MCP Gateway reached ({len(gateway)} requests)")
+            return passed
         except SmokeError as error:
             tail = "\n".join(f"    {line}" for line in agent.stderr[-15:])
-            requests = f" (agent->client requests: {', '.join(agent.client_requests)})" if agent.client_requests else ""
+            notes = f" (agent->client requests: {', '.join(agent.client_requests)})" if agent.client_requests else ""
             with provider.lock:
-                calls = provider.requests[before_calls:]
-            requests += f" (model endpoint calls: {', '.join(calls) or 'none'})" if extra is not None else ""
-            raise SmokeError(f"{error}{requests}" + (f"\n  adapter stderr:\n{tail}" if tail else "")) from error
+                calls = [request["path"] for request in provider.requests[before:]]
+            notes += f" (fake endpoint calls: {', '.join(calls) or 'none'})"
+            raise SmokeError(f"{error}{notes}" + (f"\n  adapter stderr:\n{tail}" if tail else "")) from error
         finally:
             agent.close(lambda: subprocess.run([docker.program, "kill", container], capture_output=True,
                                                check=False, timeout=60))
-        if extra is None and args.prompt:
-            passed.append(f"no prompt (no fake-endpoint setup for agent {agent_name!r})")
-        return passed
+
+
+def smoke(docker, name, reference, adapter, args, provider):
+    agent_name = adapter[0]
+    image_path = docker.image_path(reference)
+    with tempfile.TemporaryDirectory() as scratch:
+        setup = prompt_setup(agent_name, pathlib.Path(scratch), MODEL_URL) if args.prompt else None
+    passed = []
+    drop = [variable for variable in CONFIG_VARIABLES if variable in (setup or {})]
+    if drop:
+        # The real jobs' branch: no caller configuration.
+        run_once(docker, name, reference, adapter, args, provider, image_path, prompt=False, drop=drop)
+        passed.append(f"initialize and session/new without {', '.join(drop)}")
+    passed += run_once(docker, name, reference, adapter, args, provider, image_path, prompt=setup is not None)
+    if setup is None and args.prompt:
+        passed.append(f"no prompt (no fake-endpoint setup for agent {agent_name!r})")
+    return passed
 
 
 def images(args):
@@ -551,20 +703,20 @@ def images(args):
         registry = json.loads(pathlib.Path(args.commands).read_text())
         if not isinstance(registry, dict):
             raise SmokeError(f"{args.commands}: not a command registry")
-        selected = sorted(registry.items())
+        selected = [(name, reference, False) for name, reference in sorted(registry.items())]
     else:
         selected = []
     if args.loaded:
         if not args.sources:
             raise SmokeError("--loaded needs --sources")
         registry = json.loads(pathlib.Path(args.sources).read_text())
-        selected += [(name, f"{args.loaded}/{pathlib.PurePath(source).name}:validate")
+        selected += [(name, f"{args.loaded}/{pathlib.PurePath(source).name}:validate", True)
                      for name, source in sorted(registry.items())]
     for item in args.image:
         name, separator, reference = item.partition("=")
         if not separator or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name) or not reference:
             raise SmokeError(f"{item}: expected NAME=IMAGE")
-        selected.append((name, reference))
+        selected.append((name, reference, False))
     if not selected:
         raise SmokeError("no images: give --commands FILE, --loaded NAME or NAME=IMAGE")
     return selected
@@ -592,19 +744,27 @@ def main(argv=None):
         selected = images(args)
     except (SmokeError, OSError, json.JSONDecodeError) as error:
         parser.exit(2, f"kit-acp-smoke: {error}\n")
-    docker = Docker(args.docker)
-    provider = Provider()
+    pauses = os.environ.get("MARSH_SMOKE_RETRY_PAUSES")
+    docker = Docker(args.docker, tuple(float(pause) for pause in pauses.split()) if pauses is not None else None)
+    try:
+        provider = Provider(bind_address(docker))
+    except SmokeError as error:
+        parser.exit(2, f"kit-acp-smoke: {error}\n")
     failed = []
     try:
-        for name, reference in selected:
+        for name, reference, local in selected:
             try:
-                descriptor = docker.annotated_descriptor(reference)
+                # A local image (--loaded) has no registry manifest: its
+                # descriptor is its Kit source's.
+                descriptor = None if local else docker.annotated_descriptor(reference)
                 if descriptor is None:
                     if not args.sources:
-                        raise SmokeError("the image has no Kit descriptor annotation; give --sources")
+                        raise SmokeError("the image's manifest has no Kit descriptor annotation; give --sources")
                     descriptor = source_descriptor(args.sources, name)
                 adapter = acp_adapter(descriptor)
                 if adapter is None:
+                    if name in AGENT_KITS:
+                        raise SmokeError(f"marsh's {name} Kit declares no ACP adapter (com.docker.sandbox/acp@1)")
                     print(f"skipped {name}: its Kit declares no ACP adapter ({reference})", flush=True)
                     continue
                 checks = smoke(docker, name, reference, adapter, args, provider)
