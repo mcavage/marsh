@@ -386,6 +386,66 @@ class ReleaseGate(unittest.TestCase):
         group = self.ci["concurrency"]["group"]
         self.assertIn("inputs.ref && format('release-{0}', github.run_id)", group)
 
+    def test_only_a_pull_request_run_of_ci_is_ever_cancelled_by_a_newer_one(self):
+        cancel = self.ci["concurrency"]["cancel-in-progress"]
+        for event in ("push", "workflow_dispatch", "workflow_call", "schedule"):
+            self.assertFalse(evaluate(cancel, {"github.event_name": event}), event)
+        self.assertTrue(evaluate(cancel, {"github.event_name": "pull_request"}))
+        self.assertIs(self.release["concurrency"]["cancel-in-progress"], False)
+        self.assertIs(self.jobs["images"]["concurrency"]["cancel-in-progress"], False)
+
+
+@unittest.skipIf(yaml is None, "needs PyYAML (make test-tools runs this under the publisher venv)")
+class LostRunners(unittest.TestCase):
+    """rerun-lost-runners.yml re-runs a CI or Release run that failed only
+    because no hosted (macOS) runner took a job."""
+
+    def setUp(self):
+        self.workflow = load("rerun-lost-runners.yml")
+        self.job = self.workflow["jobs"]["rerun"]
+
+    def test_it_follows_ci_and_release_by_their_names(self):
+        trigger = self.workflow["on"]["workflow_run"]
+        self.assertEqual(sorted(trigger["workflows"]), sorted([load("ci.yml")["name"], load("release.yml")["name"]]))
+        self.assertEqual(trigger["types"], ["completed"])
+        self.assertEqual(list(self.workflow["on"]), ["workflow_run"])
+
+    def test_only_a_failed_same_repository_run_before_its_third_attempt_is_looked_at(self):
+        condition = self.job["if"]
+        base = {"github.event.workflow_run.conclusion": "failure", "github.event.workflow_run.run_attempt": 1,
+                "github.event.workflow_run.head_repository.full_name": "mcavage/marsh",
+                "github.repository": "mcavage/marsh"}
+        self.assertTrue(evaluate(condition, base))
+        self.assertTrue(evaluate(condition, {**base, "github.event.workflow_run.run_attempt": 2}))
+        for change in ({"github.event.workflow_run.run_attempt": 3},
+                       {"github.event.workflow_run.conclusion": "cancelled"},
+                       {"github.event.workflow_run.conclusion": "success"},
+                       {"github.event.workflow_run.head_repository.full_name": "fork/marsh"}):
+            self.assertFalse(evaluate(condition, {**base, **change}), change)
+
+    def test_its_token_can_only_re_run_and_read(self):
+        self.assertEqual(self.workflow["permissions"], {})
+        self.assertEqual(self.job["permissions"], {"contents": "read", "actions": "write", "checks": "read"})
+        self.assertNotIn("environment", self.job)
+        self.assertNotIn("secrets.", json.dumps(self.workflow))
+
+    def test_one_watcher_per_run_and_the_script_stops_at_the_same_attempt(self):
+        concurrency = self.workflow["concurrency"]
+        self.assertEqual(concurrency["group"], "rerun-lost-runners-${{ github.event.workflow_run.id }}")
+        self.assertIs(concurrency["cancel-in-progress"], False)
+        script = step_script("rerun-lost-runners.yml", "rerun", "Re-run the failed jobs if only runners were lost")
+        self.assertIn("scripts/rerun-lost-runners.py", script)
+        self.assertIn("--max-attempts 3 --apply", script)
+        self.assertIn("run_attempt < 3", self.job["if"])
+        checkout = next(step for step in self.job["steps"] if str(step.get("uses", "")).startswith("actions/checkout@"))
+        self.assertNotIn("ref", checkout.get("with", {}))  # the default branch, never the run's head
+
+    def test_the_script_knows_the_gate_by_its_ci_and_release_names(self):
+        gate = load("ci.yml")["jobs"]["passed"]["name"]
+        source = (ROOT / "scripts/rerun-lost-runners.py").read_text()
+        self.assertIn(f'GATES = frozenset({{"{gate}", "ci / {gate}"}})', source)
+        self.assertEqual(load("release.yml")["jobs"]["ci"]["uses"], "./.github/workflows/ci.yml")
+
 
 def rust_lanes():
     """The ci.yml jobs that a push selects with the code or host lane: the Rust tests."""
