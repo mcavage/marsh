@@ -115,8 +115,10 @@ user cannot see or carry between worker VMs.
 ## ACP smoke
 
 Every packaged Kit image with an ACP adapter (`com.docker.sandbox/acp@1`) must
-pass `scripts/kit-acp-smoke.py` before a version or `:latest` tag names it
-(release.yml), and on every pull request that changes a Kit (ci.yml, `make kits
+pass `scripts/kit-acp-smoke.py` before any tag names it: release.yml pushes
+the Kits by digest only (`make kit-publish KIT_UNTAGGED=1`), runs the smoke,
+and only then applies the moving tag (`:release`, `:nightly`, or an older
+stable release's version), the version tags and `:latest`; and ci.yml runs it on every pull request that changes a Kit (`make kits
 KIT_LOAD=marsh-validate && make kit-acp-smoke`). The script starts the adapter
 in the image the way a marsh ACP job does, with a job's `/run/marsh` (context,
 `job.json` and a `marsh task-mcp`), and checks `initialize`, `session/new` and

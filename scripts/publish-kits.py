@@ -789,7 +789,11 @@ def run(args):
                 for source, plan in plans.items():
                     recheck()
                     repository = f"{prefix}/{name_prefix}{source.name}"
-                    output = f"type=image,name={repository}:{args.tag},push=true"
+                    # --untagged: push the manifest by digest only, so no tag
+                    # moves until the caller applies one (release.yml tags the
+                    # Kits after their ACP smoke).
+                    output = (f"type=image,name={repository},push-by-digest=true,push=true" if args.untagged
+                              else f"type=image,name={repository}:{args.tag},push=true")
                     # What the image is built from, for promote-stable-kits.py:
                     # builds are not reproducible, but this is.
                     output += f",annotation.{INPUTS_ANNOTATION}={inputs_identity(state, root, source)}"
@@ -821,7 +825,8 @@ def run(args):
                 print(f"Publication receipt: {args.output.parent / receipt_name}", flush=True)
                 print(f"Pinned command registry: {args.output}", flush=True)
             except (ValueError, OSError, TypeError, KeyError, RecursionError, subprocess.SubprocessError) as error:
-                raise ValueError(f"publication may have occurred (including :{args.tag} tag moves); "
+                moved = "by digest, no tag moved" if args.untagged else f"including :{args.tag} tag moves"
+                raise ValueError(f"publication may have occurred ({moved}); "
                                  f"previous local registry retained until atomic commit: {error}") from error
 
 
@@ -838,6 +843,9 @@ def main():
     parser.add_argument("--insecure-registry", action="store_true", help="allow an explicitly selected HTTP registry")
     parser.add_argument("--build-inputs", type=Path, help="nonsecret descriptor args and explicit file inputs keyed by Kit source")
     parser.add_argument("--validate-only", action="store_true", help="run full cache-only builds (may execute Dockerfile instructions); no push or registry write")
+    parser.add_argument("--untagged", action="store_true",
+                        help="push each image by digest only, moving no tag (not even --tag); "
+                             "the registry pins the digests")
     parser.add_argument("--load", metavar="NAME",
                         help="with --validate-only: load each built image into the local Docker image store "
                              "as NAME/KIT:validate instead of keeping only the build cache")

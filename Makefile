@@ -17,6 +17,8 @@ KIT_FIXTURE_COMMANDS ?= $(TARGET_DIR)/kit-release/fixture-commands.json
 KIT_BUILD_INPUTS ?=
 # make kits KIT_LOAD=NAME also loads each Kit image as NAME/KIT:validate (make kit-acp-smoke).
 KIT_LOAD ?=
+# make kit-publish KIT_UNTAGGED=1 pushes the Kits by digest only (no tag moves).
+KIT_UNTAGGED ?=
 KIT_PREPARED_INPUTS ?= $(TARGET_DIR)/kit-release/build-inputs.json
 KIT_FIXTURE_INPUTS ?= $(TARGET_DIR)/kit-release/fixture-inputs.json
 SHELL_IMAGE_REPOSITORY ?=
@@ -306,7 +308,7 @@ kit-publish:
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
 		$(if $(KIT_BUILD_INPUTS),--extra-inputs "$(KIT_BUILD_INPUTS)",)
 	$(PYTHON) scripts/publish-kits.py --repository-prefix "$(KIT_REPOSITORY_PREFIX)" \
-		$(if $(KIT_TAG),--tag "$(KIT_TAG)",) \
+		$(if $(KIT_TAG),--tag "$(KIT_TAG)",) $(if $(KIT_UNTAGGED),--untagged,) \
 		--commands "$(KIT_COMMANDS)" --build-inputs "$(KIT_PREPARED_INPUTS)" \
 		--output "$(KIT_RELEASE_COMMANDS)"
 

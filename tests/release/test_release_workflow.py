@@ -7,11 +7,13 @@ the commit it builds, and the version step (run for real, against a scratch
 repository) accepts and refuses the right triggers. make test-tools runs it
 with the publisher venv, which has PyYAML.
 """
+import json
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -225,13 +227,72 @@ class ReleaseGate(unittest.TestCase):
         names = [step.get("name") for step in self.jobs["images"]["steps"]]
         smoke = names.index("ACP smoke of the pushed Kits")
         self.assertLess(names.index("Kits"), smoke)
-        for later in ("Tag every image with this version",
+        for later in ("Tag the Kits with the moving tag", "Tag every image with this version",
                       "Move the stable Kit tag (:latest) when the newest stable marsh supports it"):
             self.assertLess(smoke, names.index(later))
         step = find_step("release.yml", "images", "ACP smoke of the pushed Kits")
         self.assertNotIn("continue-on-error", step)
         self.assertNotIn("if", step)
         self.assertIn('scripts/kit-acp-smoke.py --commands "$RUNNER_TEMP/out/commands.json"', step["run"])
+
+    def test_no_kit_tag_moves_before_the_acp_smoke(self):
+        """Run every images-job step from the Kits publish up to the smoke, with
+        the real Makefile and publisher and a recording docker: no push may
+        name a tag and nothing may be tagged. Then the tag step applies the
+        moving tag to each smoked digest."""
+        steps = self.jobs["images"]["steps"]
+        names = [step.get("name") for step in steps]
+        before = names[names.index("Kits"):names.index("ACP smoke of the pushed Kits")]
+        with tempfile.TemporaryDirectory(prefix="release-kit-tags-") as directory:
+            root = pathlib.Path(directory).resolve()
+            (root / "bin").mkdir()
+            log = root / "docker.jsonl"
+            docker = root / "bin/docker"
+            docker.write_text(f"#!{sys.executable}\n" + textwrap.dedent("""\
+                import json, os, pathlib, sys
+                args = sys.argv[1:]
+                with open(os.environ["DOCKER_LOG"], "a") as stream:
+                    stream.write(json.dumps(args) + "\\n")
+                if args[:2] == ["buildx", "build"]:
+                    pathlib.Path(args[args.index("--metadata-file") + 1]).write_text(
+                        json.dumps({"containerimage.digest": "sha256:" + "b" * 64}))
+                """))
+            docker.chmod(0o755)
+            temp = root / "runner"
+            temp.mkdir()
+            (temp / "out").mkdir(mode=0o700)
+            context = {"steps.fresh.outputs.image_tag": "nightly"}
+            base = {"PATH": os.pathsep.join([str(root / "bin"), os.path.dirname(sys.executable), os.environ["PATH"]]),
+                    "HOME": str(root), "RUNNER_TEMP": str(temp), "DOCKER_LOG": str(log),
+                    "TMPDIR": str(root), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                    **{key: str(value) for key, value in self.release.get("env", {}).items()}}
+
+            def run(name):
+                script = root / "step.sh"
+                script.write_text(step_script("release.yml", "images", name))
+                result = subprocess.run([*shell_argv("release.yml", "images", name), str(script)], cwd=ROOT,
+                                        env={**base, **step_env("release.yml", "images", name, context)},
+                                        capture_output=True, text=True, timeout=900)
+                self.assertEqual(result.returncode, 0, f"{name}: {result.stdout[-2000:]}{result.stderr[-2000:]}")
+
+            for name in before:
+                run(name)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            outputs = [call[call.index("--output") + 1] for call in calls if call[:2] == ["buildx", "build"]]
+            pushes = [output for output in outputs if output != "type=cacheonly"]
+            self.assertEqual(len(pushes), len(json.loads((ROOT / "packaging/commands.json").read_text())))
+            for output in pushes:
+                fields = dict(field.split("=", 1) for field in output.split(",") if "=" in field)
+                self.assertEqual(fields.get("push-by-digest"), "true", output)
+                self.assertNotIn(":", fields["name"].rsplit("/", 1)[-1], output)
+            self.assertFalse([call for call in calls if call[:2] == ["buildx", "imagetools"]])
+
+            log.unlink()
+            run("Tag the Kits with the moving tag")
+            registry = json.loads((temp / "out/commands.json").read_text())
+            tagged = sorted(call[call.index("--tag") + 1:] for call in map(json.loads, log.read_text().splitlines()))
+            self.assertEqual(tagged, sorted([f"{ref.rsplit('@', 1)[0]}:nightly", ref]
+                                            for ref in set(registry.values())))
 
     def test_the_image_lane_smokes_the_kits_it_built(self):
         names = [step.get("name") for step in self.ci["jobs"]["images"]["steps"]]
@@ -518,14 +579,15 @@ class Publication(unittest.TestCase):
         fresh = dict(line.split("=", 1) for line in output.read_text().splitlines())
         context = {f"steps.fresh.outputs.{key}": value for key, value in fresh.items()}
         steps = {name: step_env("release.yml", "images", name, context)
-                 for name in ("Shell VM template", "Kits", "Acceptance fixture Kit", "Tag every image with this version")}
+                 for name in ("Shell VM template", "Tag the Kits with the moving tag", "Acceptance fixture Kit",
+                              "Tag every image with this version")}
         return fresh, steps
 
     def test_an_older_tag_re_run_after_a_newer_release_pushes_its_version_tag_only(self):
         fresh, steps = self.images("1.2.3", "v1.2.2", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
         self.assertEqual(fresh, {"image_tag": "1.2.3", "extra_tags": "1.2.3"})
         # Every publishing step gets the narrowed tags, not the version job's.
-        for name in ("Shell VM template", "Kits", "Acceptance fixture Kit"):
+        for name in ("Shell VM template", "Tag the Kits with the moving tag", "Acceptance fixture Kit"):
             self.assertEqual(steps[name]["IMAGE_TAG"], "1.2.3", name)
         self.assertEqual(steps["Tag every image with this version"]["EXTRA_TAGS"], "1.2.3")
 
@@ -533,7 +595,7 @@ class Publication(unittest.TestCase):
         # A nightly tag ranks above its base version under sort -V; it is not a release.
         fresh, steps = self.images("1.2.4", "v1.2.3", "v1.2.4", NIGHTLY_TAG)
         self.assertEqual(fresh, {"image_tag": "", "extra_tags": "1.2.4 latest"})
-        self.assertEqual(steps["Kits"]["IMAGE_TAG"], "")
+        self.assertEqual(steps["Tag the Kits with the moving tag"]["IMAGE_TAG"], "")
         self.assertEqual(steps["Tag every image with this version"]["EXTRA_TAGS"], "1.2.4 latest")
 
     def test_versions_compare_by_number(self):
