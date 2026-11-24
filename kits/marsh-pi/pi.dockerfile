@@ -6,7 +6,7 @@
 # npm runs only in the Node -dev stage.
 FROM dhi.io/node:26-debian13@sha256:85120617b61b168bce65bcac3a1564ec55a10c6e43a1bc92239fe5e4e03224ae AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:3a0f849e7ecad5433a8a517e4606794dc65941b275177c7f44002c3fc322d7a8 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:3107d81acc72300d2474f26fdc72cfa9ea8e31315ff033d4b9ec109308696e35 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
@@ -14,7 +14,7 @@ RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userlan
 
 # Pi, its MCP Gateway and task-tool extensions, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
-FROM dhi.io/node:26-debian13-dev@sha256:a06c9ce7ac94ecf31b85b6b82baa685479ca3fe4e28a61fdafc9676f7d313c0c AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:db6f2b88d1cfd7277818e8f1806120279647924d7f0bdede2e2378c1216532a8 AS npm
 ARG PI_VERSION
 WORKDIR /opt/marsh/pi-gateway
 COPY package.json package-lock.json ./
@@ -29,7 +29,7 @@ COPY --chmod=0644 marsh-task.mjs ./marsh-task.mjs
 
 # Docker Compose plugin, pinned with a SHA-256 (image-base/docker-compose.sh).
 # The image already has the docker CLI (docker-ce-cli from kit-vm.packages).
-FROM dhi.io/debian-base:trixie-dev@sha256:3a0f849e7ecad5433a8a517e4606794dc65941b275177c7f44002c3fc322d7a8 AS compose
+FROM dhi.io/debian-base:trixie-dev@sha256:3107d81acc72300d2474f26fdc72cfa9ea8e31315ff033d4b9ec109308696e35 AS compose
 ARG TARGETARCH
 COPY image-base/docker-compose.sh /tmp/docker-compose.sh
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
