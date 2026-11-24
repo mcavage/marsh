@@ -14,7 +14,7 @@ RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userlan
 
 # Pi, its MCP Gateway and task-tool extensions, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
-FROM dhi.io/node:26-debian13-dev@sha256:a861f20dd10ccb64994ac0d8086a4148cdf208142f79b960ac3c81070c51085d AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:d4f8c755168bbea66fc667bf4bc0a8462dc57a29da3c04e8c93ebe0592e231b5 AS npm
 ARG PI_VERSION
 WORKDIR /opt/marsh/pi-gateway
 COPY package.json package-lock.json ./
