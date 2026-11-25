@@ -9,13 +9,13 @@
 # for Code Mode and fails that feature closed when it is missing.
 FROM dhi.io/node:26-debian13@sha256:fa9dc99f7b68bdc38306b03ee76d9318937ce648a1c73d217ff6a603e7a89da1 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:36cada6ceac36fc775a1ce0597dc7a02b4f97d48163d955a0b382f2a0ae6add0 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep poppler-utils
 
-FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS build
+FROM dhi.io/debian-base:trixie-dev@sha256:36cada6ceac36fc775a1ce0597dc7a02b4f97d48163d955a0b382f2a0ae6add0 AS build
 ARG CODEX_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
@@ -46,7 +46,7 @@ RUN case "$TARGETARCH" in \
 # ACP mode (`--acp`, the Kit's acp@1 adapter): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
 # depends on kept inside its own node_modules (never on PATH).
-FROM dhi.io/node:26-debian13-dev@sha256:d4f8c755168bbea66fc667bf4bc0a8462dc57a29da3c04e8c93ebe0592e231b5 AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:bb2dac138a83abecec5ba2bf092a733fbc2598742395410734ed60e5a6966cfb AS npm
 WORKDIR /opt/marsh/codex-acp
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
@@ -57,7 +57,7 @@ COPY --chmod=0755 acp-entrypoint.sh /opt/marsh/codex-acp/marsh-acp.sh
 
 # Docker Compose plugin, pinned with a SHA-256 (image-base/docker-compose.sh).
 # The image already has the docker CLI (docker-ce-cli from kit-vm.packages).
-FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS compose
+FROM dhi.io/debian-base:trixie-dev@sha256:36cada6ceac36fc775a1ce0597dc7a02b4f97d48163d955a0b382f2a0ae6add0 AS compose
 ARG TARGETARCH
 COPY image-base/docker-compose.sh /tmp/docker-compose.sh
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \

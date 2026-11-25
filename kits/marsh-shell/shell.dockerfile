@@ -2,9 +2,9 @@
 # Engine, which runs this Kit's jobs from this same image), the POSIX text
 # tools and python3 (also as `python`), assembled from Debian packages in a -dev build stage
 # (image-base/assemble-packages.sh). The runtime image has no package manager.
-FROM dhi.io/debian-base:trixie@sha256:0bc8bbed2778c11f2af7bbbc8c38ea7bd73b4067c9ee531237f67079e53aec2a AS base
+FROM dhi.io/debian-base:trixie@sha256:ea9ab3ce7094e899b0f18b08a93bcf23a45db97c364a0d3c0cb6107243b43524 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:36cada6ceac36fc775a1ce0597dc7a02b4f97d48163d955a0b382f2a0ae6add0 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
@@ -12,7 +12,7 @@ RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userlan
 
 # Docker Compose plugin, pinned with a SHA-256 (image-base/docker-compose.sh).
 # The image already has the docker CLI (docker-ce-cli from kit-vm.packages).
-FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS compose
+FROM dhi.io/debian-base:trixie-dev@sha256:36cada6ceac36fc775a1ce0597dc7a02b4f97d48163d955a0b382f2a0ae6add0 AS compose
 ARG TARGETARCH
 COPY image-base/docker-compose.sh /tmp/docker-compose.sh
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
