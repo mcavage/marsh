@@ -4,9 +4,9 @@
 # poppler-utils (pdftoppm, pdftotext: the agent reads PDFs), assembled
 # from Debian packages in a -dev build stage (image-base/assemble-packages.sh).
 # npm runs only in the Node -dev stage.
-FROM dhi.io/node:26-debian13@sha256:85120617b61b168bce65bcac3a1564ec55a10c6e43a1bc92239fe5e4e03224ae AS base
+FROM dhi.io/node:26-debian13@sha256:fa9dc99f7b68bdc38306b03ee76d9318937ce648a1c73d217ff6a603e7a89da1 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:3fa66c79193ec70e04ce95ab7a695a65e8eab39b313500e0454d9ea607b1da10 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
@@ -29,7 +29,7 @@ COPY --chmod=0644 marsh-task.mjs ./marsh-task.mjs
 
 # Docker Compose plugin, pinned with a SHA-256 (image-base/docker-compose.sh).
 # The image already has the docker CLI (docker-ce-cli from kit-vm.packages).
-FROM dhi.io/debian-base:trixie-dev@sha256:3fa66c79193ec70e04ce95ab7a695a65e8eab39b313500e0454d9ea607b1da10 AS compose
+FROM dhi.io/debian-base:trixie-dev@sha256:5ff4ba110ee6df53768d87f200ddf33ead88452b9fb73448c70c89362364c44f AS compose
 ARG TARGETARCH
 COPY image-base/docker-compose.sh /tmp/docker-compose.sh
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
