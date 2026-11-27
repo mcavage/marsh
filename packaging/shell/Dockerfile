@@ -66,9 +66,9 @@ RUN apt-get update \
       docker-ce=5:29.10.1-0 docker-ce-cli=5:29.10.1-1 containerd.io=2.4.2-25 \
       docker-buildx-plugin=0.39.1-3 \
       nodejs-24=24.22.3-0 npm=11.21.3-2 \
-      python-3.14=3.14.10-8 python-3.14-minimal=3.14.10-8 \
-      libpython-3.14=3.14.10-8 libpython-3.14-minimal=3.14.10-8 \
-      libpython-3.14-stdlib=3.14.10-8 python3-pip=26.3-0 python3-pip-whl=26.3-0 \
+      python-3.14=3.14.10-9 python-3.14-minimal=3.14.10-9 \
+      libpython-3.14=3.14.10-9 libpython-3.14-minimal=3.14.10-9 \
+      libpython-3.14-stdlib=3.14.10-9 python3-pip=26.3-0 python3-pip-whl=26.3-0 \
       python3-setuptools-whl=84.2.1-1 python3-wheel=0.48.0-1 \
       sudo passwd ca-certificates curl git openssh-client less procps jq \
       gcc libc6-dev make zsh vim \
