@@ -3,7 +3,7 @@
 # in a -dev build stage (packaging/image-base/assemble-packages.sh).
 FROM dhi.io/node:26-debian13@sha256:dee992f8941d9123721a20ca8260bcb31e9665f2583820735f6f7a9ab4fde9cb AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:120051dda16c2611454d2c54a0959f23f80c32493d0e528a5d1348bca82dfbc8 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:de916b98b4cf1dfb1a82a9aaa466106257d17c7a9cd4fe83a007778d11917c3f AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
